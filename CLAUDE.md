@@ -222,7 +222,11 @@ mid-effort, at arm's length.
 
 Constraints:
 
-- Contrast ratio at least 7:1 for any text a client reads mid-set
+- Contrast ratio at least 7:1 for the between-sets tier, meaning any text at 14px or 17px,
+  and at least 4.5:1 for anything 28px and above. The mid-set tier is 28px to 64px at weight
+  600 to 700, which is large text by WCAG, where large means 24px and up or 18.66px and up at
+  bold weight. 7:1 is the AAA threshold for normal text, not for large text, and applying it
+  to 64px numerals over-constrains the palette for no legibility gain.
 - Minimum touch target 44px, and the primary log action considerably larger
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
