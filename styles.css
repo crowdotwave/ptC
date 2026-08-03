@@ -602,3 +602,356 @@ button {
     box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
   }
 }
+
+/* ---------------------------------------------------------------- charts
+ *
+ * Colour only tints. Stroke width, dash pattern, and marker shape carry the meaning, because
+ * the cyan ladder is measurably close in luminance and the rule against intensity only
+ * encoding applies to charts first. Glow rides on strokes and fills through drop-shadow, using
+ * the same radii as the screen, and never goes near text.
+ */
+
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.chart__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.chart__title {
+  margin: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.chart__value {
+  font-size: var(--t-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart__caption {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart__line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart__line.is-current {
+  stroke: var(--accent-data);
+  stroke-width: 3;
+  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+  filter: drop-shadow(0 0 var(--glow-radius-rest) var(--glow-tint));
+}
+
+.chart__line.is-previous {
+  stroke: var(--accent-data-dim);
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+}
+
+.chart__line.is-earlier {
+  stroke: var(--accent-data-dim);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* Planned, not failed. Dashed plus the words, never the colour alone. */
+.chart__line.is-deload {
+  stroke: var(--deload);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  filter: none;
+}
+
+.chart__mark.is-current { fill: var(--accent-data); }
+.chart__mark.is-previous { fill: var(--accent-data-dim); }
+.chart__mark.is-earlier { fill: var(--accent-data-dim); }
+
+.chart__mark.is-deload {
+  fill: var(--surface-base);
+  stroke: var(--deload);
+  stroke-width: 2;
+}
+
+.chart__mark.is-record {
+  fill: var(--pr);
+}
+
+.chart__mark.is-record-ring {
+  fill: none;
+  stroke: var(--pr);
+  stroke-width: 2;
+  --glow-tint: color-mix(in srgb, var(--pr) var(--glow-strength-celebrate), transparent);
+  filter: drop-shadow(0 0 var(--glow-radius-rest) var(--glow-tint));
+}
+
+.chart__bar.is-prescribed {
+  fill: var(--accent-data);
+  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+  filter: drop-shadow(0 0 var(--glow-radius-rest) var(--glow-tint));
+}
+
+/* Extra volume is visible and never folded into the number that carries a claim. Hatched and
+ * dimmer so adding sets grows a separate band instead of inflating the headline. */
+.chart__bar.is-extra {
+  fill: var(--accent-data-dim);
+  opacity: 0.85;
+}
+
+.chart__bar.is-deload {
+  fill: none;
+  stroke: var(--deload);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.chart__baseline {
+  stroke: var(--surface-raised);
+  stroke-width: 1;
+}
+
+.chart__rule {
+  stroke: var(--surface-raised);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+/* Text in a chart obeys the same floors as text anywhere. No glow behind any of it. */
+.chart__axis,
+.chart__note,
+.chart__blocklabel {
+  fill: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  filter: none;
+}
+
+.chart__loadlabel {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  filter: none;
+}
+
+.chart__loadlabel.is-current { fill: var(--text-primary); }
+.chart__loadlabel.is-previous,
+.chart__loadlabel.is-earlier { fill: var(--text-secondary); }
+
+.chart__blocklabel { fill: var(--text-secondary); }
+
+/* One session is a fact, not an empty chart. Two is a comparison, never a slope. */
+.chart__evidence {
+  margin: 0;
+  padding: var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-body);
+}
+
+.chart__evidence b {
+  display: block;
+  font-size: var(--t-sm);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart__evidence span {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* A scrolling screen, unlike the logging screen which must never scroll. */
+.screen--scroll {
+  min-height: 0;
+  padding-bottom: calc(var(--s-5) + env(safe-area-inset-bottom, 0px));
+  gap: var(--s-5);
+}
+
+.lifts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.lifts__item.is-on {
+  border-color: var(--accent-data);
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------------- navigation
+ *
+ * There are two destinations, which does not need a navigation system, it needs two links.
+ * Both live in the top band, which is the read only zone out of thumb reach, because a bottom
+ * bar would sit in the arc the log action owns and nobody navigates mid set.
+ */
+
+.navlink {
+  color: var(--accent-data);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-data-dim);
+  margin-left: var(--s-2);
+}
+
+.navlink:hover {
+  border-bottom-color: var(--accent-data);
+}
+
+/* Sticky at the top, never the bottom. Present only while a session is open. */
+.resume {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  padding: var(--s-2) var(--s-3);
+  margin: calc(var(--s-4) * -1) calc(var(--s-4) * -1) 0;
+  background: var(--accent-action);
+  color: var(--surface-base);
+  font-weight: 650;
+  text-align: center;
+  text-decoration: none;
+}
+
+.resume[hidden] {
+  display: none;
+}
+
+.backlink {
+  margin: 0;
+}
+
+.backlink a {
+  color: var(--accent-data);
+}
+
+/* ---------------------------------------------------------------- trainer view */
+
+.screen--wide {
+  max-width: 60rem;
+}
+
+.clientlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.clientlist__button {
+  width: 100%;
+  min-height: var(--tap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  text-align: left;
+}
+
+.clientlist__button:hover {
+  border-color: var(--accent-data);
+}
+
+.clientlist__name {
+  font-size: var(--t-body);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+/* Facts, not a verdict. Nothing here is coloured by how the numbers look. */
+.clientlist__facts {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* A question put to the trainer, never a label shown to a client. */
+.suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0;
+  padding: var(--s-3);
+  border: 1px dashed var(--deload);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-small);
+}
+
+.suggest[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- dev role switch
+ *
+ * DELETE WITH js/dev-role.js. Styled to look like scaffolding rather than product, because it
+ * is scaffolding, and it disappears entirely when Supabase auth lands at step 4.
+ */
+
+.devbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface-base);
+  border-bottom: 2px dashed var(--accent-action);
+  font-size: var(--t-small);
+}
+
+.devbar__tag {
+  padding: 0 var(--s-2);
+  border-radius: 4px;
+  background: var(--accent-action);
+  color: var(--surface-base);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.devbar__select {
+  flex: 1 1 12rem;
+  min-height: var(--tap);
+  padding: 0 var(--s-2);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.devbar__off {
+  color: var(--accent-data);
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+}

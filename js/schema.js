@@ -121,6 +121,14 @@ export const TABLES = {
       snapshot: { type: JSONB },
       starts_on: { type: DATE },
       ends_on: { type: DATE, nullable: true },
+      // Week indices, counted from starts_on, that the trainer has marked as planned back off
+      // weeks. Empty by default and never required at assign time: the trainer marks a week
+      // whenever they notice, including months later, from the client's chart.
+      //
+      // Trainer marked rather than inferred. A drop cannot be told apart from a bad week until
+      // the client comes back and lifts heavy again, so an inferred label arrives a week late,
+      // which is a week after the client needed to read the dip as intentional.
+      deload_weeks: { type: JSONB },
     },
   },
 

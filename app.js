@@ -12,7 +12,8 @@
 // The adapter is the only persistence surface here. This file never touches IndexedDB.
 
 import { openStorage, makeRecord, getDeviceId } from './js/storage.js';
-import { seed, isSeeded, getDefaultClientId } from './js/seed.js';
+import { seed, isSeeded } from './js/seed.js';
+import { initActor } from './js/actor.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
@@ -728,8 +729,13 @@ async function main() {
 
   if (!(await isSeeded(storage))) await seed(storage);
 
-  const clientId = await getDefaultClientId(storage);
-  const { client, assignment, sessions } = await loadClientData(storage, clientId);
+  const actor = await initActor(storage);
+  if (!actor.clientId) {
+    ui.exerciseName.textContent = 'No client selected';
+    showNotice('Switch to a client with the dev role control, or open the trainer view.');
+    return;
+  }
+  const { client, assignment, sessions } = await loadClientData(storage, actor.clientId);
   state.client = client;
   state.assignment = assignment;
 

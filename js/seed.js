@@ -13,7 +13,7 @@ import { epley1rm } from './history.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 4;
+const SEED_VERSION = 5;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -103,23 +103,53 @@ const DAY_TWO = [
   ['face-pull', 3, 12, 15, 8, 60, 'Light. This is for the shoulders staying healthy.'],
 ];
 
+// Two trainers, each with their own clients and their own program. The second one exists so
+// the trainer view has a neighbour to be isolated from, and so that isolation is something a
+// person can see rather than only something the RLS test asserts.
+//
 // profile picks the progression model in prescribe(). novice moves the bar every week,
 // intermediate holds it and earns reps. isDefault is the client the logging screen opens as.
-const CLIENTS = [
+const TRAINERS = [
   {
-    name: 'Dana Whitfield',
-    profile: 'intermediate',
-    strength: 1.15,
-    adherence: 0.9,
-    weeks: 8,
-    unit: 'kg',
-    blockGain: 0.03, // estimated 1RM across the whole eight weeks, not per week
-    stallWeek: 4,
-    deloadWeek: 6,
+    name: 'Robin Sayers',
+    brandColor: '#ff8a45',
     isDefault: true,
+    clients: [
+      {
+        name: 'Dana Whitfield',
+        profile: 'intermediate',
+        strength: 1.15,
+        adherence: 0.9,
+        weeks: 8,
+        unit: 'kg',
+        blockGain: 0.03, // estimated 1RM across the whole eight weeks, not per week
+        stallWeek: 4,
+        deloadWeek: 6,
+        isDefault: true,
+      },
+      { name: 'Marcus Bell', profile: 'novice', strength: 0.95, adherence: 0.81, weeks: 8, weeklyGain: 0.013, unit: 'lb' },
+      { name: 'Priya Raman', profile: 'novice', strength: 0.68, adherence: 0.88, weeks: 5, weeklyGain: 0.022, unit: 'kg' },
+    ],
   },
-  { name: 'Marcus Bell', profile: 'novice', strength: 0.95, adherence: 0.81, weeks: 8, weeklyGain: 0.013, unit: 'lb' },
-  { name: 'Priya Raman', profile: 'novice', strength: 0.68, adherence: 0.88, weeks: 5, weeklyGain: 0.022, unit: 'kg' },
+  {
+    name: 'Nadia Okonkwo',
+    brandColor: '#6dd0e4',
+    isDefault: false,
+    clients: [
+      {
+        name: 'Theo Marchetti',
+        profile: 'intermediate',
+        strength: 1.35,
+        adherence: 0.95,
+        weeks: 8,
+        unit: 'kg',
+        blockGain: 0.02,
+        stallWeek: 3,
+        deloadWeek: 6,
+      },
+      { name: 'Aisha Fournier', profile: 'novice', strength: 0.72, adherence: 0.86, weeks: 6, weeklyGain: 0.019, unit: 'kg' },
+    ],
+  },
 ];
 
 // How many weeks have actually moved by the end of a given week. The stall week and the
@@ -223,18 +253,14 @@ export async function seed(storage, { force = false } = {}) {
   const week0Monday = addDays(mostRecentMonday(today), -7 * WEEKS);
   const seededAt = iso(addDays(week0Monday, -1));
 
-  // Trainer. Palette is a warm copper, the same accent the shell uses.
-  const trainer = makeRecord(
-    'trainers',
-    {
-      auth_user_id: null,
-      display_name: 'Robin Sayers',
-      brand_color: '#E2703A',
-      logo_url: null,
-      weight_unit: 'kg',
-    },
-    { created_at: seededAt },
-  );
+  const trainers = [];
+  const clients = [];
+  const templates = [];
+  const days = [];
+  const items = [];
+  const assignments = [];
+  const sessions = [];
+  const setLogs = [];
 
   // Shared exercise library. trainer_id null and is_global true means anyone can use it.
   const exercises = EXERCISE_LIBRARY.map(([name, slug, muscle, equipment, , step]) =>
@@ -259,7 +285,23 @@ export async function seed(storage, { force = false } = {}) {
     EXERCISE_LIBRARY.map(([, slug, , , base, step, warmup]) => [slug, { base, step, warmup }]),
   );
 
-  const clients = CLIENTS.map((spec) =>
+  // Everything below is per trainer. Each gets their own template, their own clients, and
+  // their own history, so one trainer's view has a neighbour it must never reach into.
+  for (const tspec of TRAINERS) {
+  const trainer = makeRecord(
+    'trainers',
+    {
+      auth_user_id: null,
+      display_name: tspec.name,
+      brand_color: tspec.brandColor,
+      logo_url: null,
+      weight_unit: 'kg',
+    },
+    { created_at: seededAt },
+  );
+  trainers.push(trainer);
+
+  const trainerClients = tspec.clients.map((spec) =>
     makeRecord(
       'clients',
       {
@@ -273,6 +315,7 @@ export async function seed(storage, { force = false } = {}) {
       { created_at: seededAt },
     ),
   );
+  clients.push(...trainerClients);
 
   const template = makeRecord(
     'program_templates',
@@ -284,20 +327,22 @@ export async function seed(storage, { force = false } = {}) {
     },
     { created_at: seededAt },
   );
+  templates.push(template);
 
-  const days = [
+  const trainerDays = [
     makeRecord('template_days', { template_id: template.id, day_index: 0, name: 'Upper A' }, { created_at: seededAt }),
     makeRecord('template_days', { template_id: template.id, day_index: 1, name: 'Lower A' }, { created_at: seededAt }),
   ];
+  days.push(...trainerDays);
 
-  const items = [];
+  const trainerItems = [];
   [DAY_ONE, DAY_TWO].forEach((plan, dayIndex) => {
     plan.forEach(([slug, sets, repsLow, repsHigh, rpe, rest, notes], orderIndex) => {
-      items.push(
+      trainerItems.push(
         makeRecord(
           'template_items',
           {
-            day_id: days[dayIndex].id,
+            day_id: trainerDays[dayIndex].id,
             exercise_id: bySlug[slug].id,
             order_index: orderIndex,
             target_sets: sets,
@@ -316,16 +361,17 @@ export async function seed(storage, { force = false } = {}) {
       );
     });
   });
+  items.push(...trainerItems);
 
   // The snapshot freezes the program as assigned. Editing the template later must not rewrite
   // what a client was already told to do.
   const snapshot = {
     template: { id: template.id, name: template.name, notes: template.notes },
-    days: days.map((day) => ({
+    days: trainerDays.map((day) => ({
       id: day.id,
       day_index: day.day_index,
       name: day.name,
-      items: items
+      items: trainerItems
         .filter((item) => item.day_id === day.id)
         .sort((a, b) => a.order_index - b.order_index)
         .map((item) => {
@@ -344,12 +390,8 @@ export async function seed(storage, { force = false } = {}) {
     })),
   };
 
-  const assignments = [];
-  const sessions = [];
-  const setLogs = [];
-
-  clients.forEach((client, clientIndex) => {
-    const spec = CLIENTS[clientIndex];
+  trainerClients.forEach((client, clientIndex) => {
+    const spec = tspec.clients[clientIndex];
     const firstWeek = WEEKS - spec.weeks;
     const startsOn = addDays(week0Monday, firstWeek * 7);
 
@@ -362,6 +404,9 @@ export async function seed(storage, { force = false } = {}) {
           snapshot,
           starts_on: isoDate(startsOn),
           ends_on: null,
+          // The generator already produces a real deload at this week, so the trainer marking
+          // describes something that actually happened rather than inventing a label.
+          deload_weeks: spec.deloadWeek === undefined ? [] : [spec.deloadWeek - firstWeek],
         },
         { created_at: iso(atTime(startsOn, 8, 5)) },
       ),
@@ -383,8 +428,8 @@ export async function seed(storage, { force = false } = {}) {
         const offlineSession = rand() < 0.15;
         const writeDelayMs = offlineSession ? intBetween(3, 9) * 3600 * 1000 : 0;
 
-        const dayItems = items
-          .filter((item) => item.day_id === days[dayIndex].id)
+        const dayItems = trainerItems
+          .filter((item) => item.day_id === trainerDays[dayIndex].id)
           .sort((a, b) => a.order_index - b.order_index);
 
         let cursorMs = startedAt.getTime();
@@ -472,6 +517,7 @@ export async function seed(storage, { force = false } = {}) {
       }
     }
   });
+  }
 
   // One correction, so the append only path has a worked example in the data. The original
   // row stays. The correction is a new row pointing at it. Anything that reads set_logs has
@@ -501,10 +547,10 @@ export async function seed(storage, { force = false } = {}) {
     );
   }
 
-  await storage._bulkPut('trainers', [trainer]);
+  await storage._bulkPut('trainers', trainers);
   await storage._bulkPut('exercises', exercises);
   await storage._bulkPut('clients', clients);
-  await storage._bulkPut('program_templates', [template]);
+  await storage._bulkPut('program_templates', templates);
   await storage._bulkPut('template_days', days);
   await storage._bulkPut('template_items', items);
   await storage._bulkPut('assignments', assignments);
@@ -514,24 +560,29 @@ export async function seed(storage, { force = false } = {}) {
   // The logging screen renders against the intermediate by default. Designing the chart and the
   // set prefill against the flattering novice curve is how you ship something that looks great
   // in dev and underwhelms the client who needs it most.
-  const defaultIndex = CLIENTS.findIndex((spec) => spec.isDefault);
-  const defaultClient = clients[defaultIndex === -1 ? 0 : defaultIndex];
+  const defaultTrainerIndex = Math.max(0, TRAINERS.findIndex((t) => t.isDefault));
+  const defaultTrainer = trainers[defaultTrainerIndex];
+  const defaultClientSpecs = TRAINERS[defaultTrainerIndex].clients;
+  const defaultClientName = (defaultClientSpecs.find((c) => c.isDefault) ?? defaultClientSpecs[0]).name;
+  const defaultClient = clients.find(
+    (c) => c.trainer_id === defaultTrainer.id && c.display_name === defaultClientName,
+  );
 
   await storage.setMeta(SEED_META_KEY, {
     version: SEED_VERSION,
     seeded_at: iso(new Date()),
-    trainer_id: trainer.id,
+    trainer_ids: trainers.map((t) => t.id),
+    default_trainer_id: defaultTrainer.id,
     client_ids: clients.map((c) => c.id),
     default_client_id: defaultClient.id,
-    template_id: template.id,
   });
 
   return {
     skipped: false,
-    trainers: 1,
+    trainers: trainers.length,
     clients: clients.length,
     exercises: exercises.length,
-    program_templates: 1,
+    program_templates: templates.length,
     template_days: days.length,
     template_items: items.length,
     assignments: assignments.length,

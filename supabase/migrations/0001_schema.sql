@@ -133,7 +133,11 @@ create table public.assignments (
   -- no read access to program_templates at all.
   snapshot jsonb not null,
   starts_on date not null,
-  ends_on date
+  ends_on date,
+  -- Week indices from starts_on that the trainer marked as planned back off weeks. Empty by
+  -- default, never required at assign time, editable retroactively. This is a sibling of the
+  -- snapshot rather than part of it, so marking a deload never rewrites frozen history.
+  deload_weeks jsonb not null default '[]'::jsonb
 );
 
 create index assignments_client_id_idx on public.assignments (client_id);

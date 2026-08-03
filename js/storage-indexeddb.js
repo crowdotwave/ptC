@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -113,6 +113,18 @@ const MIGRATIONS = [
       // Every set logged before add a set existed was prescribed by definition.
       rewriteRows(tx, 'set_logs', (row) =>
         row.is_extra === undefined ? { ...row, is_extra: false } : row,
+      );
+    },
+  },
+  {
+    version: 5,
+    describe: 'add assignments.deload_weeks so a planned back off week has a data source',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Empty, not guessed. Nothing in existing rows says which weeks were planned, and
+      // inferring it would label bad weeks as intentional.
+      rewriteRows(tx, 'assignments', (row) =>
+        row.deload_weeks === undefined ? { ...row, deload_weeks: [] } : row,
       );
     },
   },

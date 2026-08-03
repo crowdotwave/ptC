@@ -10,6 +10,7 @@
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_MS } from './js/hold.js';
 import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
+import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
 
 const results = [];
 
@@ -364,6 +365,321 @@ test('the copy says where the number came from and never apologises', () => {
     ok(copy.startsWith('First time on this lift.'), `${source} copy does not name the situation`);
     ok(!/no data|not enough|sorry|unfortunately/i.test(copy), `${source} copy apologises`);
   }
+});
+
+// ------------------------------------------------------------------ progression
+//
+// The chart series. Everything a chart is allowed to claim is decided here, so the drawing
+// code never has to make a judgement about what counts.
+
+const sess = (id, day, assignment = 'a1') => ({
+  id,
+  client_id: 'c1',
+  assignment_id: assignment,
+  day_index: 0,
+  started_at: `${day}T18:00:00.000Z`,
+  completed_at: null,
+  client_note: null,
+});
+
+const assign = (id, startsOn, deloadWeeks = []) => ({
+  id,
+  client_id: 'c1',
+  template_id: 't1',
+  snapshot: {},
+  starts_on: startsOn,
+  ends_on: null,
+  deload_weeks: deloadWeeks,
+});
+
+test('evidence escalates with the number of points', () => {
+  eq(evidenceLevel(0), 'none');
+  eq(evidenceLevel(1), 'single');
+  eq(evidenceLevel(2), 'compare');
+  eq(evidenceLevel(3), 'compare');
+  eq(evidenceLevel(4), 'trend');
+});
+
+test('two points is a comparison and never a trend', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 100, reps: 6 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.e1rm.evidence, 'compare');
+  eq(p.volume.evidence, 'compare');
+});
+
+test('one session is a fact, with no trend and no comparison', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [row({ session_id: 's1', weight_kg: 100, reps: 5 })];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.e1rm.evidence, 'single');
+  eq(p.e1rm.change, null, 'a single point cannot produce a change');
+  eq(p.points.length, 1);
+});
+
+// The whole reason is_extra became a column: adding sets must not move the number that carries
+// a claim, or the easiest way to make the line rise is junk volume.
+test('extra sets are counted separately and never inside prescribed volume', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5, is_extra: false }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5, is_extra: true }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].prescribed, 500);
+  eq(p.points[0].extra, 500);
+});
+
+test('an extra set cannot set a record or move the strength line', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5, is_extra: false }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 200, reps: 5, is_extra: true }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].e1rm, epley1rm(100, 5), 'strength read the prescribed set, not the extra one');
+});
+
+test('warmups never reach any series', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: 10, is_warmup: true }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].prescribed, 500, 'warmup volume was excluded');
+  eq(p.points[0].e1rm, epley1rm(100, 5));
+});
+
+test('a retracted set is gone from the charts as well as the steppers', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const original = row({ session_id: 's1', weight_kg: 100, reps: 5 });
+  const undone = row({ session_id: 's1', weight_kg: 100, reps: 5, supersedes_id: original.id, is_void: true });
+  const p = buildProgression({ setLogs: [original, undone], sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points.length, 0, 'a session whose only set was retracted contributes nothing');
+});
+
+test('a week is measured from the start of its own block', () => {
+  eq(weekIndexOf('2026-07-01T18:00:00.000Z', '2026-07-01'), 0);
+  eq(weekIndexOf('2026-07-08T18:00:00.000Z', '2026-07-01'), 1);
+  eq(weekIndexOf('2026-08-12T18:00:00.000Z', '2026-07-01'), 6);
+  eq(weekIndexOf('2026-07-01T18:00:00.000Z', null), null);
+});
+
+// Trainer marked, never inferred. A dip cannot be told apart from a bad week until the client
+// comes back and lifts heavy again, which is a week after they needed to read it as planned.
+test('a deload is marked from the assignment and excluded from the change', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08'), sess('s3', '2026-07-15')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 75, reps: 5 }),
+    row({ session_id: 's3', weight_kg: 105, reps: 5 }),
+  ];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-07-01', [1])],
+    exerciseId: 'squat',
+  });
+  eq(p.points.map((x) => x.isDeload), [false, true, false]);
+  eq(p.e1rm.change.first, epley1rm(100, 5), 'the change starts at the first working session');
+  eq(p.e1rm.change.last, epley1rm(105, 5), 'and ends at the last one, stepping over the deload');
+});
+
+test('an unmarked dip is drawn but never called a deload', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 70, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points.map((x) => x.isDeload), [false, false], 'nothing is labelled without the trainer saying so');
+  eq(p.points.length, 2, 'and the dip is still shown');
+});
+
+test('a deload cannot set a record', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 200, reps: 5 }),
+  ];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-07-01', [1])],
+    exerciseId: 'squat',
+  });
+  eq(p.points[1].isRecord, false);
+});
+
+// Volume is never compared across a rep scheme change. A block is an assignment, and since the
+// snapshot freezes the rep range, an assignment boundary is a prescription change.
+test('volume is segmented by block and strength is not', () => {
+  const sessions = [
+    sess('s1', '2026-07-01', 'a1'),
+    sess('s2', '2026-07-08', 'a1'),
+    sess('s3', '2026-08-05', 'a2'),
+    sess('s4', '2026-08-12', 'a2'),
+  ];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: 10 }),
+    row({ session_id: 's2', weight_kg: 60, reps: 10 }),
+    row({ session_id: 's3', weight_kg: 90, reps: 3 }),
+    row({ session_id: 's4', weight_kg: 90, reps: 3 }),
+  ];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-07-01'), assign('a2', '2026-08-05')],
+    exerciseId: 'squat',
+  });
+  eq(p.blocks.length, 2);
+  eq(p.volume.segments.map((s) => s.points.length), [2, 2], 'volume is cut at the boundary');
+  eq(p.e1rm.series.length, 4, 'strength crosses it, which is the reason it exists');
+  eq(p.leadView, 'e1rm', 'two blocks means the six month question exists, so strength leads');
+});
+
+test('one block leads with volume, since there is no cross block story yet', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [row({ session_id: 's1' }), row({ session_id: 's2' })];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.leadView, 'volume');
+});
+
+// The measured case that decided the second altitude: the same work reads minus 25 percent as
+// volume and plus 23.8 percent as estimated 1RM.
+test('the rep scheme change that breaks volume is exactly what strength is for', () => {
+  const sessions = [sess('s1', '2026-07-01', 'a1'), sess('s2', '2026-08-05', 'a2')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: 10 }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 60, reps: 10 }),
+    row({ session_id: 's1', set_index: 2, weight_kg: 60, reps: 10 }),
+    row({ session_id: 's2', weight_kg: 90, reps: 3 }),
+    row({ session_id: 's2', set_index: 1, weight_kg: 90, reps: 3 }),
+    row({ session_id: 's2', set_index: 2, weight_kg: 90, reps: 3 }),
+    row({ session_id: 's2', set_index: 3, weight_kg: 90, reps: 3 }),
+    row({ session_id: 's2', set_index: 4, weight_kg: 90, reps: 3 }),
+  ];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-07-01'), assign('a2', '2026-08-05')],
+    exerciseId: 'squat',
+  });
+  eq(p.points[0].prescribed, 1800);
+  eq(p.points[1].prescribed, 1350);
+  const volPct = Math.round(((1350 - 1800) / 1800) * 1000) / 10;
+  eq(volPct, -25, 'volume reports a quarter lost');
+  ok(p.e1rm.change.percent > 23 && p.e1rm.change.percent < 24, `strength reported ${p.e1rm.change.percent} percent`);
+});
+
+test('reps at load is capped and keeps the most recent loads', () => {
+  const days = ['2026-07-01', '2026-07-08', '2026-07-15', '2026-07-22', '2026-07-29'];
+  const sessions = days.map((d, i) => sess(`s${i}`, d));
+  const logs = days.map((d, i) => row({ session_id: `s${i}`, weight_kg: 90 + i * 2.5, reps: 5 }));
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.repsAtLoad.lines.length, MAX_LOAD_LINES, 'capped so six months does not become stubs');
+  eq(p.repsAtLoad.hiddenCount, days.length - MAX_LOAD_LINES);
+  eq(p.repsAtLoad.lines[p.repsAtLoad.lines.length - 1].loadKg, 100, 'the newest load is last');
+});
+
+// The intermediate case, which is the profile the whole design targets. One load, reps
+// climbing. Not a degenerate chart, the only place this progress is visible.
+test('one unchanged load across a block is a single line, not an empty chart', () => {
+  const days = ['2026-07-01', '2026-07-08', '2026-07-15', '2026-07-22'];
+  const sessions = days.map((d, i) => sess(`s${i}`, d));
+  const logs = days.map((d, i) => row({ session_id: `s${i}`, weight_kg: 92.5, reps: 5 + i }));
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.repsAtLoad.lines.length, 1);
+  eq(p.repsAtLoad.lines[0].points.map((x) => x.reps), [5, 6, 7, 8]);
+  eq(p.repsAtLoad.evidence, 'trend');
+});
+
+test('reps at load reads the top set of that load in a session', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 8 }),
+    row({ session_id: 's1', set_index: 2, weight_kg: 100, reps: 4 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.repsAtLoad.lines[0].points[0].reps, 8);
+});
+
+test('another client rows and other exercises never reach the series', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 'not-mine', weight_kg: 500, reps: 5 }),
+    row({ session_id: 's1', exercise_id: 'bench', weight_kg: 400, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points.length, 1);
+  eq(p.points[0].prescribed, 500);
+});
+
+test('no history produces empty series rather than an exception', () => {
+  const p = buildProgression({ setLogs: [], sessions: [], assignments: [], exerciseId: 'squat' });
+  eq(p.points, []);
+  eq(p.e1rm.evidence, 'none');
+  eq(p.volume.evidence, 'none');
+  eq(p.blocks, []);
+  eq(p.leadView, 'volume');
+});
+
+// ------------------------------------------------------------------ deload suggestion
+//
+// The only inference in the product, and it never produces a label. It produces a question,
+// put to the trainer, because measured against noisy data this rule flagged every unplanned
+// dip it was given.
+
+test('a dip suggests a question, and marking it removes the question', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08'), sess('s3', '2026-07-15')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 75, reps: 5 }),
+    row({ session_id: 's3', weight_kg: 100, reps: 5 }),
+  ];
+  const unmarked = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  const asked = suggestDeloadWeeks(unmarked);
+  eq(asked.length, 1);
+  eq(asked[0].week, 1);
+  eq(asked[0].dropPercent, 25);
+
+  const marked = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01', [1])], exerciseId: 'squat' });
+  eq(suggestDeloadWeeks(marked), [], 'an answered question stops being asked');
+});
+
+test('a small dip is not worth asking about', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 97.5, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(suggestDeloadWeeks(p), []);
+});
+
+test('a steadily climbing block asks nothing', () => {
+  const days = ['2026-07-01', '2026-07-08', '2026-07-15', '2026-07-22'];
+  const sessions = days.map((d, i) => sess(`s${i}`, d));
+  const logs = days.map((d, i) => row({ session_id: `s${i}`, weight_kg: 90 + i * 2.5, reps: 5 }));
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(suggestDeloadWeeks(p), []);
+});
+
+test('one question per week, not one per session', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08'), sess('s3', '2026-07-09')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 70, reps: 5 }),
+    row({ session_id: 's3', weight_kg: 70, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(suggestDeloadWeeks(p).length, 1);
 });
 
 // ------------------------------------------------------------------ report

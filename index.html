@@ -12,7 +12,13 @@
       <!-- Top third. Nothing here is interactive: on a 6.7 inch phone held in one hand this
            band is out of the thumb's reach, so it carries reading material only. -->
       <header class="context">
-        <p class="context__who"><span id="client-name">Loading</span> <span id="day-name"></span></p>
+        <!-- The only navigation on this screen, and it sits in the unreachable top band on
+             purpose. A bottom tab bar is the standard answer and it is wrong here: it would
+             land in the thumb arc the log action owns. You never navigate mid set. -->
+        <p class="context__who">
+          <span id="client-name">Loading</span> <span id="day-name"></span>
+          <a class="navlink" href="progress.html">Progress</a>
+        </p>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <p class="context__set num" id="set-position">&nbsp;</p>
         <p class="context__target" id="target">&nbsp;</p>

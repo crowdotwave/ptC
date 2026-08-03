@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Clients</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="screen screen--scroll screen--wide">
+      <header class="context">
+        <p class="context__who" id="trainer-name">Loading</p>
+        <h1 class="context__exercise" id="view-title">Clients</h1>
+        <p class="context__target" id="view-note">&nbsp;</p>
+      </header>
+
+      <section id="list-view">
+        <ul class="clientlist" id="client-list"></ul>
+      </section>
+
+      <section id="detail-view" hidden>
+        <p class="backlink"><a href="#" id="back-to-list">Back to clients</a></p>
+
+        <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+
+        <p class="suggest" id="deload-suggest" hidden></p>
+
+        <div class="chart">
+          <div class="chart__head">
+            <h2 class="chart__title" id="lead-title">Estimated 1RM</h2>
+            <span class="chart__value num" id="lead-value"></span>
+          </div>
+          <div id="lead-plot"></div>
+          <p class="chart__caption" id="lead-caption"></p>
+        </div>
+
+        <div class="chart">
+          <div class="chart__head">
+            <h2 class="chart__title" id="second-title">Volume</h2>
+            <span class="chart__value num" id="second-value"></span>
+          </div>
+          <div id="second-plot"></div>
+          <p class="chart__caption" id="second-caption"></p>
+        </div>
+
+        <div class="chart">
+          <div class="chart__head">
+            <h2 class="chart__title">Reps at each load</h2>
+            <span class="chart__value num" id="reps-value"></span>
+          </div>
+          <div id="reps-plot"></div>
+          <p class="chart__caption" id="reps-caption"></p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="trainer.js"></script>
+  </body>
+</html>

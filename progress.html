@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Progress</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="screen screen--scroll">
+      <!-- Sticky at the top, never the bottom, so it cannot enter the thumb arc. Only present
+           while a session is actually open. -->
+      <a class="resume" id="resume" href="index.html" hidden></a>
+
+      <header class="context">
+        <p class="context__who">
+          <span id="client-name">Loading</span>
+          <a class="navlink" href="index.html">Back to logging</a>
+        </p>
+        <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
+        <p class="context__last num" id="headline">&nbsp;</p>
+      </header>
+
+      <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+
+      <section class="chart" id="lead-chart" aria-labelledby="lead-title">
+        <div class="chart__head">
+          <h2 class="chart__title" id="lead-title">Estimated 1RM</h2>
+          <span class="chart__value num" id="lead-value"></span>
+        </div>
+        <div id="lead-plot"></div>
+        <p class="chart__caption" id="lead-caption"></p>
+      </section>
+
+      <section class="chart" id="second-chart" aria-labelledby="second-title">
+        <div class="chart__head">
+          <h2 class="chart__title" id="second-title">Volume</h2>
+          <span class="chart__value num" id="second-value"></span>
+        </div>
+        <div id="second-plot"></div>
+        <p class="chart__caption" id="second-caption"></p>
+      </section>
+
+      <section class="chart" id="reps-chart" aria-labelledby="reps-title">
+        <div class="chart__head">
+          <h2 class="chart__title" id="reps-title">Reps at each load</h2>
+          <span class="chart__value num" id="reps-value"></span>
+        </div>
+        <div id="reps-plot"></div>
+        <p class="chart__caption" id="reps-caption"></p>
+      </section>
+    </main>
+
+    <script type="module" src="progress.js"></script>
+  </body>
+</html>
