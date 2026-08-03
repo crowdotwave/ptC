@@ -103,11 +103,12 @@ const DAY_TWO = [
   ['face-pull', 3, 12, 15, 8, 60, 'Light. This is for the shoulders staying healthy.'],
 ];
 
+// profile picks the progression model in prescribe(). novice moves the bar every week,
+// intermediate holds it and earns reps. isDefault is the client the logging screen opens as.
 const CLIENTS = [
-  // display_name, strength factor, adherence, weeks of history, weekly progression
   {
     name: 'Dana Whitfield',
-    profile: 'grinder',
+    profile: 'intermediate',
     strength: 1.15,
     adherence: 0.9,
     weeks: 8,
@@ -137,7 +138,7 @@ function progressIndex(spec, week) {
  * The novice model moves the bar every week with noise on top, which is roughly true for
  * someone in their first months and produces the flattering curve.
  *
- * The grinder model is the one worth designing against. An intermediate at a 105 kg estimated
+ * The intermediate model is the one worth designing against. A lifter at a 105 kg estimated
  * squat 1RM gaining 3 percent over eight weeks earns about 3 kg. The smallest jump available
  * on the rack is 2.5 kg, which is more than half of that, so almost all of the progress shows
  * up as reps at an unchanged load. That is the hard case for a chart: the number on the bar
@@ -150,7 +151,7 @@ function prescribe(spec, config, item, week) {
   const high = item.target_reps_high ?? low;
   const baseWeight = Math.max(config.step, roundTo(config.base * spec.strength, config.step));
 
-  if (spec.profile !== 'grinder') {
+  if (spec.profile !== 'intermediate') {
     const target = config.base * spec.strength * (1 + spec.weeklyGain) ** week;
     return {
       weight: Math.max(config.step, roundTo(target * between(0.97, 1.03), config.step)),
@@ -192,7 +193,7 @@ export async function isSeeded(storage) {
   return Boolean(meta && meta.version === SEED_VERSION);
 }
 
-/** The client the logging screen opens as. The grinder, on purpose. */
+/** The client the logging screen opens as. The intermediate, on purpose. */
 export async function getDefaultClientId(storage) {
   const meta = await storage.getMeta(SEED_META_KEY);
   return meta ? meta.default_client_id : null;
@@ -503,7 +504,7 @@ export async function seed(storage, { force = false } = {}) {
   await storage._bulkPut('sessions', sessions);
   await storage._bulkPut('set_logs', setLogs);
 
-  // The logging screen renders against the grinder by default. Designing the chart and the
+  // The logging screen renders against the intermediate by default. Designing the chart and the
   // set prefill against the flattering novice curve is how you ship something that looks great
   // in dev and underwhelms the client who needs it most.
   const defaultIndex = CLIENTS.findIndex((spec) => spec.isDefault);

@@ -32,17 +32,19 @@
       <!-- Bottom third, inside the thumb arc. The biggest number on the screen and the place
            the thumb goes are not the same place, so the log action sits lowest. -->
       <div class="controls" id="controls">
+        <!-- The remaining rest is a track along the bottom edge, never a fill behind the
+             numerals. See the comment on .rest in styles.css for why. -->
         <div class="rest" id="rest" data-state="idle">
-          <span class="rest__fill" id="rest-fill" aria-hidden="true"></span>
           <span class="rest__label" id="rest-label">Rest</span>
           <span class="rest__time num" id="rest-time" role="timer" aria-live="off">0:00</span>
+          <span class="rest__track" aria-hidden="true"><span class="rest__fill" id="rest-fill"></span></span>
         </div>
 
         <div class="secondary">
-          <button type="button" class="ghost" id="skip">Skip lift</button>
-          <button type="button" class="ghost" id="end">End session</button>
-          <button type="button" class="ghost" id="type-toggle">Type</button>
-          <button type="button" class="ghost" id="undo" disabled>Undo</button>
+          <button type="button" class="button-secondary" id="skip">Skip lift</button>
+          <button type="button" class="button-secondary" id="end">End session</button>
+          <button type="button" class="button-secondary" id="type-toggle">Type</button>
+          <button type="button" class="button-secondary" id="undo" disabled>Undo</button>
         </div>
 
         <div class="stepper" id="stepper-weight">

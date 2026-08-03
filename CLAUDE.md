@@ -236,10 +236,54 @@ Constraints:
   600 to 700, which is large text by WCAG, where large means 24px and up or 18.66px and up at
   bold weight. 7:1 is the AAA threshold for normal text, not for large text, and applying it
   to 64px numerals over-constrains the palette for no legibility gain.
+- On `--surface-raised`, text is `--text-primary` only. This is the cost of widening the
+  surface separation to 2.18:1, which is what makes two surfaces tell apart under glare.
+  Lifting the raised surface lifted its luminance, and every other text token fell under the
+  floor on it: `--text-secondary` measures 4.39, missing both the 7:1 and the 4.5:1 rules.
+  Anything that needs a second text colour needs a different surface, not a different token.
 - Minimum touch target 44px, and the primary log action considerably larger
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
 - Responsive down to a 360px viewport, designed mobile first, desktop is the trainer view
+
+### Encoding rules
+
+**No hue-only encoding.** Mid-set, under exertion and glare and with sweat on the glass, fine
+hue discrimination degrades. Every state that carries meaning also carries a shape, a weight,
+a position, or a word.
+
+**No intensity-only encoding either.** This one is measured, not assumed. The data axis is
+cyan, and cyan clusters at high luminance in sRGB, so an intensity ladder in it has very
+little room. Against `--surface-base`, `--accent-data` reads 10.02 and `--pr` reads 11.46,
+a ratio of 1.14 between them. `--progress` and `--pr` sit 1 degree apart in hue. On the
+logging screen that is fine, because a record also carries glow, animation, a pill, a position
+in the top band, and a sentence naming the lift. In a static chart it is not fine: a record
+drawn only in `--pr` beside a `--progress` segment is, by measurement, the same line.
+
+So in charts colour only tints. Weight and shape carry the meaning:
+
+| meaning | token | stroke |
+| --- | --- | --- |
+| history, superseded | `--accent-data-dim` | 1px, dashed |
+| planned deload | `--deload` | 2px, dashed, labelled "Planned deload" |
+| a week where nothing moved | `--flat` | 2px, solid |
+| the series | `--accent-data` | 2px, solid |
+| a value that improved | `--progress` | 3px, solid |
+| a record | `--pr` | filled dot with a 2px ring, plus the celebration glow |
+
+No hue means "planned". `--deload` can only keep a back off week quiet and clearly not an
+alarm. The dashed stroke and the words are what make it read as intentional, so neither is
+optional.
+
+### Glow
+
+Glow applies to fills, borders, container edges, and chart strokes. It never sits on or
+behind text read mid-set, because glow spreads light into its surroundings and lowers
+effective contrast, and glare is the exact failure mode this palette exists to survive.
+
+Two intensities, `--glow-rest` and `--glow-celebrate`, defined once and shared by the screen
+and by charts. The record is the only thing that animates, and under `prefers-reduced-motion`
+it keeps the glow and drops the movement, because a glow is light rather than motion.
 
 Copy rules: active voice, sentence case, name things by what the person controls. The button
 that says "Log set" produces state that says "Logged." Empty states are invitations to act,

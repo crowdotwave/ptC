@@ -20,29 +20,66 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces. Separation is 2.18:1, which survives glare. Borders back it up anyway. */
-  --iron: #14181c;
-  --rack: #46505c;
+  /* Surfaces. Separation is 2.18:1, which survives glare. Borders back it up anyway.
+   * Names state the role, not the object the colour was sampled from, so widening the palette
+   * later means adding a role rather than inventing another gym object to name it after. */
+  --surface-base: #14181c;
+  --surface-raised: #46505c;
 
-  /* Text. Ratios are against --iron then --rack.
-   * chalk 15.48 / 7.11   any size on either surface
-   * dust   9.57 / 4.39   any size on iron, 28px and up on rack
-   * steel  9.87 / 4.53   any size on iron, 28px and up on rack
-   */
-  --chalk: #edeff1;
-  --dust: #b5bfc9;
-  --steel: #a8c4de;
+  /* ON --surface-raised, TEXT IS --text-primary ONLY.
+   *
+   * That is the bill for widening the surface separation to 2.18. Raising the surface to
+   * #46505C lifted its luminance, and every text token except --text-primary fell under the
+   * floor on it: --text-secondary lands at 4.39, which misses both the 7:1 between sets rule
+   * and the 4.5:1 large text rule. Written down here so it stops being rediscovered.
+   *
+   * Ratios below are against --surface-base then --surface-raised. */
+  --text-primary: #edeff1; /* 15.48 / 7.11  any size, either surface. The only one on raised */
+  --text-secondary: #b5bfc9; /*  9.57 / 4.39  base only, any size */
 
-  /* Fill only, never text. --load reads 3.50 against --rack, which is below the floor for
-   * text of any size. Both carry --iron as their ink: 7.62 and 5.07. */
-  --load: #ff8a45;
-  --press: #d9682a;
+  /* Fill only, never text. Both read under the floor on --surface-raised. Their ink is
+   * --surface-base, at 7.62 and 5.07. */
+  --accent-action: #ff8a45; /*  7.62 / 3.50  fill only */
+  --accent-action-pressed: #d9682a; /*  5.07 / 2.33  fill only */
 
-  /* State. --muted is disabled text on --iron only, 5.28. --focus always ships with a 2px
-   * --iron inner ring so it never has to contrast with whatever fill sits under it. */
-  --muted: #828d99;
-  --focus: #9fe0ff;
-  --pr: #f5c451;
+  /* The data and progress axis, complementary to the action orange at 165 degrees.
+   *
+   * Read as a ladder, low to high. It is not a luminance ramp: cyan clusters at high
+   * luminance in sRGB, so the top two rungs are separated by chroma rather than lightness.
+   * Every adjacent pair clears at least one of a luminance step, a hue step, or a saturation
+   * step, and the weakest pair anywhere is --accent-data against --pr at 1.14 luminance,
+   * carried by 36 points of saturation plus a ringed dot. Six tokens is the ceiling here.
+   * A seventh forces a real trade. */
+  --accent-data-dim: #478d9e; /*  4.73 / 2.17  strokes and 28px up, base only. History */
+  --deload: #7a95de; /*  6.10 / 2.80  base only. A planned back off week */
+  --flat: #9ea7b0; /*  7.31 / 3.36  base only. A week where nothing moved */
+  --accent-data: #6dd0e4; /* 10.02 / 4.60  the series, and informational text */
+  --pr: #1fe3ff; /* 11.46 / 5.26  the record moment. The only token that glows bright */
+  --progress: #ade8f2; /* 13.25 / 6.09  a value that improved */
+
+  /* State. --muted is disabled text on --surface-base only. --focus always ships with a
+   * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
+  --muted: #828d99; /*  5.28 / 2.43  base only */
+  --focus: #9fe0ff; /* 12.39 / 5.69  ring, never text */
+
+  /* Glow. One vocabulary for the screen now and chart strokes later, where the same radii
+   * drive filter: drop-shadow() instead of box-shadow.
+   *
+   * HARD RULE: glow goes on fills, borders, container edges, and chart strokes. It never sits
+   * on or behind text read mid set. Glow spreads light into its surroundings, which lowers
+   * effective contrast, and glare is the exact failure mode this palette exists to survive.
+   *
+   * Each element sets --glow-tint by mixing its own colour toward transparent.
+   *
+   * These are primitives, and the two intensities are composed in the glow rules further down
+   * rather than in a token here. A custom property substitutes its var()s on the element where
+   * it is declared, so a --glow-rest holding var(--glow-tint) would resolve against :root,
+   * find no tint, compute to the guaranteed invalid value, and inherit as invalid no matter
+   * what a descendant sets. Primitives at the root, composition at the use site. */
+  --glow-radius-rest: 14px;
+  --glow-radius-celebrate: 30px;
+  --glow-strength-rest: 32%;
+  --glow-strength-celebrate: 62%;
 
   /* Reading distance, in centimetres. This is the retune point.
    *
@@ -75,6 +112,7 @@
 
   --radius: 12px;
   --tap: 44px;
+  --rest-track-height: 8px;
 
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -86,7 +124,7 @@
 }
 
 html {
-  background: var(--iron);
+  background: var(--surface-base);
 }
 
 body {
@@ -94,8 +132,8 @@ body {
   font-family: var(--font);
   font-size: var(--t-body);
   line-height: 1.4;
-  color: var(--chalk);
-  background: var(--iron);
+  color: var(--text-primary);
+  background: var(--surface-base);
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
 }
@@ -116,10 +154,27 @@ button {
   touch-action: manipulation;
 }
 
-/* The inner ring is --iron, so the bright ring never has to contrast with the fill beneath. */
+/* The inner ring is --surface-base, so the bright ring never has to contrast with whatever
+ * fill sits beneath it. */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--iron), 0 0 0 6px var(--focus);
+  box-shadow: 0 0 0 2px var(--surface-base), 0 0 0 6px var(--focus);
+}
+
+/* ---------------------------------------------------------------- glow
+ *
+ * The two intensities, in one place. Every element listed here supplies its own --glow-tint
+ * by mixing its own colour toward transparent at the matching strength.
+ *
+ * HARD RULE: fills, borders, container edges, and chart strokes only. Never on or behind text
+ * read mid set. Charts will reuse the same radii through filter: drop-shadow(). */
+.log,
+.rest__fill {
+  box-shadow: 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
+.pr {
+  box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
 }
 
 /* ---------------------------------------------------------------- screen skeleton */
@@ -145,7 +200,7 @@ button {
 
 .context__who {
   margin: 0;
-  color: var(--dust);
+  color: var(--text-secondary);
   font-size: var(--t-small);
   text-transform: none;
 }
@@ -163,20 +218,23 @@ button {
   margin: 0;
   font-size: var(--t-sm);
   font-weight: 600;
-  color: var(--dust);
+  color: var(--text-secondary);
 }
 
 .context__target,
 .context__last {
   margin: 0;
   font-size: var(--t-body);
-  color: var(--dust);
+  color: var(--text-secondary);
 }
 
 .context__last {
-  color: var(--steel);
+  color: var(--accent-data);
 }
 
+/* Glow site three, and the only one that animates. The glow is on the border, so it never
+ * sits behind the pill's own words. Hue is never the only signal here: the pill shape, the
+ * position in the top band, and the sentence naming the lift all carry it too. */
 .pr {
   align-self: flex-start;
   margin: var(--s-1) 0 0;
@@ -186,6 +244,18 @@ button {
   color: var(--pr);
   font-size: var(--t-body);
   font-weight: 650;
+  --glow-tint: color-mix(in srgb, var(--pr) var(--glow-strength-celebrate), transparent);
+  animation: pr-pulse 1.6s ease-in-out 3;
+}
+
+@keyframes pr-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+  }
+  50% {
+    box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
+  }
 }
 
 .pr[hidden] {
@@ -207,73 +277,83 @@ button {
   flex: 0 0 auto;
 }
 
+/* The remaining rest, as a track along the bottom edge rather than a fill behind the text.
+ *
+ * Glow forced the question, but the fill was already wrong on its own. A block draining
+ * right to left behind fixed colour numerals changes the background under those numerals
+ * continuously, so the contrast of the countdown varied over the life of the timer and was at
+ * its worst somewhere in the middle. A number you read mid set cannot have a contrast ratio
+ * that depends on how much rest is left. The track never passes behind text, so the numerals
+ * sit on --surface-base at a fixed 10.02 from first second to last.
+ *
+ * 8px, not 4. At 65cm under gym lighting a 4px rule is close to invisible, and while the
+ * numerals carry the primary signal the track still has to be seen without being looked for. */
 .rest {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--s-3);
   min-height: var(--tap);
-  padding: var(--s-2) var(--s-3);
-  border: 1px solid var(--rack);
+  padding: var(--s-2) var(--s-3) calc(var(--s-2) + var(--rest-track-height));
+  border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
-/* Fills back toward empty as the rest runs down. Colour is not the only signal: the number
- * counts and the label changes. */
-.rest__fill {
+.rest__track {
   position: absolute;
-  inset: 0 auto 0 0;
+  inset: auto 0 0 0;
+  height: var(--rest-track-height);
+  background: var(--surface-raised);
+}
+
+.rest__fill {
+  display: block;
+  height: 100%;
   width: 0%;
-  background: var(--rack);
+  background: var(--accent-data);
+  /* Glow site two. Legal because the track is below the text, never behind it. The shadow
+   * itself is composed in the glow rules near the top of this file. */
+  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
   transition: width 0.25s linear;
 }
 
-.rest__label,
-.rest__time,
-.rest__actions {
-  position: relative;
-}
-
 .rest__label {
-  color: var(--dust);
+  color: var(--text-secondary);
   font-size: var(--t-small);
 }
 
 .rest__time {
   font-size: var(--t-md);
   font-weight: 650;
-  color: var(--steel);
+  color: var(--accent-data);
   line-height: 1;
 }
 
+/* Colour is not the only signal: the number counts down and the label changes word. */
 .rest[data-state='ready'] .rest__time {
-  color: var(--chalk);
+  color: var(--text-primary);
 }
 
-.rest__actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--s-2);
-}
-
-.ghost {
+.button-secondary {
   min-height: var(--tap);
   min-width: var(--tap);
   padding: 0 var(--s-3);
-  border: 1px solid var(--rack);
+  border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
-  color: var(--dust);
+  color: var(--text-secondary);
   font-size: var(--t-small);
   font-weight: 600;
-  background: var(--iron);
+  background: var(--surface-base);
 }
 
-.ghost:active {
-  background: var(--rack);
+/* Text moves to --text-primary with the surface, per the raised surface rule. */
+.button-secondary:active {
+  background: var(--surface-raised);
+  color: var(--text-primary);
 }
 
-.ghost:disabled {
+.button-secondary:disabled {
   color: var(--muted);
   cursor: not-allowed;
 }
@@ -286,7 +366,7 @@ button {
   gap: var(--s-2);
 }
 
-.secondary .ghost {
+.secondary .button-secondary {
   flex: 1 1 auto;
 }
 
@@ -298,7 +378,7 @@ button {
   align-items: center;
   gap: var(--s-2);
   padding: var(--s-2);
-  background: var(--rack);
+  background: var(--surface-raised);
   border: 1px solid var(--muted);
   border-radius: var(--radius);
   --step-btn: 4.5rem;
@@ -312,16 +392,16 @@ button {
   height: 100%;
   min-height: 3.5rem;
   border-radius: calc(var(--radius) - 3px);
-  background: var(--iron);
-  color: var(--chalk);
+  background: var(--surface-base);
+  color: var(--text-primary);
   font-size: var(--t-md);
   font-weight: 700;
   line-height: 1;
 }
 
 .stepper__btn:active {
-  background: var(--press);
-  color: var(--iron);
+  background: var(--accent-action-pressed);
+  color: var(--surface-base);
 }
 
 .stepper__btn:disabled {
@@ -348,9 +428,11 @@ button {
   font-size: var(--t-lg);
 }
 
+/* --text-primary, not --text-secondary. This sits on --surface-raised, where secondary
+ * measures 4.39 and misses both floors. See the raised surface rule in the token block. */
 .stepper__unit {
   font-size: var(--t-body);
-  color: var(--dust);
+  color: var(--text-primary);
 }
 
 /* Keyboard is the fallback, never the default, so it only appears after an explicit tap. */
@@ -360,8 +442,8 @@ button {
   padding: 0 var(--s-2);
   border: 2px solid var(--focus);
   border-radius: calc(var(--radius) - 3px);
-  background: var(--iron);
-  color: var(--chalk);
+  background: var(--surface-base);
+  color: var(--text-primary);
   font-family: inherit;
   font-size: var(--t-lg);
   font-weight: 700;
@@ -370,11 +452,12 @@ button {
 
 /* ---------------------------------------------------------------- the log action */
 
+/* Glow site one. The glow sits outside the fill, so the button's own ink is never on it. */
 .log {
   min-height: 6.5rem;
   border-radius: var(--radius);
-  background: var(--load);
-  color: var(--iron);
+  background: var(--accent-action);
+  color: var(--surface-base);
   font-size: var(--t-sm);
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -383,10 +466,12 @@ button {
   align-items: center;
   justify-content: center;
   gap: var(--s-1);
+  --glow-tint: color-mix(in srgb, var(--accent-action) var(--glow-strength-rest), transparent);
 }
 
 .log:active {
-  background: var(--press);
+  background: var(--accent-action-pressed);
+  --glow-tint: color-mix(in srgb, var(--accent-action-pressed) var(--glow-strength-rest), transparent);
 }
 
 .log__sub {
@@ -395,10 +480,14 @@ button {
   opacity: 0.85;
 }
 
+/* Disabled drops to --surface-base rather than --surface-raised, because --muted measures
+ * 2.43 on raised and 5.28 on base. Nothing glows when nothing is actionable. */
 .log:disabled {
-  background: var(--rack);
+  background: var(--surface-base);
+  border: 1px solid var(--surface-raised);
   color: var(--muted);
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* ---------------------------------------------------------------- done and errors */
@@ -408,7 +497,7 @@ button {
   flex-direction: column;
   gap: var(--s-2);
   padding: var(--s-4);
-  border: 1px solid var(--rack);
+  border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
 }
 
@@ -420,7 +509,7 @@ button {
 
 .done__stat {
   margin: 0;
-  color: var(--dust);
+  color: var(--text-secondary);
   font-size: var(--t-body);
 }
 
@@ -429,15 +518,17 @@ button {
 .notice {
   margin: 0;
   padding: var(--s-2) var(--s-3);
-  border: 1px solid var(--rack);
+  border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
-  color: var(--dust);
+  color: var(--text-secondary);
   font-size: var(--t-small);
 }
 
+/* The border carries the attention, not the text colour. --accent-action is a fill and border
+ * token, and --pr now means a record rather than a problem. */
 .notice[data-tone='attention'] {
-  border-color: var(--pr);
-  color: var(--pr);
+  border-color: var(--accent-action);
+  color: var(--text-primary);
 }
 
 .notice[hidden] {
@@ -485,5 +576,13 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* The record keeps its glow, it just stops moving. A glow is light, not motion, and the
+   * blanket rule above would otherwise land the pill on the resting keyframe and quietly
+   * demote the one moment this product exists to deliver. */
+  .pr {
+    animation: none !important;
+    box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
   }
 }
