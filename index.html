@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>ptC</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="screen">
+      <!-- Top third. Nothing here is interactive: on a 6.7 inch phone held in one hand this
+           band is out of the thumb's reach, so it carries reading material only. -->
+      <header class="context">
+        <p class="context__who"><span id="client-name">Loading</span> <span id="day-name"></span></p>
+        <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
+        <p class="context__set num" id="set-position">&nbsp;</p>
+        <p class="context__target" id="target">&nbsp;</p>
+        <p class="context__last num" id="last-time">&nbsp;</p>
+        <p class="pr" id="pr-chip" hidden>Personal record</p>
+      </header>
+
+      <div class="spacer" aria-hidden="true"></div>
+
+      <p class="notice" id="notice" hidden role="status"></p>
+
+      <section class="done" id="done" hidden>
+        <h2 class="done__title" id="done-title">Session logged.</h2>
+        <p class="done__stat num" id="done-stat"></p>
+      </section>
+
+      <!-- Bottom third, inside the thumb arc. The biggest number on the screen and the place
+           the thumb goes are not the same place, so the log action sits lowest. -->
+      <div class="controls" id="controls">
+        <div class="rest" id="rest" data-state="idle">
+          <span class="rest__fill" id="rest-fill" aria-hidden="true"></span>
+          <span class="rest__label" id="rest-label">Rest</span>
+          <span class="rest__time num" id="rest-time" role="timer" aria-live="off">0:00</span>
+        </div>
+
+        <div class="secondary">
+          <button type="button" class="ghost" id="skip">Skip lift</button>
+          <button type="button" class="ghost" id="end">End session</button>
+          <button type="button" class="ghost" id="type-toggle">Type</button>
+          <button type="button" class="ghost" id="undo" disabled>Undo</button>
+        </div>
+
+        <div class="stepper" id="stepper-weight">
+          <button type="button" class="stepper__btn" id="weight-down" aria-label="Less weight">&minus;</button>
+          <div class="stepper__readout">
+            <span class="stepper__value num" id="weight-value">0</span>
+            <span class="stepper__unit" id="weight-unit">kg</span>
+            <input
+              class="stepper__input num"
+              id="weight-input"
+              type="number"
+              inputmode="decimal"
+              step="0.5"
+              min="0"
+              aria-label="Weight"
+              hidden
+            />
+          </div>
+          <button type="button" class="stepper__btn" id="weight-up" aria-label="More weight">+</button>
+        </div>
+
+        <div class="stepper stepper--reps" id="stepper-reps">
+          <button type="button" class="stepper__btn" id="reps-down" aria-label="Fewer reps">&minus;</button>
+          <div class="stepper__readout">
+            <span class="stepper__value num" id="reps-value">0</span>
+            <span class="stepper__unit">reps</span>
+            <input
+              class="stepper__input num"
+              id="reps-input"
+              type="number"
+              inputmode="numeric"
+              step="1"
+              min="1"
+              aria-label="Reps"
+              hidden
+            />
+          </div>
+          <button type="button" class="stepper__btn" id="reps-up" aria-label="More reps">+</button>
+        </div>
+
+        <button type="button" class="log" id="log">
+          <span id="log-label">Log set</span>
+          <span class="log__sub num" id="log-sub"></span>
+        </button>
+      </div>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

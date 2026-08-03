@@ -1,0 +1,489 @@
+/* Tokens first, screen second. Nothing below the token block invents a raw colour or size.
+ *
+ * Palette source: a gym floor read under bad overhead light, mid set, at arm's length.
+ *
+ * The base is deliberately not near black. A glossy phone reflects roughly four to six percent
+ * of a bright room off the front glass, and that reflected light sets a luminance floor the
+ * display cannot go under. A near black base sits below that floor and the screen stops being
+ * a UI and becomes a mirror of the ceiling lights. Lifting the base puts every surface above
+ * the reflection.
+ *
+ * The action colour is orange because of the eye, not taste. Short wavelengths focus in front
+ * of the retina, so a blue or blue green primary is the blurriest possible choice at arm's
+ * length. Long wavelength orange lands on the retina and stays sharp through sweat and glare.
+ * It also rules out the acid green default.
+ *
+ * Text is off white, never pure white. Pure white on a dark base haloes, and halation is worse
+ * with astigmatism and worse again through sweat on the glass.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces. Separation is 2.18:1, which survives glare. Borders back it up anyway. */
+  --iron: #14181c;
+  --rack: #46505c;
+
+  /* Text. Ratios are against --iron then --rack.
+   * chalk 15.48 / 7.11   any size on either surface
+   * dust   9.57 / 4.39   any size on iron, 28px and up on rack
+   * steel  9.87 / 4.53   any size on iron, 28px and up on rack
+   */
+  --chalk: #edeff1;
+  --dust: #b5bfc9;
+  --steel: #a8c4de;
+
+  /* Fill only, never text. --load reads 3.50 against --rack, which is below the floor for
+   * text of any size. Both carry --iron as their ink: 7.62 and 5.07. */
+  --load: #ff8a45;
+  --press: #d9682a;
+
+  /* State. --muted is disabled text on --iron only, 5.28. --focus always ships with a 2px
+   * --iron inner ring so it never has to contrast with whatever fill sits under it. */
+  --muted: #828d99;
+  --focus: #9fe0ff;
+  --pr: #f5c451;
+
+  /* Reading distance, in centimetres. This is the retune point.
+   *
+   * 65 is a phone resting on a bench or the floor next to the rack. If it turns out to sit
+   * propped at the rack it is closer to 120, and if it lives in a pocket and only comes out
+   * between sets it is 35, which collapses the mid set tier onto the between sets tier.
+   * Change the one number. Past about 90 the layout wants a look, since 4rem scaled by 1.4
+   * starts crowding a 360px viewport. */
+  --read-distance: 65;
+  --read-basis: 65;
+  --dist: calc(var(--read-distance) / var(--read-basis));
+
+  /* Mid set tier. Read at --read-distance, one hand, sweat on the glass, heart rate high.
+   * Large text by WCAG at every size here, so the floor is 4.5:1, not 7:1. */
+  --t-xl: calc(4rem * var(--dist));
+  --t-lg: calc(2.5rem * var(--dist));
+  --t-md: calc(2rem * var(--dist));
+  --t-sm: calc(1.75rem * var(--dist));
+
+  /* Between sets tier. Read at about 35cm with the phone in hand. Fixed, because this tier
+   * does not move when the mid set reading distance changes. 7:1 floor. */
+  --t-body: 1.0625rem;
+  --t-small: 0.875rem;
+
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+
+  --radius: 12px;
+  --tap: 44px;
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--iron);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--t-body);
+  line-height: 1.4;
+  color: var(--chalk);
+  background: var(--iron);
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+/* Every number on this screen is tabular, so a stepper does not reflow when 95 becomes 100
+ * and the thumb does not miss on the second tap. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* The inner ring is --iron, so the bright ring never has to contrast with the fill beneath. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--iron), 0 0 0 6px var(--focus);
+}
+
+/* ---------------------------------------------------------------- screen skeleton */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--s-4) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom, 0px));
+  gap: var(--s-3);
+}
+
+/* Top third. Read only, on purpose. On a 6.7 inch phone nothing up here is reachable with the
+ * thumb of the hand holding it, so nothing up here is interactive. */
+.context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  flex: 0 0 auto;
+}
+
+.context__who {
+  margin: 0;
+  color: var(--dust);
+  font-size: var(--t-small);
+  text-transform: none;
+}
+
+/* The lift is the identifier, so it outranks the set counter. */
+.context__exercise {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.context__set {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--dust);
+}
+
+.context__target,
+.context__last {
+  margin: 0;
+  font-size: var(--t-body);
+  color: var(--dust);
+}
+
+.context__last {
+  color: var(--steel);
+}
+
+.pr {
+  align-self: flex-start;
+  margin: var(--s-1) 0 0;
+  padding: var(--s-1) var(--s-3);
+  border: 2px solid var(--pr);
+  border-radius: 999px;
+  color: var(--pr);
+  font-size: var(--t-body);
+  font-weight: 650;
+}
+
+.pr[hidden] {
+  display: none;
+}
+
+/* Pushes the controls into the thumb arc no matter how short the context block is. */
+.spacer {
+  flex: 1 1 auto;
+  min-height: var(--s-2);
+}
+
+/* ---------------------------------------------------------------- controls */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  flex: 0 0 auto;
+}
+
+.rest {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Fills back toward empty as the rest runs down. Colour is not the only signal: the number
+ * counts and the label changes. */
+.rest__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: var(--rack);
+  transition: width 0.25s linear;
+}
+
+.rest__label,
+.rest__time,
+.rest__actions {
+  position: relative;
+}
+
+.rest__label {
+  color: var(--dust);
+  font-size: var(--t-small);
+}
+
+.rest__time {
+  font-size: var(--t-md);
+  font-weight: 650;
+  color: var(--steel);
+  line-height: 1;
+}
+
+.rest[data-state='ready'] .rest__time {
+  color: var(--chalk);
+}
+
+.rest__actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s-2);
+}
+
+.ghost {
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+  color: var(--dust);
+  font-size: var(--t-small);
+  font-weight: 600;
+  background: var(--iron);
+}
+
+.ghost:active {
+  background: var(--rack);
+}
+
+.ghost:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* Secondary actions. Skip and end session are ordinary controls here, deliberately styled the
+ * same as type and undo. Nothing about a skipped lift gets a warning colour. */
+.secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.secondary .ghost {
+  flex: 1 1 auto;
+}
+
+/* ---------------------------------------------------------------- steppers */
+
+.stepper {
+  display: grid;
+  grid-template-columns: var(--step-btn) 1fr var(--step-btn);
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: var(--rack);
+  border: 1px solid var(--muted);
+  border-radius: var(--radius);
+  --step-btn: 4.5rem;
+}
+
+.stepper--reps {
+  --step-btn: 3.75rem;
+}
+
+.stepper__btn {
+  height: 100%;
+  min-height: 3.5rem;
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--iron);
+  color: var(--chalk);
+  font-size: var(--t-md);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stepper__btn:active {
+  background: var(--press);
+  color: var(--iron);
+}
+
+.stepper__btn:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.stepper__readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.stepper__value {
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.stepper--reps .stepper__value {
+  font-size: var(--t-lg);
+}
+
+.stepper__unit {
+  font-size: var(--t-body);
+  color: var(--dust);
+}
+
+/* Keyboard is the fallback, never the default, so it only appears after an explicit tap. */
+.stepper__input {
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0 var(--s-2);
+  border: 2px solid var(--focus);
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--iron);
+  color: var(--chalk);
+  font-family: inherit;
+  font-size: var(--t-lg);
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- the log action */
+
+.log {
+  min-height: 6.5rem;
+  border-radius: var(--radius);
+  background: var(--load);
+  color: var(--iron);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+}
+
+.log:active {
+  background: var(--press);
+}
+
+.log__sub {
+  font-size: var(--t-body);
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.log:disabled {
+  background: var(--rack);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- done and errors */
+
+.done {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+}
+
+.done__title {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 650;
+}
+
+.done__stat {
+  margin: 0;
+  color: var(--dust);
+  font-size: var(--t-body);
+}
+
+/* Two registers. Neutral is the default because most of what this screen has to say is not a
+ * problem: moving on from a lift, closing a session. Only a failed write earns attention. */
+.notice {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+  color: var(--dust);
+  font-size: var(--t-small);
+}
+
+.notice[data-tone='attention'] {
+  border-color: var(--pr);
+  color: var(--pr);
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- small viewports */
+
+@media (max-height: 700px) {
+  :root {
+    --t-xl: calc(3.25rem * var(--dist));
+    --t-lg: calc(2.125rem * var(--dist));
+    --t-md: calc(1.625rem * var(--dist));
+    --t-sm: calc(1.5rem * var(--dist));
+  }
+
+  .log {
+    min-height: 5.25rem;
+  }
+
+  .stepper__btn {
+    min-height: 3rem;
+  }
+}
+
+@media (max-width: 22.5rem) {
+  .stepper {
+    --step-btn: 3.5rem;
+  }
+
+  .stepper--reps {
+    --step-btn: 3.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

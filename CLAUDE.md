@@ -195,7 +195,16 @@ Requirements:
 - Rest timer starts automatically on set completion and is visible without scrolling.
 - A set is logged optimistically. The UI never blocks on the network.
 - Undo the last logged set is always available for the duration of the session.
-- No confirmation dialogs anywhere in the logging flow.
+- Skipping an exercise is one tap and moves straight to the next lift. A skipped exercise
+  writes no set rows, because nothing was performed and absence is the truthful record.
+  It is not a failure state: no warning colour, no badge, no running count of what was
+  missed, no prompt asking why, and no offer to reschedule it. The acknowledgement names the
+  lift the client is now on, not the one they left.
+- Ending a session early is always available and closes the session with whatever was logged.
+  The summary reports what was done and never what was not. A session with two lifts in it is
+  a session, not a partial one.
+- No confirmation dialogs anywhere in the logging flow. That includes skip and end session:
+  both are reachable by undo or by simply training again, so neither is worth a dialog.
 
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no
 notifications nagging the client to train.

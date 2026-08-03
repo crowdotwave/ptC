@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>ptC history tests</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="dev.css" />
+  </head>
+  <body class="dev">
+    <main class="dev__shell">
+      <header>
+        <h1>History tests</h1>
+        <p class="dev__note">
+          Pure unit tests for <code>js/history.js</code>, the module that decides what counts.
+          No storage, no adapter, no seeding. The adapter check is at
+          <a href="dev.html">dev.html</a> and the logging screen is at
+          <a href="index.html">index.html</a>.
+        </p>
+      </header>
+
+      <div class="dev__row">
+        <h2>Result</h2>
+        <span class="dev__status" id="summary" data-state="busy">Running</span>
+      </div>
+
+      <ul class="dev__log" id="results"></ul>
+    </main>
+
+    <script type="module" src="test.js"></script>
+  </body>
+</html>

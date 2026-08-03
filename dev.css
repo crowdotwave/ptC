@@ -1,0 +1,153 @@
+/* Styles for the adapter check page only. Uses the app tokens, adds nothing to them.
+ * None of this ships to a client. */
+
+body.dev {
+  padding: var(--s-4);
+  font-size: var(--t-body);
+}
+
+.dev__shell {
+  max-width: 60rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.dev h1 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-exercise);
+}
+
+.dev h2 {
+  margin: 0;
+  font-size: var(--t-body);
+}
+
+.dev__note {
+  margin: 0;
+  color: var(--dust);
+  font-size: var(--t-small);
+}
+
+.dev__note a {
+  color: var(--steel);
+}
+
+.dev__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.dev__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.dev__actions button {
+  min-height: var(--tap);
+  padding: 0 var(--s-5);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+  background: var(--rack);
+  color: var(--chalk);
+  font-weight: 600;
+}
+
+.dev__actions button:active {
+  background: var(--press);
+  color: var(--iron);
+}
+
+.dev__actions button:disabled {
+  background: var(--iron);
+  color: var(--muted);
+  cursor: progress;
+}
+
+.dev__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--dust);
+  font-size: var(--t-small);
+}
+
+.dev__status::before {
+  content: '';
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dev__status[data-state='ok']::before { background: var(--steel); }
+.dev__status[data-state='fail']::before { background: var(--load); }
+.dev__status[data-state='busy']::before { background: var(--pr); }
+
+.dev__log {
+  margin: 0;
+  padding: var(--s-3);
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+  font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  font-size: var(--t-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--chalk);
+}
+
+.dev__log b { color: var(--steel); font-weight: 600; }
+.dev__log i { color: var(--load); font-style: normal; font-weight: 600; }
+.dev__log em { color: var(--dust); font-style: normal; }
+
+.dev__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--s-2);
+}
+
+.dev__tile {
+  padding: var(--s-3);
+  border: 1px solid var(--rack);
+  border-radius: var(--radius);
+}
+
+.dev__tile b {
+  display: block;
+  font-size: var(--t-exercise);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.dev__tile span {
+  display: block;
+  color: var(--dust);
+  font-size: var(--t-small);
+}
+
+/* Test list. Shares the log panel styling, one row per case. */
+ul.dev__log {
+  list-style: none;
+  padding-left: var(--s-3);
+}
+
+.t {
+  white-space: pre-wrap;
+}
+
+.t.ok {
+  color: var(--steel);
+}
+
+.t.bad {
+  color: var(--load);
+  font-weight: 600;
+}

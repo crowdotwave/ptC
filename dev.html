@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>ptC adapter check</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="dev.css" />
+  </head>
+  <body class="dev">
+    <main class="dev__shell">
+      <header>
+        <h1>Adapter check</h1>
+        <p class="dev__note">
+          Not the app. This page proves the storage adapter reads, writes, and refuses what it
+          should. The logging screen is at <a href="index.html">index.html</a>.
+        </p>
+      </header>
+
+      <section>
+        <div class="dev__row">
+          <h2>Adapter</h2>
+          <span class="dev__status" id="adapter-status" data-state="busy" role="status">Opening the database</span>
+        </div>
+        <div class="dev__actions">
+          <button type="button" id="run-test">Run adapter check</button>
+          <button type="button" id="reseed">Reset and reseed</button>
+          <button type="button" id="sync">Sync</button>
+        </div>
+        <pre class="dev__log" id="log" aria-live="polite"></pre>
+      </section>
+
+      <section>
+        <h2>Rows on this device</h2>
+        <div class="dev__grid" id="counts"></div>
+      </section>
+    </main>
+
+    <script type="module" src="dev.js"></script>
+  </body>
+</html>
