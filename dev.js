@@ -87,6 +87,7 @@ async function runAdapterCheck(storage) {
     const existingLog = (await storage.query('set_logs', {}, { limit: 1 }))[0];
     if (existingLog) {
       ok = assert(existingLog.is_void === false, 'migration backfilled set_logs.is_void') && ok;
+      ok = assert(existingLog.is_extra === false, 'migration backfilled set_logs.is_extra') && ok;
 
       let refusedUpdate = false;
       try {
@@ -125,6 +126,7 @@ async function runAdapterCheck(storage) {
         logged_at: new Date().toISOString(),
         supersedes_id: existingLog.id,
         is_void: true,
+        is_extra: existingLog.is_extra === true,
         device_id: getDeviceId(),
       });
       await storage.put('set_logs', retraction);

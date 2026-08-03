@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -97,6 +97,22 @@ const MIGRATIONS = [
         row.increment_kg === undefined
           ? { ...row, increment_kg: byEquipment[row.equipment] ?? 2.5 }
           : row,
+      );
+    },
+  },
+  {
+    version: 4,
+    describe: 'add template_items.starting_weight_kg and set_logs.is_extra',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Null, not a number. The trainer has not said, and inventing one here would be exactly
+      // the guess the whole starting weight design exists to avoid.
+      rewriteRows(tx, 'template_items', (row) =>
+        row.starting_weight_kg === undefined ? { ...row, starting_weight_kg: null } : row,
+      );
+      // Every set logged before add a set existed was prescribed by definition.
+      rewriteRows(tx, 'set_logs', (row) =>
+        row.is_extra === undefined ? { ...row, is_extra: false } : row,
       );
     },
   },

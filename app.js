@@ -15,9 +15,9 @@ import { openStorage, makeRecord, getDeviceId } from './js/storage.js';
 import { seed, isSeeded, getDefaultClientId } from './js/seed.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
+import { openingWeight, openingCopy } from './js/prefill.js';
 
 const KG_PER_LB = 0.45359237;
-const EMPTY_BAR_KG = 20;
 
 const el = (id) => document.getElementById(id);
 const ui = {
@@ -41,6 +41,7 @@ const ui = {
   typeToggle: el('type-toggle'),
   skip: el('skip'),
   end: el('end'),
+  addSet: el('add-set'),
   stepperWeight: el('stepper-weight'),
   stepperReps: el('stepper-reps'),
   weightValue: el('weight-value'),
@@ -70,7 +71,9 @@ const state = {
   logged: [],
   best: new Map(),
   increments: new Map(),
-  weightKg: EMPTY_BAR_KG,
+  // Placeholder only. Every real value comes from history or from js/prefill.js before the
+  // first render, so nothing this file invents ever reaches a stepper.
+  weightKg: 0,
   reps: 5,
   restEndsAt: 0,
   restTotal: 0,
@@ -176,6 +179,7 @@ async function buildPlan(storage, day, sessions) {
           item,
           setIndex,
           isWarmup: row.is_warmup,
+          isExtra: false,
           weightKg: row.weight_kg,
           reps: row.reps,
           lastWeightKg: row.weight_kg,
@@ -186,24 +190,26 @@ async function buildPlan(storage, day, sessions) {
       continue;
     }
 
-    // No history for this lift. Start at the empty bar and the bottom of the rep range, which
-    // is an invitation to log rather than an apology for having nothing. Snapped to the lift's
-    // own increment so the opening number is one the equipment can hold.
-    //
-    // Known weak spot: 20kg is right for a barbell and a guess for everything else. The honest
-    // fix is a starting load per exercise, which is a schema column and not this pass.
-    const increment = state.increments.get(item.exercise_id) || 2.5;
-    const opening = Math.max(increment, Math.round(EMPTY_BAR_KG / increment) * increment);
+    // No history for this lift, so this runs exactly once per client per exercise. The
+    // trainer's starting_weight_kg is the real answer. When it is blank, prefill.js falls back
+    // to a fact about the equipment rather than a guess about the person, deliberately light.
+    const opening = openingWeight({
+      startingWeightKg: item.starting_weight_kg ?? null,
+      equipment: item.exercise.equipment,
+      incrementKg: state.increments.get(item.exercise_id),
+    });
     for (let setIndex = 0; setIndex < item.target_sets; setIndex += 1) {
       plan.push({
         item,
         setIndex,
         isWarmup: false,
-        weightKg: opening,
+        isExtra: false,
+        weightKg: opening.kg,
         reps: item.target_reps_low,
         lastWeightKg: null,
         lastReps: null,
         lastOn: null,
+        openingSource: opening.source,
       });
     }
   }
@@ -236,6 +242,7 @@ function render() {
   ui.skip.disabled = false;
   ui.end.disabled = false;
   ui.typeToggle.disabled = false;
+  ui.addSet.disabled = false;
 
   const exercise = entry.item.exercise;
   const siblings = setsForExercise(exercise.id);
@@ -244,7 +251,9 @@ function render() {
   ui.exerciseName.textContent = exercise.name;
   ui.setPosition.textContent = entry.isWarmup
     ? `Warmup set, ${position} of ${siblings.length}`
-    : `Set ${position} of ${siblings.length}`;
+    : entry.isExtra
+      ? `Extra set, ${position} of ${siblings.length}`
+      : `Set ${position} of ${siblings.length}`;
 
   const high = entry.item.target_reps_high;
   const repRange = high && high !== entry.item.target_reps_low
@@ -256,7 +265,7 @@ function render() {
 
   ui.lastTime.textContent =
     entry.lastWeightKg === null
-      ? 'First time on this lift.'
+      ? openingCopy(entry.openingSource)
       : `Last time ${formatWeight(entry.lastWeightKg)} ${unit()} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`;
 
   renderValues();
@@ -292,20 +301,22 @@ function renderDone() {
   ui.skip.disabled = true;
   ui.end.disabled = true;
   ui.typeToggle.disabled = true;
+  ui.addSet.disabled = true;
 
   ui.exerciseName.textContent = state.day.name;
   ui.setPosition.textContent = '';
   ui.target.textContent = '';
   ui.lastTime.textContent = '';
 
-  const sets = state.logged.filter((row) => !row.isWarmup).length;
-  const volume = state.logged
-    .filter((row) => !row.isWarmup)
-    .reduce((total, row) => total + row.weightKg * row.reps, 0);
+  const working = state.logged.filter((row) => !row.isWarmup);
+  const sets = working.length;
+  const extra = working.filter((row) => row.isExtra).length;
+  const volume = working.reduce((total, row) => total + row.weightKg * row.reps, 0);
 
   ui.doneTitle.textContent = sets ? 'Session logged.' : 'Nothing logged yet.';
   ui.doneStat.textContent = sets
-    ? `${sets} working ${sets === 1 ? 'set' : 'sets'}, ${Math.round(volume).toLocaleString()} kg moved.`
+    ? `${sets} working ${sets === 1 ? 'set' : 'sets'}${extra ? `, ${extra} added` : ''}, ` +
+      `${Math.round(volume).toLocaleString()} kg moved.`
     : 'Open a set and log it when you are ready.';
 
   // Undo stays live for the whole session, including after the last set, which is why the
@@ -389,6 +400,9 @@ function logSet() {
     logged_at: new Date().toISOString(),
     supersedes_id: null,
     is_void: false,
+    // Recorded at log time, not inferred later from the snapshot. Whether a set was asked for
+    // is a fact about the moment it happened.
+    is_extra: entry.isExtra === true,
     device_id: getDeviceId(),
   });
 
@@ -403,6 +417,7 @@ function logSet() {
     weightKg: state.weightKg,
     reps: state.reps,
     isWarmup: entry.isWarmup,
+    isExtra: entry.isExtra === true,
     // Undo has to put this back. A record that was taken back must stop being a record, or
     // the next real one never fires.
     previousBest,
@@ -464,6 +479,7 @@ function undoLast() {
     logged_at: new Date().toISOString(),
     supersedes_id: last.id,
     is_void: true,
+    is_extra: last.isExtra === true,
     device_id: getDeviceId(),
   });
 
@@ -518,6 +534,43 @@ function skipExercise() {
   ui.prChip.hidden = true;
   render();
   showNotice(next ? `On to ${next.item.exercise.name}.` : 'That was the last lift.');
+}
+
+/**
+ * Appends one more set to the lift the client is on, prefilled from where the steppers already
+ * sit, and marks it extra.
+ *
+ * The insert lands at or after the cursor, never before it, which is what keeps the planIndex
+ * stored on every already logged set pointing at the same entry. Undo depends on that.
+ */
+function addSet() {
+  const entry = currentEntry();
+  if (!entry) return;
+
+  const exerciseId = entry.item.exercise_id;
+  let insertAt = state.cursor;
+  while (insertAt < state.plan.length && state.plan[insertAt].item.exercise_id === exerciseId) {
+    insertAt += 1;
+  }
+
+  const siblings = setsForExercise(exerciseId);
+  const highestIndex = siblings.reduce((max, s) => Math.max(max, s.setIndex), -1);
+
+  state.plan.splice(insertAt, 0, {
+    item: entry.item,
+    setIndex: highestIndex + 1,
+    isWarmup: false,
+    isExtra: true,
+    weightKg: state.weightKg,
+    reps: state.reps,
+    lastWeightKg: null,
+    lastReps: null,
+    lastOn: null,
+    openingSource: null,
+  });
+
+  render();
+  showNotice(`Extra set added to ${entry.item.exercise.name}.`);
 }
 
 /** Closes the session with whatever is in it. A session with two lifts in it is a session. */
@@ -640,6 +693,7 @@ function wire() {
   ui.undo.addEventListener('click', undoLast);
   ui.skip.addEventListener('click', skipExercise);
   ui.end.addEventListener('click', endSession);
+  ui.addSet.addEventListener('click', addSet);
 
   ui.typeToggle.addEventListener('click', () => {
     if (state.typing) {

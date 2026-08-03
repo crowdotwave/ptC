@@ -102,6 +102,11 @@ export const TABLES = {
       target_rpe: { type: NUMERIC, nullable: true },
       rest_seconds: { type: INT },
       notes: { type: TEXT },
+      // What to put on the bar the first time this client does this lift, set by the trainer
+      // when building the program. Used only when the client has no history for the exercise,
+      // and never again after that. Null means the trainer did not say, which is a real answer
+      // for a client nobody has seen lift yet. See js/prefill.js for what happens then.
+      starting_weight_kg: { type: NUMERIC, nullable: true },
     },
   },
 
@@ -153,6 +158,11 @@ export const TABLES = {
       // stops counting. A correction, which keeps the set but fixes its numbers, is the same
       // shape with is_void false.
       is_void: { type: BOOL },
+      // True when the client added this set beyond what the program asked for. Recorded here
+      // rather than inferred from assignments.snapshot, because the chart has to separate
+      // prescribed volume from extra volume on every row it reads, and because whether a set
+      // was part of the plan is a fact about the moment it was logged.
+      is_extra: { type: BOOL },
       device_id: { type: TEXT },
     },
   },

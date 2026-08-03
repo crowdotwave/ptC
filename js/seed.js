@@ -13,7 +13,7 @@ import { epley1rm } from './history.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 3;
+const SEED_VERSION = 4;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -306,6 +306,10 @@ export async function seed(storage, { force = false } = {}) {
             target_rpe: rpe,
             rest_seconds: rest,
             notes,
+            // Face pull is left blank on purpose, so the fixture contains the case where a
+            // trainer has not said and js/prefill.js has to answer.
+            starting_weight_kg:
+              slug === 'face-pull' ? null : roundTo(configBySlug[slug].base * 0.6, configBySlug[slug].step),
           },
           { created_at: seededAt },
         ),
@@ -408,6 +412,7 @@ export async function seed(storage, { force = false } = {}) {
               logged_at: iso(new Date(cursorMs)),
               supersedes_id: null,
               is_void: false,
+              is_extra: false,
               device_id: deviceId,
             });
             setIndex += 1;
@@ -434,6 +439,7 @@ export async function seed(storage, { force = false } = {}) {
               logged_at: iso(new Date(cursorMs)),
               supersedes_id: null,
               is_void: false,
+              is_extra: false,
               device_id: deviceId,
             });
           }
@@ -487,6 +493,7 @@ export async function seed(storage, { force = false } = {}) {
           logged_at: original.logged_at,
           supersedes_id: original.id,
           is_void: false, // a correction, not a retraction: the set happened, the count was wrong
+          is_extra: false,
           device_id: deviceId,
         },
         { created_at: iso(new Date(Date.parse(original.created_at) + 90 * 1000)) },

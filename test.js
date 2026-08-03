@@ -9,6 +9,7 @@
 
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_MS } from './js/hold.js';
+import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 
 const results = [];
 
@@ -307,6 +308,62 @@ test('a two second hold covers a working weight change, not a nudge', () => {
   const steps = holdTicks(2000).length;
   ok(steps >= 8, `expected a usable number of steps, got ${steps}`);
   ok(steps <= 20, `expected the load not to run away, got ${steps}`);
+});
+
+// ------------------------------------------------------------------ opening weight
+//
+// Runs once per client per exercise, on a lift nobody has watched them do. The rule is that it
+// never invents a number that pretends to know how strong somebody is.
+
+test('the trainer starting weight wins whenever it is set', () => {
+  const r = openingWeight({ startingWeightKg: 60, equipment: 'barbell', incrementKg: 2.5 });
+  eq(r.kg, 60);
+  eq(r.source, 'trainer');
+});
+
+test('a blank starting weight on a barbell falls back to the empty bar', () => {
+  const r = openingWeight({ startingWeightKg: null, equipment: 'barbell', incrementKg: 2.5 });
+  eq(r.kg, EMPTY_BARBELL_KG);
+  eq(r.source, 'bar');
+});
+
+test('a blank starting weight elsewhere falls back to the lightest the equipment holds', () => {
+  eq(openingWeight({ startingWeightKg: null, equipment: 'cable', incrementKg: 5 }).kg, 5);
+  eq(openingWeight({ startingWeightKg: null, equipment: 'machine', incrementKg: 10 }).kg, 10);
+  eq(openingWeight({ startingWeightKg: null, equipment: 'dumbbell', incrementKg: 2 }).kg, 2);
+  eq(openingWeight({ startingWeightKg: null, equipment: 'cable', incrementKg: 5 }).source, 'lightest');
+});
+
+// The direction of the error is the whole design. Under costs a few taps on the stepper. Over
+// costs a failed rep, or an injury, and a client who stops trusting the numbers.
+test('every fallback is lighter than any plausible working weight', () => {
+  for (const eq_ of ['barbell', 'dumbbell', 'cable', 'machine']) {
+    const r = openingWeight({ startingWeightKg: null, equipment: eq_, incrementKg: 5 });
+    ok(r.kg <= EMPTY_BARBELL_KG, `${eq_} opened at ${r.kg}, which is not obviously light`);
+  }
+});
+
+test('a nonsense starting weight is ignored rather than trusted', () => {
+  for (const bad of [0, -20, null, undefined, Number.NaN, 'heavy']) {
+    const r = openingWeight({ startingWeightKg: bad, equipment: 'barbell', incrementKg: 2.5 });
+    eq(r.kg, EMPTY_BARBELL_KG, `starting weight ${String(bad)} should not have been used`);
+    eq(r.source, 'bar');
+  }
+});
+
+test('a missing increment does not produce a zero or a NaN', () => {
+  for (const bad of [0, -1, undefined, Number.NaN]) {
+    const r = openingWeight({ startingWeightKg: null, equipment: 'cable', incrementKg: bad });
+    ok(Number.isFinite(r.kg) && r.kg > 0, `increment ${String(bad)} produced ${r.kg}`);
+  }
+});
+
+test('the copy says where the number came from and never apologises', () => {
+  for (const source of ['trainer', 'bar', 'lightest']) {
+    const copy = openingCopy(source);
+    ok(copy.startsWith('First time on this lift.'), `${source} copy does not name the situation`);
+    ok(!/no data|not enough|sorry|unfortunately/i.test(copy), `${source} copy apologises`);
+  }
 });
 
 // ------------------------------------------------------------------ report

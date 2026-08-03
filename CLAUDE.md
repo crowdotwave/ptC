@@ -195,6 +195,16 @@ Requirements:
 - Rest timer starts automatically on set completion and is visible without scrolling.
 - A set is logged optimistically. The UI never blocks on the network.
 - Undo the last logged set is always available for the duration of the session.
+- Adding a set is one tap and appends to the lift the client is on, prefilled from wherever the
+  steppers already sit. The added set is written with `set_logs.is_extra` true, recorded at log
+  time rather than inferred later from the assignment snapshot, because the trainer needs
+  prescribed and actual separated on every row a chart reads.
+- The first ever set on a lift prefills from `template_items.starting_weight_kg`, which the
+  trainer sets when building the program. When it is blank, and it will be for a client nobody
+  has watched lift, the app does not guess a working weight. It falls back to a fact about the
+  equipment: the empty bar, or the lightest load a stack or rack can hold. Both are obviously
+  too light on purpose. Erring light costs a few taps on the stepper. Erring heavy costs a
+  failed rep, or an injury, and a client who stops trusting the numbers.
 - Skipping an exercise is one tap and moves straight to the next lift. A skipped exercise
   writes no set rows, because nothing was performed and absence is the truthful record.
   It is not a failure state: no warning colour, no badge, no running count of what was
