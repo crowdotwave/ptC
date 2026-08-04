@@ -21,6 +21,9 @@
         </p>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <p class="context__set num" id="set-position">&nbsp;</p>
+        <!-- The client picks the day. A five day rotation is not done in order, so guessing
+             from the last session and offering no way to change it is wrong. -->
+        <nav class="daypicker" id="day-picker" aria-label="Choose today's session"></nav>
         <p class="context__target" id="target">&nbsp;</p>
         <p class="context__last num" id="last-time">&nbsp;</p>
         <p class="pr" id="pr-chip" hidden>Personal record</p>
@@ -77,7 +80,7 @@
           <button type="button" class="stepper__btn" id="reps-down" aria-label="Fewer reps">&minus;</button>
           <div class="stepper__readout">
             <span class="stepper__value num" id="reps-value">0</span>
-            <span class="stepper__unit">reps</span>
+            <span class="stepper__unit" id="reps-unit">reps</span>
             <input
               class="stepper__input num"
               id="reps-input"

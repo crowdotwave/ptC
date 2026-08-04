@@ -22,7 +22,7 @@ begin
   if to_regprocedure('auth.uid()') is null then
     raise exception 'auth.uid() is missing. Run this against a Supabase database, not a bare Postgres.';
   end if;
-  if to_regprocedure('public.claim_invite(text)') is null then
+  if to_regprocedure('ptc.handle_new_auth_user(uuid,text,jsonb)') is null then
     raise exception '0003_rpc.sql has not been run yet.';
   end if;
 end $$;
@@ -35,13 +35,13 @@ insert into public.trainers (id, auth_user_id, display_name, brand_color, weight
   ('10000000-0000-4000-8000-000000000002', '22222222-2222-4222-8222-222222222222', 'Trainer Two', '#6DD0E4', 'kg');
 
 -- A and B share a trainer, which is the case that actually matters. C belongs to a different
--- trainer, which catches a policy that isolates by trainer but not by client. D is unclaimed,
--- for the invite tests.
-insert into public.clients (id, trainer_id, auth_user_id, display_name, invite_code, status, weight_unit) values
-  ('20000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Client A', 'CODE-AAA', 'active', 'kg'),
-  ('20000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Client B', 'CODE-BBB', 'active', 'kg'),
-  ('20000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-000000000002', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'Client C', 'CODE-CCC', 'active', 'kg'),
-  ('20000000-0000-4000-8000-00000000000d', '10000000-0000-4000-8000-000000000001', null,                                   'Client D', 'CODE-DDD', 'invited', 'kg');
+-- trainer, which catches a policy that isolates by trainer but not by client. D has never
+-- accepted, which is the state a client row sits in between being created and being claimed.
+insert into public.clients (id, trainer_id, auth_user_id, display_name, email, status, weight_unit) values
+  ('20000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-000000000001', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Client A', 'client.a@example.com', 'active', 'kg'),
+  ('20000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-000000000001', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'Client B', 'client.b@example.com', 'active', 'kg'),
+  ('20000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-000000000002', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'Client C', 'client.c@example.com', 'active', 'kg'),
+  ('20000000-0000-4000-8000-00000000000d', '10000000-0000-4000-8000-000000000001', null,                                   'Client D', 'client.d@example.com', 'invited', 'kg');
 
 -- One shared library lift, plus a custom lift for each trainer. The custom pair is what proves
 -- a client can read their own trainer's exercises and none of anybody else's, which is what
@@ -53,6 +53,12 @@ insert into public.exercises (id, trainer_id, name, slug, primary_muscle, equipm
 
 insert into public.program_templates (id, trainer_id, name, notes) values
   ('60000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Foundations', '');
+
+-- Assigned to client D, who has never signed up. The trainer built this and handed it over
+-- before that person had an account, which is the flow the whole email binding exists for.
+insert into public.assignments (id, client_id, template_id, snapshot, starts_on) values
+  ('80000000-0000-4000-8000-00000000000d', '20000000-0000-4000-8000-00000000000d',
+   '60000000-0000-4000-8000-000000000001', '{"days":[]}'::jsonb, current_date);
 
 insert into public.sessions (id, client_id, day_index, started_at) values
   ('40000000-0000-4000-8000-00000000000a', '20000000-0000-4000-8000-00000000000a', 0, now()),
@@ -191,6 +197,9 @@ begin
   select count(*) into n from public.program_templates;
   if n <> 1 then raise exception 'trainer One sees % templates, expected 1', n; end if;
 
+  select count(*) into n from public.assignments;
+  if n <> 1 then raise exception 'trainer One sees % assignments, expected 1', n; end if;
+
   select count(*) into n from public.trainers;
   if n <> 1 then raise exception 'trainer One sees % trainer rows, expected only their own', n; end if;
 
@@ -234,78 +243,198 @@ end $$;
 
 reset role;
 
--- ================================================================ claiming an invite
--- A signed in user with no client row yet. This is the only moment a client touches a row
--- before they own it, so it is the only place the binding can go wrong.
+-- ================================================================ accepting an invite
+--
+-- No codes. The trainer creates a row with a name and an email, and it waits. When that person
+-- signs up, the auth trigger binds them on the email match. Called here as the plain function
+-- rather than by inserting into auth.users, so the test does not depend on the shape of a
+-- Supabase internal table.
 
+do $$
+declare outcome text; n bigint;
+begin
+  -- the whole point: a program is waiting before the person has ever signed up
+  select count(*) into n from public.assignments where client_id = '20000000-0000-4000-8000-00000000000d';
+  if n <> 1 then raise exception 'client D should have an assignment waiting before signup, got %', n; end if;
+
+  select count(*) into n from public.clients
+   where id = '20000000-0000-4000-8000-00000000000d' and auth_user_id is null and status = 'invited';
+  if n <> 1 then raise exception 'client D should be unclaimed before signup'; end if;
+
+  -- signing up with a matching address binds, case insensitively
+  outcome := ptc.handle_new_auth_user('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Client.D@Example.COM', '{}'::jsonb);
+  if outcome <> 'client' then raise exception 'expected a client binding, got %', outcome; end if;
+
+  select count(*) into n from public.clients
+   where id = '20000000-0000-4000-8000-00000000000d'
+     and auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+     and status = 'active';
+  if n <> 1 then raise exception 'client D did not bind on the email match'; end if;
+
+  -- and no trainer was created for them
+  select count(*) into n from public.trainers where auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  if n <> 0 then raise exception 'an invited client was also made a trainer'; end if;
+
+  -- running it again changes nothing
+  outcome := ptc.handle_new_auth_user('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'client.d@example.com', '{}'::jsonb);
+  if outcome <> 'client_exists' then raise exception 'a repeat bind returned %', outcome; end if;
+  select count(*) into n from public.clients where auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  if n <> 1 then raise exception 'a repeat bind produced % client rows', n; end if;
+end $$;
+
+-- everything that was waiting is now theirs, read through the policies as themselves
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","role":"authenticated"}', true);
 
 do $$
-declare n bigint; v_id uuid; blocked boolean;
+declare n bigint;
 begin
-  -- before claiming, an unbound user sees nothing at all
   select count(*) into n from public.clients;
-  if n <> 0 then raise exception 'ISOLATION FAILURE: an unbound user sees % client rows', n; end if;
-
-  -- a valid unclaimed code binds the row
-  select public.claim_invite('CODE-DDD') into v_id;
-  if v_id is distinct from '20000000-0000-4000-8000-00000000000d' then
-    raise exception 'claim_invite returned %, expected client D', v_id;
-  end if;
-
-  -- and now they are that client, and only that client
-  select count(*) into n from public.clients;
-  if n <> 1 then raise exception 'ISOLATION FAILURE: after claiming, the client sees % rows, expected 1', n; end if;
+  if n <> 1 then raise exception 'a newly bound client sees % client rows, expected only their own', n; end if;
 
   select count(*) into n from public.clients where id = '20000000-0000-4000-8000-00000000000d';
-  if n <> 1 then raise exception 'after claiming, the client cannot see their own row'; end if;
+  if n <> 1 then raise exception 'a newly bound client cannot see their own row'; end if;
 
-  -- claiming did not open a door to anybody else
+  select count(*) into n from public.assignments;
+  if n <> 1 then raise exception 'the program assigned before signup did not reach the client, saw %', n; end if;
+
+  -- and the binding gave them nothing belonging to anybody else
   select count(*) into n from public.set_logs;
-  if n <> 0 then raise exception 'ISOLATION FAILURE: newly claimed client D sees % set_logs', n; end if;
+  if n <> 0 then raise exception 'ISOLATION FAILURE: a newly bound client reads % set_logs', n; end if;
 
-  select count(*) into n from public.trainers;
-  if n <> 0 then raise exception 'ISOLATION FAILURE: newly claimed client D read % trainer rows', n; end if;
-
-  -- a second code cannot be claimed by an account that already has a client row
-  blocked := false;
-  begin
-    perform public.claim_invite('CODE-AAA');
-  exception when others then blocked := true;
-  end;
-  if not blocked then raise exception 'a claimed account claimed a second invite code'; end if;
+  select count(*) into n from public.program_templates;
+  if n <> 0 then raise exception 'ISOLATION FAILURE: a newly bound client reads program_templates'; end if;
 end $$;
 
 reset role;
 
--- a different signed in user, on the code that was just taken
-set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","role":"authenticated"}', true);
+-- an already accepted row is never rebound, which is what stops a typo from handing months of
+-- history to whoever answers the second invite
+do $$
+declare outcome text; n bigint;
+begin
+  outcome := ptc.handle_new_auth_user('99999999-9999-4999-8999-999999999999', 'client.a@example.com', '{}'::jsonb);
+  select count(*) into n from public.clients
+   where id = '20000000-0000-4000-8000-00000000000a' and auth_user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  if n <> 1 then raise exception 'BINDING FAILURE: an accepted client row was rebound to a new account'; end if;
+  if outcome <> 'trainer' then
+    raise exception 'a signup on a taken address should fall through to a trainer, got %', outcome;
+  end if;
+end $$;
+
+-- ================================================================ signing up as a trainer
 
 do $$
-declare n bigint; blocked boolean;
+declare outcome text; n bigint; v_name text;
 begin
+  outcome := ptc.handle_new_auth_user('77777777-7777-4777-8777-777777777777', 'coach@example.com',
+                                      '{"display_name":"Coach Iqbal"}'::jsonb);
+  if outcome <> 'trainer' then raise exception 'expected a trainer, got %', outcome; end if;
+
+  select count(*), max(display_name) into n, v_name
+    from public.trainers where auth_user_id = '77777777-7777-4777-8777-777777777777';
+  if n <> 1 then raise exception 'a signup produced % trainer rows, expected exactly 1', n; end if;
+  if v_name <> 'Coach Iqbal' then raise exception 'display name came through as %', v_name; end if;
+
+  -- the same person signing up again produces nothing new
+  outcome := ptc.handle_new_auth_user('77777777-7777-4777-8777-777777777777', 'coach@example.com', '{}'::jsonb);
+  if outcome <> 'trainer_exists' then raise exception 'a repeat signup returned %', outcome; end if;
+
+  select count(*) into n from public.trainers where auth_user_id = '77777777-7777-4777-8777-777777777777';
+  if n <> 1 then raise exception 'a repeat signup produced % trainer rows, expected 1', n; end if;
+
+  -- with no display name in the metadata, the address carries it rather than a blank
+  outcome := ptc.handle_new_auth_user('88888888-8888-4888-8888-888888888888', 'sam.rivera@example.com', '{}'::jsonb);
+  select max(display_name) into v_name from public.trainers where auth_user_id = '88888888-8888-4888-8888-888888888888';
+  if v_name <> 'sam.rivera' then raise exception 'fallback display name was %', v_name; end if;
+
+  -- a signup with no address does nothing at all rather than creating a nameless trainer
+  outcome := ptc.handle_new_auth_user('66666666-6666-4666-8666-666666666666', null, '{}'::jsonb);
+  if outcome <> 'skipped' then raise exception 'a signup with no email returned %', outcome; end if;
+  select count(*) into n from public.trainers where auth_user_id = '66666666-6666-4666-8666-666666666666';
+  if n <> 0 then raise exception 'a signup with no email created a trainer'; end if;
+end $$;
+
+-- ================================================================ the binding is not writable
+--
+-- A trainer can fix a typo in an email, and cannot touch the binding it produced.
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}', true);
+
+do $$
+declare blocked boolean; n bigint;
+begin
+  -- fixing an address is allowed, since a typo has to be repairable
+  update public.clients set email = 'fixed@example.com'
+   where id = '20000000-0000-4000-8000-00000000000b';
+  select count(*) into n from public.clients where email = 'fixed@example.com';
+  if n <> 1 then raise exception 'a trainer cannot correct a client email'; end if;
+
+  -- unbinding is not, which is the whole protection
   blocked := false;
   begin
-    perform public.claim_invite('CODE-DDD');
+    update public.clients set auth_user_id = null where id = '20000000-0000-4000-8000-00000000000a';
   exception when others then blocked := true;
   end;
-  if not blocked then raise exception 'ISOLATION FAILURE: an already claimed invite code was claimed again'; end if;
+  if not blocked then raise exception 'BINDING FAILURE: a trainer cleared a client auth_user_id'; end if;
 
   blocked := false;
   begin
-    perform public.claim_invite('NO-SUCH-CODE');
+    update public.clients set auth_user_id = '11111111-1111-4111-8111-111111111111'
+     where id = '20000000-0000-4000-8000-00000000000a';
   exception when others then blocked := true;
   end;
-  if not blocked then raise exception 'an unknown invite code was accepted'; end if;
-
-  -- a failed claim leaves them bound to nothing and seeing nothing
-  select count(*) into n from public.clients;
-  if n <> 0 then raise exception 'ISOLATION FAILURE: a failed claim exposed % client rows', n; end if;
+  if not blocked then raise exception 'BINDING FAILURE: a trainer reassigned a client auth_user_id'; end if;
 end $$;
 
 reset role;
+
+-- ================================================================ timestamps are the server's
+--
+-- A browser clock is attacker controlled and conflict resolution is last write wins on
+-- updated_at, so a client that sends a year from now would win every future conflict on that
+-- row forever.
+
+do $$
+declare v_created timestamptz; v_updated timestamptz;
+begin
+  insert into public.exercises (id, created_at, updated_at, trainer_id, name, slug, primary_muscle,
+                                equipment, is_global, increment_kg)
+  values ('3f000000-0000-4000-8000-000000000001', '2099-01-01', '2099-01-01', null,
+          'Time Travel Press', 'time-travel-press', 'none', 'none', true, 2.5);
+
+  select created_at, updated_at into v_created, v_updated
+    from public.exercises where id = '3f000000-0000-4000-8000-000000000001';
+
+  if v_created > now() then raise exception 'a client supplied created_at of % survived', v_created; end if;
+  if v_updated > now() then raise exception 'a client supplied updated_at of % survived', v_updated; end if;
+
+  -- and created_at cannot be rewritten by a later update
+  update public.exercises set name = 'Renamed', created_at = '2099-01-01'
+   where id = '3f000000-0000-4000-8000-000000000001';
+  select created_at into v_created from public.exercises where id = '3f000000-0000-4000-8000-000000000001';
+  if v_created > now() then raise exception 'an update rewrote created_at to %', v_created; end if;
+end $$;
+
+-- logged_at stays client supplied, because it records when a set actually happened and offline
+-- logging is the entire reason it exists separately from created_at.
+do $$
+declare v_logged timestamptz; v_created timestamptz;
+begin
+  insert into public.set_logs (id, created_at, session_id, exercise_id, set_index, weight_kg, reps,
+                               is_warmup, logged_at, is_void, is_extra, device_id)
+  values ('5e000000-0000-4000-8000-000000000001', '2099-01-01', '40000000-0000-4000-8000-00000000000a',
+          '30000000-0000-4000-8000-000000000001', 7, 100, 5, false, '2026-01-01T09:00:00Z', false, false, 'dev');
+
+  select logged_at, created_at into v_logged, v_created
+    from public.set_logs where id = '5e000000-0000-4000-8000-000000000001';
+
+  if v_logged <> '2026-01-01T09:00:00Z'::timestamptz then
+    raise exception 'logged_at was overwritten, offline logging depends on it';
+  end if;
+  if v_created > now() then raise exception 'created_at on a set log was not stamped by the server'; end if;
+end $$;
 
 -- ================================================================ as anon
 -- Nobody is logged in. Every read in this product is somebody's private training data.
@@ -336,13 +465,13 @@ begin
   end;
   if n <> 0 then raise exception 'ISOLATION FAILURE: anon read % exercises', n; end if;
 
-  -- and cannot claim an invite without signing in first
+  -- and cannot reach the function that decides who a new auth user is
   blocked := false;
   begin
-    perform public.claim_invite('CODE-AAA');
+    perform ptc.handle_new_auth_user('55555555-5555-4555-8555-555555555555', 'client.d@example.com', '{}'::jsonb);
   exception when others then blocked := true;
   end;
-  if not blocked then raise exception 'ISOLATION FAILURE: anon claimed an invite code'; end if;
+  if not blocked then raise exception 'ISOLATION FAILURE: anon called the auth binding function'; end if;
 end $$;
 
 reset role;

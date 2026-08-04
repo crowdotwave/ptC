@@ -127,6 +127,7 @@ async function runAdapterCheck(storage) {
         supersedes_id: existingLog.id,
         is_void: true,
         is_extra: existingLog.is_extra === true,
+        rounds: existingLog.rounds ?? null,
         device_id: getDeviceId(),
       });
       await storage.put('set_logs', retraction);
@@ -153,7 +154,7 @@ async function runAdapterCheck(storage) {
         trainer_id: trainer.id,
         auth_user_id: null,
         display_name: 'Stray',
-        invite_code: 'STRAY123',
+        email: 'stray@example.com',
         status: 'active',
         weight_unit: 'kg',
         weight_lb: 185,

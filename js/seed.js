@@ -10,10 +10,11 @@
 
 import { makeRecord, newId, getDeviceId } from './storage.js';
 import { epley1rm } from './history.js';
+import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './program.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 5;
+const SEED_VERSION = 6;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -62,11 +63,10 @@ function isoDate(date) {
 
 const iso = (date) => date.toISOString();
 
-function inviteCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
-  let code = '';
-  for (let i = 0; i < 8; i += 1) code += alphabet[intBetween(0, alphabet.length - 1)];
-  return code;
+// Fake but well formed, and on a domain reserved by RFC 2606 so a stray invite from a
+// development database cannot reach a real inbox.
+function fakeEmail(name) {
+  return `${name.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`;
 }
 
 // name, slug, primary_muscle, equipment, working weight for a reference lifter in kg,
@@ -88,19 +88,43 @@ const EXERCISE_LIBRARY = [
   ['Walking Lunge', 'walking-lunge', 'glutes', 'dumbbell', 16, 2, false],
 ];
 
-// slug, target_sets, target_reps_low, target_reps_high, target_rpe, rest_seconds, notes
+// Written the way the trainer writes it, as spreadsheet cells, so the seed exercises the same
+// parsing the builder and the importer use. Columns match their sheet exactly:
+//   number, slug, adjust, sets, reps, load, rest, notes
 const DAY_ONE = [
-  ['barbell-bench-press', 3, 5, 8, 8, 180, 'Elbows tucked about 45 degrees. Pause on the chest.'],
-  ['barbell-row', 3, 6, 10, 8, 150, 'Chest stays down. Pull to the bottom of the ribcage.'],
-  ['overhead-press', 3, 6, 10, 8, 150, 'Squeeze the glutes, ribs down.'],
-  ['lat-pulldown', 3, 8, 12, 9, 90, 'Last set to two reps in reserve.'],
+  ['1', 'barbell-bench-press', 'BARBELL', '3', '5-8', '1-2 RIR', '180 SEC', 'Elbows tucked about 45 degrees. Pause on the chest.'],
+  ['2', 'barbell-row', 'BARBELL', '3', '6-10', '1-2 RIR', '150 SEC', 'Chest stays down. Pull to the bottom of the ribcage.'],
+  ['3', 'overhead-press', 'BARBELL', '3', '6-10', '1-2 RIR', '150 SEC', 'Squeeze the glutes, ribs down.'],
+  ['4', 'lat-pulldown', 'MED GRIP', '3', '8-12', '1 RIR', '90 SEC', 'Last set to two reps in reserve.'],
 ];
 
 const DAY_TWO = [
-  ['barbell-back-squat', 3, 5, 8, 8, 210, 'Full depth or stop the set. Depth over load.'],
-  ['romanian-deadlift', 3, 6, 10, 7.5, 150, 'Stop when the hamstrings run out, not when the bar hits the floor.'],
-  ['leg-press', 3, 10, 15, 9, 120, 'Slow on the way down, three seconds.'],
-  ['face-pull', 3, 12, 15, 8, 60, 'Light. This is for the shoulders staying healthy.'],
+  ['1', 'barbell-back-squat', 'BARBELL', '3', '5-8', '1-2 RIR', '210 SEC', 'Full depth or stop the set. Depth over load.'],
+  ['2', 'romanian-deadlift', 'DUMBELL', '3', '6-10', '1-2 RIR', '150 SEC', 'Stop when the hamstrings run out, not when the bar hits the floor.'],
+  ['3', 'leg-press', 'MACHINE', '3', '10-15', '1 RIR', '120 SEC', 'Slow on the way down, three seconds.'],
+  ['4', 'face-pull', 'CABLE', '3', '12-15', '1 RIR', '60 SEC', 'Light. This is for the shoulders staying healthy.'],
+];
+
+// The two day headers, matching the shape of a real sheet.
+const DAY_META = [
+  {
+    day_type: 'STRENGTH',
+    split: 'UPPER A',
+    warmup: {
+      mobility: ['BANDED ARM CIRCLES X10', 'MAX DEAD HANG X2'],
+      general: ['BANDED PULL APARTS X15', 'INCLINE PUSH UPS X10'],
+      specific: ['STRETCH/PRIME MUSCLES', 'PREPARE JOINTS', 'INCREASE BODY TEMP'],
+    },
+  },
+  {
+    day_type: 'STRENGTH',
+    split: 'LOWER A',
+    warmup: {
+      mobility: ['DEEP SQUAT HOLD 30 SEC', 'HIP WIPERS X10'],
+      general: ['BANDED WALKS X20', 'STANDING CALF RAISE X20'],
+      specific: ['PREPARE JOINTS', 'INCREASE BODY TEMP'],
+    },
+  },
 ];
 
 // Two trainers, each with their own clients and their own program. The second one exists so
@@ -308,7 +332,7 @@ export async function seed(storage, { force = false } = {}) {
         trainer_id: trainer.id,
         auth_user_id: null,
         display_name: spec.name,
-        invite_code: inviteCode(),
+        email: fakeEmail(spec.name),
         status: 'active',
         weight_unit: spec.unit,
       },
@@ -329,15 +353,33 @@ export async function seed(storage, { force = false } = {}) {
   );
   templates.push(template);
 
-  const trainerDays = [
-    makeRecord('template_days', { template_id: template.id, day_index: 0, name: 'Upper A' }, { created_at: seededAt }),
-    makeRecord('template_days', { template_id: template.id, day_index: 1, name: 'Lower A' }, { created_at: seededAt }),
-  ];
+  const trainerDays = [0, 1].map((dayIndex) =>
+    makeRecord(
+      'template_days',
+      {
+        template_id: template.id,
+        day_index: dayIndex,
+        name: DAY_META[dayIndex].split,
+        day_type: DAY_META[dayIndex].day_type,
+        split: DAY_META[dayIndex].split,
+        warmup: DAY_META[dayIndex].warmup,
+        comments: '',
+      },
+      { created_at: seededAt },
+    ),
+  );
   days.push(...trainerDays);
 
   const trainerItems = [];
   [DAY_ONE, DAY_TWO].forEach((plan, dayIndex) => {
-    plan.forEach(([slug, sets, repsLow, repsHigh, rpe, rest, notes], orderIndex) => {
+    plan.forEach(([number, slug, adjust, sets, reps, load, rest, notes], orderIndex) => {
+      // Parsed the same way a pasted spreadsheet row would be, so the seed and the importer
+      // cannot drift apart.
+      const parsedReps = parseReps(reps);
+      const parsedLoad = parseLoad(load);
+      const parsedSets = parseSets(sets);
+      const logging = inferLogging({ repsText: reps, loadText: load, sets: parsedSets });
+
       trainerItems.push(
         makeRecord(
           'template_items',
@@ -345,16 +387,22 @@ export async function seed(storage, { force = false } = {}) {
             day_id: trainerDays[dayIndex].id,
             exercise_id: bySlug[slug].id,
             order_index: orderIndex,
-            target_sets: sets,
-            target_reps_low: repsLow,
-            target_reps_high: repsHigh,
-            target_rpe: rpe,
-            rest_seconds: rest,
+            group_label: number,
+            variation: adjust,
+            target_sets: parsedSets,
+            target_reps_low: parsedReps.low,
+            target_reps_high: parsedReps.high,
+            target_reps_text: parsedReps.text,
+            target_load: parsedLoad.text,
+            target_rpe: parsedLoad.rpe,
+            rest_seconds: parseRest(rest),
             notes,
-            // Face pull is left blank on purpose, so the fixture contains the case where a
-            // trainer has not said and js/prefill.js has to answer.
-            starting_weight_kg:
-              slug === 'face-pull' ? null : roundTo(configBySlug[slug].base * 0.6, configBySlug[slug].step),
+            // Blank on purpose almost everywhere, because a real trainer prescribes effort and
+            // never a weight. js/prefill.js answers for the first session and history answers
+            // after that.
+            starting_weight_kg: null,
+            is_logged: logging.isLogged,
+            log_mode: logging.logMode,
           },
           { created_at: seededAt },
         ),
@@ -371,6 +419,10 @@ export async function seed(storage, { force = false } = {}) {
       id: day.id,
       day_index: day.day_index,
       name: day.name,
+      day_type: day.day_type,
+      split: day.split,
+      warmup: day.warmup,
+      comments: day.comments,
       items: trainerItems
         .filter((item) => item.day_id === day.id)
         .sort((a, b) => a.order_index - b.order_index)
@@ -458,6 +510,7 @@ export async function seed(storage, { force = false } = {}) {
               supersedes_id: null,
               is_void: false,
               is_extra: false,
+              rounds: null,
               device_id: deviceId,
             });
             setIndex += 1;
@@ -485,6 +538,7 @@ export async function seed(storage, { force = false } = {}) {
               supersedes_id: null,
               is_void: false,
               is_extra: false,
+              rounds: null,
               device_id: deviceId,
             });
           }
@@ -540,6 +594,7 @@ export async function seed(storage, { force = false } = {}) {
           supersedes_id: original.id,
           is_void: false, // a correction, not a retraction: the set happened, the count was wrong
           is_extra: false,
+          rounds: null,
           device_id: deviceId,
         },
         { created_at: iso(new Date(Date.parse(original.created_at) + 90 * 1000)) },

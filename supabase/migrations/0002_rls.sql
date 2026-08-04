@@ -19,7 +19,24 @@ revoke all on all functions in schema public from anon, authenticated;
 -- anon gets nothing at all. Every read in this product is somebody's private training data.
 grant usage on schema public to anon, authenticated;
 
-grant select, insert, update, delete on public.clients to authenticated;
+-- clients is column level on write, because auth_user_id is the binding between a person and
+-- their training and nothing reachable over the API may touch it. Only
+-- ptc.handle_new_auth_user sets it, running as the definer.
+--
+-- Without this, a trainer could null out a bound client's auth_user_id and the next signup on
+-- that email would bind to a row that already has months of history in it. With it, a binding
+-- is one way: set once by the database, never reopened.
+--
+-- created_at and updated_at are grantable because the timestamp trigger overwrites whatever
+-- arrives, so the adapter can keep sending them and they are simply ignored.
+--
+-- NOTE for step 4: the Supabase remote adapter must omit auth_user_id when writing a client
+-- row, or the insert fails on the column grant rather than silently dropping the value.
+grant select, delete on public.clients to authenticated;
+grant insert (id, created_at, updated_at, trainer_id, display_name, email, status, weight_unit)
+  on public.clients to authenticated;
+grant update (updated_at, display_name, email, status, weight_unit)
+  on public.clients to authenticated;
 grant select, insert, update, delete on public.exercises to authenticated;
 grant select, insert, update, delete on public.program_templates to authenticated;
 grant select, insert, update, delete on public.template_days to authenticated;
@@ -56,7 +73,7 @@ grant update (updated_at, display_name, brand_color, logo_url, weight_unit)
 -- hole in the thing it exists to protect: a caller who can create a function or table in a
 -- schema earlier on the path can substitute their own and have it run as the owner.
 
-create schema if not exists ptc;
+-- Created in 0001, because the timestamp trigger lives in it.
 revoke all on schema ptc from public, anon;
 grant usage on schema ptc to authenticated;
 

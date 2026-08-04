@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 5;
+export const DB_VERSION = 7;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -126,6 +126,67 @@ const MIGRATIONS = [
       rewriteRows(tx, 'assignments', (row) =>
         row.deload_weeks === undefined ? { ...row, deload_weeks: [] } : row,
       );
+    },
+  },
+  {
+    version: 6,
+    describe: 'replace clients.invite_code with clients.email, the Supabase auth binding key',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // A dropped column has to actually leave the row, not just stop being read. The
+      // validator rejects unknown columns, so a leftover invite_code would fail the next
+      // write of any row that still carried it.
+      rewriteRows(tx, 'clients', (row) => {
+        if (row.email !== undefined && row.invite_code === undefined) return row;
+        const { invite_code: _dropped, ...rest } = row;
+        return {
+          ...rest,
+          // No invite code maps to an address, so an unmigrated row gets a placeholder that is
+          // obviously not deliverable rather than a guess that might reach a real person.
+          email: row.email ?? `unmigrated+${row.id}@invalid`,
+        };
+      });
+    },
+  },
+  {
+    version: 7,
+    describe: 'carry what a real trainer actually writes: day labels, warm ups, effort targets',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+
+      rewriteRows(tx, 'template_days', (row) =>
+        row.warmup === undefined
+          ? {
+              ...row,
+              day_type: row.day_type ?? null,
+              split: row.split ?? null,
+              warmup: row.warmup ?? { mobility: [], general: [], specific: [] },
+              comments: row.comments ?? '',
+            }
+          : row,
+      );
+
+      // Existing seeded rows were all plain sets and reps, so they migrate to the normal
+      // logging mode and keep the numbers they already had.
+      rewriteRows(tx, 'template_items', (row) => {
+        if (row.log_mode !== undefined) return row;
+        const low = row.target_reps_low ?? null;
+        const high = row.target_reps_high ?? null;
+        return {
+          ...row,
+          group_label: row.group_label ?? null,
+          variation: row.variation ?? null,
+          target_reps_text:
+            row.target_reps_text ?? (low === null ? null : high && high !== low ? `${low}-${high}` : `${low}`),
+          target_load: row.target_load ?? (row.target_rpe === null ? null : `RPE ${row.target_rpe}`),
+          is_logged: row.is_logged ?? true,
+          log_mode: row.log_mode ?? 'weight_reps',
+        };
+      });
+
+      // reps becomes nullable and rounds appears. Nothing already on disk has either state,
+      // so this only widens what a future row may hold.
+      rewriteRows(tx, 'set_logs', (row) => (row.rounds === undefined ? { ...row, rounds: null } : row));
     },
   },
 ];

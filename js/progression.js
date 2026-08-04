@@ -118,12 +118,19 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
       const week = block ? weekIndexOf(session.started_at, block.startsOn) : null;
       const prescribedRows = rows.filter((r) => !r.is_extra);
 
+      // A carry or a sled records a weight and no reps, and an AMRAP records rounds. Neither
+      // has a rep count, so neither can contribute to volume or to an estimated 1RM without
+      // inventing a number. They stay in history and out of the arithmetic.
+      const counted = (r) => Number.isFinite(r.reps) && r.reps > 0;
+
       // Extra sets are counted and shown, never folded into the number that carries a claim.
-      const prescribed = prescribedRows.reduce((t, r) => t + r.weight_kg * r.reps, 0);
-      const extra = rows.filter((r) => r.is_extra).reduce((t, r) => t + r.weight_kg * r.reps, 0);
+      const prescribed = prescribedRows.filter(counted).reduce((t, r) => t + r.weight_kg * r.reps, 0);
+      const extra = rows
+        .filter((r) => r.is_extra && counted(r))
+        .reduce((t, r) => t + r.weight_kg * r.reps, 0);
 
       // Prescribed working sets only, so a max single cannot be farmed for a better line.
-      const forStrength = prescribedRows.filter((r) => r.reps >= 1 && r.reps <= MAX_REPS_FOR_E1RM);
+      const forStrength = prescribedRows.filter((r) => counted(r) && r.reps <= MAX_REPS_FOR_E1RM);
       const best = forStrength.reduce(
         (top, r) => {
           const value = epley1rm(r.weight_kg, r.reps);
@@ -272,6 +279,8 @@ function buildRepsAtLoad(blockPoints) {
   for (const point of blockPoints) {
     if (point.isDeload) continue;
     for (const row of point.rows) {
+      // Same rule as volume: no rep count, no line on this chart.
+      if (!Number.isFinite(row.reps) || row.reps <= 0) continue;
       if (!byLoad.has(row.weight_kg)) byLoad.set(row.weight_kg, new Map());
       const perSession = byLoad.get(row.weight_kg);
       // The top set of that load in that session, which is what a progression reads.

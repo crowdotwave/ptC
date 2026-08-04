@@ -17,6 +17,7 @@ import { initActor } from './js/actor.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
+import { targetLine } from './js/program.js';
 
 const KG_PER_LB = 0.45359237;
 
@@ -42,6 +43,8 @@ const ui = {
   typeToggle: el('type-toggle'),
   skip: el('skip'),
   end: el('end'),
+  dayPicker: el('day-picker'),
+  repsUnit: el('reps-unit'),
   addSet: el('add-set'),
   stepperWeight: el('stepper-weight'),
   stepperReps: el('stepper-reps'),
@@ -168,6 +171,11 @@ async function buildPlan(storage, day, sessions) {
   const plan = [];
 
   for (const item of [...day.items].sort((a, b) => a.order_index - b.order_index)) {
+    // Cardio intervals and anything else the trainer marked as not logged are shown on the
+    // day, never stepped through. Recording a number nobody measured is worse than recording
+    // nothing.
+    if (item.is_logged === false) continue;
+
     const rows = await storage.query('set_logs', { exercise_id: item.exercise_id });
     const mine = rows.filter((row) => sessionStartById.has(row.session_id));
     const previous = lastPerformance(mine, sessionStartById);
@@ -181,6 +189,7 @@ async function buildPlan(storage, day, sessions) {
           setIndex,
           isWarmup: row.is_warmup,
           isExtra: false,
+          logMode: item.log_mode ?? 'weight_reps',
           weightKg: row.weight_kg,
           reps: row.reps,
           lastWeightKg: row.weight_kg,
@@ -205,6 +214,7 @@ async function buildPlan(storage, day, sessions) {
         setIndex,
         isWarmup: false,
         isExtra: false,
+        logMode: item.log_mode ?? 'weight_reps',
         weightKg: opening.kg,
         reps: item.target_reps_low,
         lastWeightKg: null,
@@ -256,13 +266,12 @@ function render() {
       ? `Extra set, ${position} of ${siblings.length}`
       : `Set ${position} of ${siblings.length}`;
 
-  const high = entry.item.target_reps_high;
-  const repRange = high && high !== entry.item.target_reps_low
-    ? `${entry.item.target_reps_low} to ${high} reps`
-    : `${entry.item.target_reps_low} reps`;
+  // Built from the trainer's own cells rather than reassembled from numbers, so a target of
+  // '50 FT' or '1-2 RIR' reaches the client as written.
+  const written = targetLine(entry.item);
   ui.target.textContent = entry.isWarmup
     ? 'Warmup. Move well, save it for the working sets.'
-    : `Target ${repRange}${entry.item.target_rpe ? `, RPE ${entry.item.target_rpe}` : ''}`;
+    : written || 'No target set.';
 
   ui.lastTime.textContent =
     entry.lastWeightKg === null
@@ -274,6 +283,13 @@ function render() {
 }
 
 function renderValues() {
+  const mode = currentEntry()?.logMode ?? 'weight_reps';
+
+  // A carry has a load and no reps. An AMRAP has a load and rounds. The stepper changes what
+  // it counts rather than pretending everything is sets and reps.
+  ui.stepperReps.hidden = mode === 'weight_only';
+  ui.repsUnit.textContent = mode === 'rounds' ? 'rounds' : 'reps';
+
   ui.weightValue.textContent = formatWeight(state.weightKg);
   ui.weightUnit.textContent = unit();
   ui.repsValue.textContent = String(state.reps);
@@ -285,9 +301,13 @@ function renderValues() {
     entry && entry.lastWeightKg !== null && entry.lastWeightKg === state.weightKg && entry.lastReps === state.reps;
 
   ui.logLabel.textContent = 'Log set';
-  ui.logSub.textContent = `${formatWeight(state.weightKg)} ${unit()} for ${state.reps}${
-    unchanged ? ', same as last time' : ''
-  }`;
+  const suffix = unchanged ? ', same as last time' : '';
+  ui.logSub.textContent =
+    mode === 'weight_only'
+      ? `${formatWeight(state.weightKg)} ${unit()}${suffix}`
+      : mode === 'rounds'
+        ? `${formatWeight(state.weightKg)} ${unit()}, ${state.reps} rounds${suffix}`
+        : `${formatWeight(state.weightKg)} ${unit()} for ${state.reps}${suffix}`;
 }
 
 function renderUndo() {
@@ -312,7 +332,9 @@ function renderDone() {
   const working = state.logged.filter((row) => !row.isWarmup);
   const sets = working.length;
   const extra = working.filter((row) => row.isExtra).length;
-  const volume = working.reduce((total, row) => total + row.weightKg * row.reps, 0);
+  const volume = working
+    .filter((row) => row.logMode === 'weight_reps')
+    .reduce((total, row) => total + row.weightKg * row.reps, 0);
 
   ui.doneTitle.textContent = sets ? 'Session logged.' : 'Nothing logged yet.';
   ui.doneStat.textContent = sets
@@ -395,7 +417,10 @@ function logSet() {
     exercise_id: entry.item.exercise_id,
     set_index: entry.setIndex,
     weight_kg: state.weightKg,
-    reps: state.reps,
+    // A carry records a load and no reps. An AMRAP records rounds instead. Nothing invents a
+    // rep count, and everything downstream skips a row that has none.
+    reps: entry.logMode === 'weight_reps' ? state.reps : entry.logMode === 'rounds' ? null : null,
+    rounds: entry.logMode === 'rounds' ? state.reps : null,
     rpe: null,
     is_warmup: entry.isWarmup,
     logged_at: new Date().toISOString(),
@@ -417,6 +442,7 @@ function logSet() {
     setIndex: entry.setIndex,
     weightKg: state.weightKg,
     reps: state.reps,
+    logMode: entry.logMode,
     isWarmup: entry.isWarmup,
     isExtra: entry.isExtra === true,
     // Undo has to put this back. A record that was taken back must stop being a record, or
@@ -474,7 +500,8 @@ function undoLast() {
     exercise_id: last.exerciseId,
     set_index: last.setIndex,
     weight_kg: last.weightKg,
-    reps: last.reps,
+    reps: last.logMode === 'weight_reps' ? last.reps : null,
+    rounds: last.logMode === 'rounds' ? last.reps : null,
     rpe: null,
     is_warmup: last.isWarmup,
     logged_at: new Date().toISOString(),
@@ -685,6 +712,62 @@ function bindHold(button, apply) {
   });
 }
 
+/**
+ * Every day in the program, with the suggested one preselected.
+ *
+ * A five day rotation does not get done in order. Somebody skips legs on a Monday and does it
+ * Thursday, and guessing from the last session with no way to override it makes the app wrong
+ * in a way the client cannot fix.
+ */
+function renderDayPicker(snapshot, sessions) {
+  const days = [...snapshot.days].sort((a, b) => a.day_index - b.day_index);
+  ui.dayPicker.innerHTML = days
+    .map((day) => {
+      const on = day.day_index === state.day.day_index;
+      const label = day.split || day.name;
+      const type = day.day_type ? `<span class="daypicker__type">${escapeText(day.day_type)}</span>` : '';
+      return (
+        `<button type="button" class="button-secondary daypicker__item${on ? ' is-on' : ''}" ` +
+        `data-day="${day.day_index}"${on ? ' aria-current="true"' : ''}>${type}${escapeText(label)}</button>`
+      );
+    })
+    .join('');
+}
+
+const escapeText = (v) =>
+  String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+/** Switching days mid session would orphan what is already logged, so it is only offered
+ *  before the first set. */
+async function chooseDay(dayIndex) {
+  if (state.logged.length) {
+    showNotice('You have already logged a set. Finish or end this session first.');
+    return;
+  }
+  const days = [...state.assignment.snapshot.days].sort((a, b) => a.day_index - b.day_index);
+  const picked = days.find((d) => d.day_index === Number(dayIndex));
+  if (!picked || picked.day_index === state.day.day_index) return;
+
+  state.day = picked;
+  const sessions = await state.storage.query(
+    'sessions',
+    { client_id: state.client.id },
+    { orderBy: 'started_at' },
+  );
+  state.plan = await buildPlan(state.storage, picked, sessions);
+  state.cursor = 0;
+  const first = state.plan[0];
+  if (first) {
+    state.weightKg = first.weightKg;
+    state.reps = first.reps;
+  }
+  ui.dayName.textContent = `· ${picked.name}`;
+  renderDayPicker(state.assignment.snapshot, sessions);
+  clearNotice();
+  stopRest();
+  render();
+}
+
 function wire() {
   bindHold(ui.weightUp, () => adjustWeight(1));
   bindHold(ui.weightDown, () => adjustWeight(-1));
@@ -695,6 +778,10 @@ function wire() {
   ui.skip.addEventListener('click', skipExercise);
   ui.end.addEventListener('click', endSession);
   ui.addSet.addEventListener('click', addSet);
+  ui.dayPicker.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-day]');
+    if (button) chooseDay(button.dataset.day);
+  });
 
   ui.typeToggle.addEventListener('click', () => {
     if (state.typing) {
@@ -756,6 +843,7 @@ async function main() {
 
   ui.clientName.textContent = client.display_name;
   ui.dayName.textContent = `· ${state.day.name}`;
+  renderDayPicker(snapshot, sessions);
   ui.weightInput.step = unit() === 'lb' ? '5' : '2.5';
 
   wire();

@@ -11,6 +11,7 @@ import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js
 import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_MS } from './js/hold.js';
 import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
+import { parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine } from './js/program.js';
 
 const results = [];
 
@@ -51,6 +52,8 @@ function row(overrides = {}) {
     logged_at: '2026-07-01T18:00:00.000Z',
     supersedes_id: null,
     is_void: false,
+    is_extra: false,
+    rounds: null,
     device_id: 'test',
     ...overrides,
   };
@@ -680,6 +683,138 @@ test('one question per week, not one per session', () => {
   ];
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
   eq(suggestDeloadWeeks(p).length, 1);
+});
+
+// ------------------------------------------------------------------ reading a trainer's sheet
+//
+// Fixtures are real cells from a real workbook: 61 exercise rows across 10 day blocks. The
+// counts quoted are what those rules currently cover.
+
+test('a plain rep count and a rep range both parse', () => {
+  eq(parseReps('8'), { low: 8, high: 8, text: '8' });
+  eq(parseReps('6-8'), { low: 6, high: 8, text: '6-8' });
+  eq(parseReps('12-15'), { low: 12, high: 15, text: '12-15' });
+});
+
+// 16 of 61 rows. A distance or a duration has no rep count, and none is invented for it.
+test('a distance or a duration keeps its text and yields no numbers', () => {
+  for (const cell of ['50 FT', '500M', '400M', '200M', '100M', '25M', '10 MINS']) {
+    const r = parseReps(cell);
+    eq(r.low, null, `${cell} produced a rep count`);
+    eq(r.high, null);
+    eq(r.text, cell, 'the trainer text survives verbatim');
+  }
+});
+
+test('NA in the reps cell is nothing at all', () => {
+  eq(parseReps('N/A'), { low: null, high: null, text: null });
+  eq(parseReps('NA'), { low: null, high: null, text: null });
+  eq(parseReps(''), { low: null, high: null, text: null });
+});
+
+test('rest parses seconds and minutes, and NA is null', () => {
+  eq(parseRest('60 SEC'), 60);
+  eq(parseRest('90 SEC'), 90);
+  eq(parseRest('45 SEC'), 45);
+  eq(parseRest('2 MIN'), 120);
+  eq(parseRest('NA'), null);
+  eq(parseRest('N/A'), null);
+  eq(parseRest(''), null);
+});
+
+// RIR is reps in reserve, so RPE is ten minus it. 37 of 61 rows are RIR.
+test('RIR converts to RPE and a range takes the harder end', () => {
+  eq(parseLoad('1 RIR'), { text: '1 RIR', rpe: 9 });
+  eq(parseLoad('2 RIR'), { text: '2 RIR', rpe: 8 });
+  eq(parseLoad('3 RIR'), { text: '3 RIR', rpe: 7 });
+  eq(parseLoad('1-2 RIR'), { text: '1-2 RIR', rpe: 9 }, 'the top of the effort range');
+});
+
+// The whole reason target_load exists. None of these is a number.
+test('a load that is not an effort keeps its words and gets no RPE', () => {
+  for (const cell of ['BW', 'ASSISTED BW', 'MODERATE', '2 PLATES', '5-7 SPEED', '3 MINS', '1 MINUTE']) {
+    const r = parseLoad(cell);
+    eq(r.text, cell);
+    eq(r.rpe, null, `${cell} was given an RPE it does not have`);
+  }
+});
+
+test('sets parses a count and NA is null', () => {
+  eq(parseSets('3'), 3);
+  eq(parseSets('4'), 4);
+  eq(parseSets('NA'), null);
+  eq(parseSets('N/A'), null);
+  eq(parseSets(''), null);
+});
+
+test('a lettered set number marks a superset or a circuit', () => {
+  eq(parseGroup('1'), { label: '1', group: '1', isGrouped: false });
+  eq(parseGroup('1A'), { label: '1A', group: '1', isGrouped: true });
+  eq(parseGroup('2B'), { label: '2B', group: '2', isGrouped: true });
+  eq(parseGroup('3C'), { label: '3C', group: '3', isGrouped: true });
+  ok(parseGroup('1A').group === parseGroup('1B').group, '1A and 1B are one group');
+});
+
+test('a rep count means the normal weight and reps', () => {
+  eq(inferLogging({ repsText: '6-8', loadText: '1-2 RIR', sets: 4 }),
+     { isLogged: true, logMode: 'weight_reps' });
+});
+
+// A carry or a sled: the load is the whole point and there are no reps to count.
+test('a distance with a load logs weight only', () => {
+  eq(inferLogging({ repsText: '50 FT', loadText: '2 PLATES', sets: 3 }),
+     { isLogged: true, logMode: 'weight_only' });
+  eq(inferLogging({ repsText: '400M', loadText: 'N/A', sets: 3 }),
+     { isLogged: true, logMode: 'weight_only' });
+});
+
+// A running interval has no sets, no reps, and a duration in the Load cell. There is nothing
+// to measure, so nothing is asked for.
+test('a cardio interval is not logged at all', () => {
+  eq(inferLogging({ repsText: 'N/A', loadText: '3 MINS', sets: null }),
+     { isLogged: false, logMode: 'weight_reps' });
+  eq(inferLogging({ repsText: 'N/A', loadText: '1 MINUTE', sets: null }),
+     { isLogged: false, logMode: 'weight_reps' });
+});
+
+test('the target line shows what the trainer wrote, not a reassembly of it', () => {
+  eq(targetLine({ target_sets: 4, target_reps_text: '6-8', target_load: '1-2 RIR', rest_seconds: 60 }),
+     '4 sets, 6-8, 1-2 RIR, 60s rest');
+  eq(targetLine({ target_sets: 3, target_reps_text: '50 FT', target_load: '2 PLATES', rest_seconds: null }),
+     '3 sets, 50 FT, 2 PLATES');
+  eq(targetLine({ target_sets: null, target_reps_text: '10 MINS', target_load: '5-7 SPEED', rest_seconds: null }),
+     '10 MINS, 5-7 SPEED');
+});
+
+// ------------------------------------------------------------------ logging what has no reps
+
+test('a weight only set contributes no volume and no estimated 1RM', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: null }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].prescribed, 500, 'only the row with reps counted');
+  eq(p.points[0].e1rm, epley1rm(100, 5), 'the repless row cannot set a strength number');
+});
+
+test('an AMRAP round count never becomes a rep count', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [row({ session_id: 's1', weight_kg: 24, reps: null, rounds: 5 })];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].prescribed, 0, 'rounds are not reps and do not multiply into volume');
+  eq(p.points[0].e1rm, null);
+});
+
+test('a repless row does not appear as a load line', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: null }),
+    row({ session_id: 's2', weight_kg: 60, reps: null }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.repsAtLoad.lines, [], 'reps at load has nothing to draw without reps');
 });
 
 // ------------------------------------------------------------------ report

@@ -82,9 +82,12 @@ trainers
 
 clients
   trainer_id uuid -> trainers.id
-  auth_user_id uuid null      -- null until the client accepts their invite
+  auth_user_id uuid null      -- null until they accept. Set only by the auth trigger,
+                              -- never writable over the API, so a binding is one way
   display_name text
-  invite_code text unique
+  email text unique           -- the binding key. Supabase invites here and the trigger
+                              -- matches on it, so a client can be created, programmed,
+                              -- and assigned before that person has ever signed up
   status text                 -- 'invited' | 'active' | 'archived'
   weight_unit text
 

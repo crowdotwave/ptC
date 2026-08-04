@@ -5,10 +5,14 @@
 --
 -- Conventions carried over from CLAUDE.md:
 --   every id is a client generated uuid, so no column has a default and there are no serials
---   created_at is when the row was written, set by the client, defaulted only as a safety net
+--   created_at and updated_at are set by the database and are not writable by any client
 --   updated_at exists on every mutable table because conflict resolution is last write wins
 --   set_logs is append only and therefore has no updated_at
 --   weight is always kilograms, money is always integer cents
+
+-- The helper schema is created here rather than in 0002, because the timestamp trigger below
+-- lives in it and this file has to be runnable on its own.
+create schema if not exists ptc;
 
 -- No extensions are needed. pgcrypto would be the obvious one, and it is deliberately absent:
 -- nothing here generates a uuid server side, because every id comes from crypto.randomUUID()
@@ -37,15 +41,33 @@ create table public.clients (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   trainer_id uuid not null references public.trainers (id) on delete cascade,
+  -- Null until the person accepts their invite. Set only by ptc.handle_new_auth_user, never
+  -- by the app: the update grant below excludes this column, so a bound row cannot be
+  -- unbound and handed to somebody else.
   auth_user_id uuid unique,
   display_name text not null,
-  invite_code text not null unique,
+  -- The binding key. Supabase sends the invite here and the auth trigger matches on it, which
+  -- is what lets a trainer create, program, and assign a client before that person has ever
+  -- signed up.
+  email text not null,
   status text not null check (status in ('invited', 'active', 'archived')),
   weight_unit text not null check (weight_unit in ('kg', 'lb'))
 );
 
 create index clients_trainer_id_idx on public.clients (trainer_id);
 create index clients_status_idx on public.clients (status);
+
+-- Globally unique, case insensitively, and this is a real product decision rather than a
+-- technicality. ptc.current_client_id() resolves one auth user to one client row, so more than
+-- one match would make "which client am I" nondeterministic and a person would silently see
+-- one trainer's program and not the other's. Making the invariant true at the database is
+-- better than assuming it in a resolver.
+--
+-- The cost: one person cannot be a client of two trainers on this deployment. Reversing that
+-- later means dropping this index, adding unique (trainer_id, lower(email)), and teaching the
+-- resolver to return a set instead of a row.
+create unique index clients_email_key on public.clients (lower(email));
+create index clients_email_idx on public.clients (email);
 
 -- ---------------------------------------------------------------- exercises
 
@@ -215,13 +237,72 @@ create index payments_trainer_id_idx on public.payments (trainer_id);
 create index payments_client_id_idx on public.payments (client_id);
 create index payments_paid_on_idx on public.payments (paid_on);
 
--- ---------------------------------------------------------------- notes on what is absent
+-- ---------------------------------------------------------------- server side timestamps
 --
--- There is deliberately no updated_at trigger. Conflict resolution is last write wins on
--- updated_at, and the value that has to win is the one the client wrote when the edit actually
--- happened, possibly hours before it synced. A trigger stamping now() on arrival would make
--- every sync look like the newest edit and would quietly reverse the rule.
+-- created_at and updated_at are stamped by the database and whatever the client sent is
+-- discarded. A browser clock is attacker controlled, and conflict resolution is last write
+-- wins on updated_at, so a client that sends a timestamp a year in the future wins every
+-- future conflict on that row, permanently. Nothing else in the app can undo that.
+--
+-- This changes what last write wins means, and the change is deliberate. It is now the last
+-- write to reach the server, not the last edit made on a device. An edit made offline three
+-- hours ago that syncs now beats an edit made ten minutes ago that already synced. That is
+-- the price of not trusting a clock we do not control, and it is the right side to err on.
+--
+-- logged_at on set_logs stays client supplied, because it records when a set actually
+-- happened and offline logging is the whole point of it. It is a domain fact, not an ordering
+-- key, and nothing resolves a conflict with it.
+--
+-- Written as a trigger rather than as a revoked column grant so that a client sending the
+-- columns is harmless rather than a permission error. The adapter stamps them locally for its
+-- own offline ordering and does not need to learn to strip them before a write.
+
+create or replace function ptc.stamp_row() returns trigger
+  language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.created_at := now();
+    if to_jsonb(new) ? 'updated_at' then
+      new.updated_at := now();
+    end if;
+  else
+    -- created_at is immutable. An update cannot rewrite when the row first appeared.
+    new.created_at := old.created_at;
+    if to_jsonb(new) ? 'updated_at' then
+      new.updated_at := now();
+    end if;
+  end if;
+  return new;
+end $$;
+
+create trigger stamp_trainers before insert or update on public.trainers
+  for each row execute function ptc.stamp_row();
+create trigger stamp_clients before insert or update on public.clients
+  for each row execute function ptc.stamp_row();
+create trigger stamp_exercises before insert or update on public.exercises
+  for each row execute function ptc.stamp_row();
+create trigger stamp_program_templates before insert or update on public.program_templates
+  for each row execute function ptc.stamp_row();
+create trigger stamp_template_days before insert or update on public.template_days
+  for each row execute function ptc.stamp_row();
+create trigger stamp_template_items before insert or update on public.template_items
+  for each row execute function ptc.stamp_row();
+create trigger stamp_assignments before insert or update on public.assignments
+  for each row execute function ptc.stamp_row();
+create trigger stamp_sessions before insert or update on public.sessions
+  for each row execute function ptc.stamp_row();
+create trigger stamp_payments before insert or update on public.payments
+  for each row execute function ptc.stamp_row();
+
+-- set_logs is append only, so insert only. It has no updated_at to stamp.
+create trigger stamp_set_logs before insert on public.set_logs
+  for each row execute function ptc.stamp_row();
+
+-- ---------------------------------------------------------------- notes on what is absent
 --
 -- There is deliberately no default on any id. Ids come from crypto.randomUUID() on the device,
 -- which is what makes an offline write idempotent on replay. A default would paper over a
--- client bug by inventing a second id for a row that already had one.
+-- client bug by inventing a second id for a row that already had one. Idempotency rests on
+-- ids, not on timestamps, which is why stamping the timestamps server side does not disturb
+-- it: a replayed insert collides on the primary key exactly as before.

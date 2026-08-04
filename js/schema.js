@@ -38,12 +38,17 @@ export const TABLES = {
 
   clients: {
     appendOnly: false,
-    indexes: ['trainer_id', 'auth_user_id', 'invite_code', 'status'],
+    indexes: ['trainer_id', 'auth_user_id', 'email', 'status'],
     fields: {
       trainer_id: { type: UUID, ref: 'trainers' },
+      // Null until the person accepts. Set only by the database, on an email match with a new
+      // auth user, and never writable by the app. That is what stops a bound row from being
+      // reopened and rebound to somebody else.
       auth_user_id: { type: UUID, nullable: true },
       display_name: { type: TEXT },
-      invite_code: { type: TEXT },
+      // The binding key. Supabase sends the invite here and the trigger matches on it, so a
+      // client row can exist, be programmed, and be assigned long before anyone signs up.
+      email: { type: TEXT },
       status: { type: TEXT, enum: ['invited', 'active', 'archived'] },
       weight_unit: { type: TEXT, enum: ['kg', 'lb'] },
     },
@@ -86,6 +91,17 @@ export const TABLES = {
       template_id: { type: UUID, ref: 'program_templates' },
       day_index: { type: INT },
       name: { type: TEXT },
+      // The two labels on the trainer's own sheet: STRENGTH, CARDIO, ENDURANCE, ATHLETIC,
+      // HIGH VOLUME, and the split beside it. Kept as free text because it is the trainer's
+      // vocabulary, not ours, and a fixed enum would start rejecting their words.
+      day_type: { type: TEXT, nullable: true },
+      split: { type: TEXT, nullable: true },
+      // The three warm up columns, shown and never logged. Nobody is ticking off a tibia
+      // raise, so this is instruction rather than data.
+      // { mobility: [], general: [], specific: [] }
+      warmup: { type: JSONB },
+      // The Comments block under each day. Coaching cues, one line each.
+      comments: { type: TEXT },
     },
   },
 
@@ -96,12 +112,35 @@ export const TABLES = {
       day_id: { type: UUID, ref: 'template_days' },
       exercise_id: { type: UUID, ref: 'exercises' },
       order_index: { type: INT },
-      target_sets: { type: INT },
-      target_reps_low: { type: INT },
+      // The trainer's own set number. '1', '2', but also '1A', '1B', '2C' where a superset or
+      // a circuit groups rows together. Rows sharing a leading number are one group.
+      group_label: { type: TEXT, nullable: true },
+      // The Adjust column: BARBELL, CABLE, MED GRIP, SIT/STAND, TREAD, SPEED, HEIGHT. A
+      // modifier on the exercise for this program, not a property of the exercise itself.
+      variation: { type: TEXT, nullable: true },
+      // Nullable because the sheet says NA on 14 rows of 61: the stair master, the cardio
+      // intervals, and every row of a six minute AMRAP.
+      target_sets: { type: INT, nullable: true },
+      // Nullable for the same reason, plus the 16 rows whose Reps cell is a distance or a
+      // duration rather than a count. target_reps_text always carries what the trainer typed.
+      target_reps_low: { type: INT, nullable: true },
       target_reps_high: { type: INT, nullable: true },
+      target_reps_text: { type: TEXT, nullable: true },
+      // What the trainer actually prescribes. Across 61 real rows this was RIR on 37 of them
+      // and never once a weight, so the numeric target_rpe is derived where it can be and the
+      // text is what gets shown.
+      target_load: { type: TEXT, nullable: true },
       target_rpe: { type: NUMERIC, nullable: true },
-      rest_seconds: { type: INT },
+      rest_seconds: { type: INT, nullable: true },
       notes: { type: TEXT },
+      // Whether the client logs this row at all. False for cardio intervals and anything else
+      // where a number would be invented rather than measured.
+      is_logged: { type: BOOL },
+      // How it is logged when it is.
+      //   weight_reps   the normal case, a weight and a rep count
+      //   weight_only   a carry or a sled, where the load matters and reps do not apply
+      //   rounds        an AMRAP, where the client records rounds completed and the load used
+      log_mode: { type: TEXT, enum: ['weight_reps', 'weight_only', 'rounds'] },
       // What to put on the bar the first time this client does this lift, set by the trainer
       // when building the program. Used only when the client has no history for the exercise,
       // and never again after that. Null means the trainer did not say, which is a real answer
@@ -156,7 +195,12 @@ export const TABLES = {
       set_index: { type: INT },
       // Always kilograms. Pounds are a display conversion only.
       weight_kg: { type: NUMERIC },
-      reps: { type: INT },
+      // Null on a carry or a sled, where the load is the whole point and there are no reps to
+      // count. Anything that computes volume or an estimated 1RM skips these rows rather than
+      // inventing a number for them.
+      reps: { type: INT, nullable: true },
+      // Rounds completed in an AMRAP block. Null everywhere else.
+      rounds: { type: INT, nullable: true },
       rpe: { type: NUMERIC, nullable: true },
       is_warmup: { type: BOOL },
       logged_at: { type: TS },

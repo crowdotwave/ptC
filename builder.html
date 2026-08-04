@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Programs</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="screen screen--scroll screen--wide">
+      <header class="context">
+        <p class="context__who">
+          <span id="trainer-name">Loading</span>
+          <a class="navlink" href="trainer.html">Clients</a>
+        </p>
+        <h1 class="context__exercise" id="view-title">Programs</h1>
+        <p class="context__target" id="view-note">&nbsp;</p>
+      </header>
+
+      <section id="list-view">
+        <div class="secondary">
+          <button type="button" class="button-secondary" id="new-program">New program</button>
+        </div>
+        <ul class="clientlist" id="program-list"></ul>
+      </section>
+
+      <section id="edit-view" hidden>
+        <p class="backlink"><a href="#" id="back-to-list">Back to programs</a></p>
+
+        <p class="suggest" id="live-warning" hidden></p>
+
+        <div class="field">
+          <label class="field__label" for="program-name">Program name</label>
+          <input class="field__input" id="program-name" type="text" />
+        </div>
+
+        <div id="days"></div>
+
+        <div class="secondary">
+          <button type="button" class="button-secondary" id="add-day">Add day</button>
+          <button type="button" class="button-secondary" id="archive">Archive program</button>
+        </div>
+      </section>
+    </main>
+
+    <datalist id="exercise-options"></datalist>
+
+    <script type="module" src="builder.js"></script>
+  </body>
+</html>

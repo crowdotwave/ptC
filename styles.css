@@ -955,3 +955,145 @@ button {
   display: inline-flex;
   align-items: center;
 }
+
+/* The client picks the day. A five day rotation does not get done in order. */
+.daypicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+.daypicker__item {
+  flex-direction: column;
+  align-items: flex-start;
+  display: inline-flex;
+  gap: 0;
+  line-height: 1.15;
+}
+
+.daypicker__item.is-on {
+  border-color: var(--accent-data);
+  color: var(--text-primary);
+}
+
+.daypicker__type {
+  display: block;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------- program builder
+ *
+ * A table, because the trainer's real tool is a table and the whole point is that they are
+ * doing the same thing they already do. Their columns, their order, their vocabulary.
+ */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin-bottom: var(--s-3);
+}
+
+.field__label {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.field__input {
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.field__input:hover { border-color: var(--accent-data-dim); }
+
+.day {
+  margin: var(--s-5) 0;
+  padding: var(--s-4);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+}
+
+.day__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.day__type { flex: 0 1 12rem; text-transform: uppercase; }
+.day__split { flex: 1 1 16rem; text-transform: uppercase; }
+
+/* Three columns, exactly as they sit on the sheet. Display only, never logged. */
+.warmup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.warmup__col { display: flex; flex-direction: column; gap: var(--s-1); }
+.warmup__label { color: var(--text-secondary); font-size: var(--t-small); }
+.warmup__box { resize: vertical; font-size: var(--t-small); }
+
+/* The table scrolls inside itself rather than pushing the page sideways. */
+.tablewrap {
+  overflow-x: auto;
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+}
+
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-small);
+}
+
+.ptable th {
+  padding: var(--s-2);
+  text-align: left;
+  font-weight: 650;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  white-space: nowrap;
+}
+
+.ptable td {
+  padding: var(--s-1);
+  border-top: 1px solid var(--surface-raised);
+  vertical-align: middle;
+}
+
+.ptable__actions { display: flex; gap: var(--s-1); padding: var(--s-1); }
+
+.cell {
+  width: 100%;
+  min-width: 7rem;
+  min-height: var(--tap);
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.cell--narrow { min-width: 4.5rem; }
+.cell:hover { border-color: var(--surface-raised); }
+.cell:focus { border-color: var(--accent-data); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -14,8 +14,8 @@ depends on the one before it.
 1. `migrations/0001_schema.sql` creates the ten tables and their indexes.
 2. `migrations/0002_rls.sql` takes back the default grants, adds the ownership helpers, enables
    and forces row level security, and adds the policies.
-3. `migrations/0003_rpc.sql` adds `claim_invite` and `trainer_branding`, the two things a
-   client needs that a policy cannot express.
+3. `migrations/0003_rpc.sql` adds the auth trigger that decides what a new signup is, and
+   `trainer_branding`.
 4. `tests/rls_isolation.sql` proves the policies actually isolate. It checks that 0003 ran, so
    it fails fast rather than confusingly if the order slipped.
 
@@ -61,11 +61,18 @@ What it covers beyond the required case:
   `auth_user_id` either
 - trainer Two sees none of trainer One's clients, payments, templates, set_logs, or custom
   exercises
-- an unbound signed in user sees nothing, claims a valid unclaimed code, becomes exactly one
-  client, and gains no access to anybody else
-- the same code cannot be claimed twice, an unknown code is refused, an account that already
-  has a client row cannot claim a second, and a failed claim leaves the caller seeing nothing
-- anon reads nothing at all and cannot claim an invite
+- a program assigned before signup is waiting, and reaches the client once they accept
+- a signup on a matching address binds the client row, case insensitively, and creates no
+  trainer for them
+- running the handler twice for the same person produces exactly the same rows
+- an already accepted client row is never rebound, so a second signup on that address becomes
+  a trainer instead of taking over the row
+- a signup with no pending invite becomes exactly one trainer, and a repeat creates no
+  duplicate
+- a signup with no email address creates nothing at all
+- a trainer can correct a client's email and cannot write auth_user_id at all
+- created_at and updated_at ignore whatever the client sent, and logged_at does not
+- anon reads nothing at all and cannot reach the auth binding function
 
 ## Decisions worth knowing
 
@@ -77,14 +84,41 @@ column grant because grants are per role, and both trainers and clients are the 
 through the API by anyone, trainer included. Nothing needs it: a signed in user already knows
 their own `auth.uid()`, and the mapping is resolved server side by the helpers.
 
-**Claiming an invite never reads through RLS.** No policy can grant "read the row whose
-`invite_code` you happen to know" without also granting the ability to fish for other people's
-rows one code at a time. So `claim_invite(code)` takes a code and returns an id or an error,
-and the caller never sees a row they do not already own. The update carries
-`and auth_user_id is null` in its own where clause rather than trusting the check above it, so
-two devices submitting the same code at the same moment cannot both succeed. A bad code and an
-already claimed code produce the same message, so the function is not an oracle for which
-codes are real.
+**There are no invite codes. Supabase auth is the only way in.** A trainer creates a client row
+with a name and an email. The row sits there with `auth_user_id` null, and can be programmed
+and assigned in that state. When that person signs up, a trigger on `auth.users` binds them on
+the email match.
+
+**Binding is one way.** `ptc.handle_new_auth_user` only ever binds a row whose `auth_user_id`
+is still null, and the column grant in 0002 means no client of the API can write that column at
+all, so a bound row cannot be unbound and handed to somebody else. A trainer can still fix a
+typo'd email, which they need, but fixing it after acceptance changes nothing about who the row
+belongs to.
+
+**A trigger, not an RPC.** It fires on every path into `auth.users`, including the admin invite
+path where our own code is not running because the person is clicking a link in an email and
+setting a password on a hosted page. It also leaves no window in which an authenticated user
+exists with neither a trainer nor a client row, which would be an account that cannot repair
+itself because it has no row and therefore no permissions. The cost is that a bug here breaks
+signup outright, which is why the logic sits in `handle_new_auth_user` taking plain arguments,
+so the test can call it without fabricating an `auth.users` row.
+
+**Anyone who signs up without a pending invite becomes a trainer.** Correct for a product with
+no public client signup, and the thing to revisit if one ever appears.
+
+**`clients.email` is globally unique, case insensitively.** `ptc.current_client_id()` resolves
+one auth user to one client row, so a second match would make "which client am I"
+nondeterministic. The cost is that one person cannot be a client of two trainers here.
+Reversing it means dropping the index, adding `unique (trainer_id, lower(email))`, and teaching
+the resolver to return a set.
+
+**Timestamps are the server's.** `created_at` and `updated_at` are stamped by a trigger and
+whatever arrived is discarded, because a browser clock is attacker controlled and conflict
+resolution is last write wins on `updated_at`. A client sending a year from now would otherwise
+win every future conflict on that row permanently. This does change what last write wins means:
+the last write to reach the server, not the last edit made on a device. `logged_at` stays
+client supplied, because it records when a set actually happened and offline logging is the
+entire reason it exists separately.
 
 **A client can read their own trainer's custom exercises.** This is `exercises_select`'s third
 clause and it is load bearing rather than convenience: the logging screen reads `increment_kg`
@@ -125,7 +159,7 @@ column as an argument cannot be hoisted, because the answer depends on the row, 
 used only where the alternative is worse and each is a primary key lookup.
 
 **Every column a policy filters on is indexed.** All eighteen of them, verified against
-`0001_schema.sql`: primary keys, the two unique `auth_user_id` columns, `clients.invite_code`,
+`0001_schema.sql`: primary keys, the two unique `auth_user_id` columns, `clients.email`,
 and the explicit indexes on `trainer_id`, `client_id`, `session_id`, `template_id`, `day_id`,
 and `is_global`. No extra index migration was needed.
 
