@@ -2,11 +2,11 @@
  *
  * Palette source: a gym floor read under bad overhead light, mid set, at arm's length.
  *
- * The base is deliberately not near black. A glossy phone reflects roughly four to six percent
- * of a bright room off the front glass, and that reflected light sets a luminance floor the
- * display cannot go under. A near black base sits below that floor and the screen stops being
- * a UI and becomes a mirror of the ceiling lights. Lifting the base puts every surface above
- * the reflection.
+ * The base is pure black, by decision. Worth knowing the tradeoff that was taken: a glossy
+ * phone reflects roughly four to six percent of a bright room off the front glass, and that
+ * reflected light sets a luminance floor the display cannot go under, so under gym lighting a
+ * black base sits below the reflection and reads closer to a mirror than a lifted base would.
+ * It also looks better on an OLED panel with the pixels genuinely off.
  *
  * The action colour is orange because of the eye, not taste. Short wavelengths focus in front
  * of the retina, so a blue or blue green primary is the blurriest possible choice at arm's
@@ -23,7 +23,7 @@
   /* Surfaces. Separation is 2.18:1, which survives glare. Borders back it up anyway.
    * Names state the role, not the object the colour was sampled from, so widening the palette
    * later means adding a role rather than inventing another gym object to name it after. */
-  --surface-base: #14181c;
+  --surface-base: #000000;
   --surface-raised: #46505c;
 
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
