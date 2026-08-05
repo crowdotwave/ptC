@@ -1216,3 +1216,17 @@ button.navlink:disabled {
   color: var(--text-primary);
   font-weight: 700;
 }
+
+/* The code fallback disclosure. Quiet on purpose: it is the exit somebody looks for only after
+ * the link has not worked, and it should not compete with the thing that did. */
+.auth__alt {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--accent-data-dim);
+  color: var(--accent-data);
+  font: inherit;
+  font-size: var(--t-small);
+  cursor: pointer;
+}

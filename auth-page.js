@@ -14,6 +14,7 @@ const sendButton = document.getElementById('send');
 const verifyButton = document.getElementById('verify');
 const note = document.getElementById('note');
 const lede = document.getElementById('lede');
+const showCode = document.getElementById('show-code');
 
 /** Where to land after signing in. Same origin only, so a crafted next cannot send anyone off. */
 function destination() {
@@ -73,14 +74,22 @@ async function main() {
       // Deliberately not "if that address is on file". The trainer creates the client row, so a
       // person who typed the wrong address needs to find that out now, not after waiting for an
       // email that is never coming.
-      say(`Sent to ${email}. Open it on this device, or paste the code below.`, 'ok');
-      codeForm.hidden = false;
-      codeInput.focus();
+      lede.textContent = 'Check your email.';
+      say(`Sent to ${email}. Open the link in that email on this device.`, 'ok');
+      emailForm.hidden = true;
+      showCode.hidden = false;
     } catch (error) {
       say(error.message, 'fail');
     } finally {
       busy(false);
     }
+  });
+
+  showCode.addEventListener('click', () => {
+    showCode.hidden = true;
+    codeForm.hidden = false;
+    codeInput.focus();
+    say('Paste the six digit code from the email. Some setups send only a link.', '');
   });
 
   codeForm.addEventListener('submit', async (event) => {

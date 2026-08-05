@@ -28,9 +28,14 @@
         <button class="auth__go" id="send" type="submit">Send me a link</button>
       </form>
 
-      <!-- The typed code. Hidden until a link has been sent, because offering two ways in at
-           once makes the first decision on the screen a choice nobody has enough information
-           to make. -->
+      <!-- The typed code, behind a disclosure rather than shown alongside the link.
+           It only works if the Supabase email template carries {{ .Token }}, which the default
+           template does not and which needs a paid plan to change on Supabase's own sender. So
+           for most deploys this input is a dead end, and offering a dead end beside a working
+           link is worse than not offering it. The link is the path. This is the escape hatch
+           for a phone whose mail app opens links somewhere unhelpful. -->
+      <button class="auth__alt" id="show-code" type="button" hidden>Have a code instead?</button>
+
       <form class="auth__form" id="code-form" hidden novalidate>
         <label class="auth__label" for="code">Or paste the code from the email</label>
         <input
