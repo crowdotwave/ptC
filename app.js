@@ -327,12 +327,18 @@ function renderValues() {
 
   ui.logLabel.textContent = 'Log set';
   const suffix = unchanged ? ', same as last time' : '';
+
+  // What is about to be written, in the words of the thing being done. A pushup reading
+  // "0 kg for 9" is not wrong so much as noise: there is no weight, so naming one asks the
+  // reader to check a number that will always be zero.
+  const load = `${formatWeight(state.weightKg)} ${unit()}`;
   ui.logSub.textContent =
-    mode === 'weight_only'
-      ? `${formatWeight(state.weightKg)} ${unit()}${suffix}`
-      : mode === 'rounds'
-        ? `${formatWeight(state.weightKg)} ${unit()}, ${state.reps} rounds${suffix}`
-        : `${formatWeight(state.weightKg)} ${unit()} for ${state.reps}${suffix}`;
+    {
+      weight_only: `${load}${suffix}`,
+      rounds: `${load}, ${state.reps} rounds${suffix}`,
+      bodyweight_reps: `${state.reps} rep${state.reps === 1 ? '' : 's'}${suffix}`,
+      time_hold: `${state.reps} second${state.reps === 1 ? '' : 's'}${suffix}`,
+    }[mode] ?? `${load} for ${state.reps}${suffix}`;
 }
 
 function renderUndo() {
