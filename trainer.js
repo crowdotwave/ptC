@@ -176,7 +176,9 @@ function showList() {
   el('list-view').hidden = false;
   el('detail-view').hidden = true;
   el('view-title').textContent = 'Clients';
-  el('view-note').textContent = `${state.clients.length} client${state.clients.length === 1 ? '' : 's'}, most recently active first.`;
+  el('view-note').textContent =
+    `${state.clients.length} client${state.clients.length === 1 ? '' : 's'}, most recently active first.` +
+    (state.everyone ? ' Everybody on the app, because this account is building it.' : '');
 }
 
 async function main() {
@@ -208,9 +210,15 @@ async function main() {
   const exercises = await storage.query('exercises', {});
   for (const ex of exercises) state.exercises.set(ex.id, ex);
 
-  // Only this trainer's clients. A client side filter, which is a shape to look at rather than
-  // a guarantee. supabase/tests/rls_isolation.sql is what makes it true.
-  const clients = await storage.query('clients', { trainer_id: state.trainer.id }, { orderBy: 'display_name' });
+  // This trainer's clients, or everybody for the two accounts building the app. Either way this
+  // is a client side filter over rows the database already decided to hand over, which is a shape
+  // to look at rather than a guarantee. supabase/tests/rls_isolation.sql is what makes it true:
+  // a staff read is an extra select policy, so a non staff trainer's query returns their own rows
+  // whatever this line asks for.
+  state.everyone = Boolean(actor?.isStaff);
+  const clients = actor?.isStaff
+    ? await storage.query('clients', {}, { orderBy: 'display_name' })
+    : await storage.query('clients', { trainer_id: state.trainer.id }, { orderBy: 'display_name' });
   const fourWeeksAgo = Date.now() - 28 * 86400000;
 
   state.clients = await Promise.all(

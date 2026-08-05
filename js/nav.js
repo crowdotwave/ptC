@@ -14,7 +14,17 @@ import { signOutAndClear } from './boot.js';
  * signing back in is one email, and the cost of an accidental tap is far lower than the cost of
  * a dialog people learn to dismiss without reading.
  */
-export function wireNav({ storage, client, session }) {
+export function wireNav({ storage, client, session, actor }) {
+  // Links declare what they need with data-needs. Somebody who both coaches and is coached sees
+  // every link, a plain client sees only theirs, and neither case needs a page to know which is
+  // which. Absent rather than disabled: a link to a screen that will bounce you is worse than no
+  // link, because it looks like the app is broken rather than like it is not for you.
+  for (const link of document.querySelectorAll('[data-needs]')) {
+    const needs = link.dataset.needs;
+    const has = needs === 'trainer' ? Boolean(actor?.trainerId) : Boolean(actor?.clientId);
+    link.hidden = !has;
+  }
+
   for (const control of document.querySelectorAll('[data-signout]')) {
     if (!session) {
       control.hidden = true;

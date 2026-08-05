@@ -67,9 +67,29 @@ async function alignIdentity(storage, identity) {
 // the trainer view are different products sharing a deploy, not two tabs of one thing.
 const HOME = { trainer: 'trainer.html', client: 'index.html' };
 
-/** True when this page serves one role and the person looking at it is the other one. */
+/**
+ * Capability, not role. A person can hold both: somebody who coaches and is also coached has a
+ * trainers row and a clients row bound to one auth user, and public.whoami() reports 'both'.
+ *
+ * Asking "do you have a client id" rather than "are you a client" is what keeps that person able
+ * to reach their own training. Comparing a single role string would have picked one and silently
+ * locked them out of the other half of the app.
+ */
+export function can(actor, role) {
+  if (!actor) return false;
+  return role === 'trainer' ? Boolean(actor.trainerId) : Boolean(actor.clientId);
+}
+
+/** Where to send somebody who cannot be here. Their own training first, if they have any. */
+function homeFor(actor) {
+  if (can(actor, 'client')) return HOME.client;
+  if (can(actor, 'trainer')) return HOME.trainer;
+  return null;
+}
+
 function misrouted(role, actor) {
-  return Boolean(role && actor && actor.role !== role && HOME[actor.role]);
+  if (!role || !actor || can(actor, role)) return false;
+  return Boolean(homeFor(actor));
 }
 
 export async function boot({ allowLocal = true, role = null } = {}) {
@@ -115,7 +135,12 @@ export async function boot({ allowLocal = true, role = null } = {}) {
     if (who.role === 'none') {
       return { mode: 'unbound', storage, client, session, actor: null, error: null };
     }
-    actor = { role: who.role, clientId: who.clientId, trainerId: who.trainerId };
+    actor = {
+      role: who.role,
+      clientId: who.clientId,
+      trainerId: who.trainerId,
+      isStaff: who.isStaff,
+    };
     await storage.setMeta(ACTOR_KEY, actor);
   } catch (whoamiError) {
     // Offline, or the server is down. A device that has signed in before knows the answer.
@@ -156,7 +181,7 @@ export function gate(result) {
     return false;
   }
   if (result.mode === 'wrong-role') {
-    location.replace(HOME[result.actor.role]);
+    location.replace(homeFor(result.actor));
     return false;
   }
   return true;

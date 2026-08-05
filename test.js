@@ -13,6 +13,7 @@ import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
 import { parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine } from './js/program.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
+import { can } from './js/boot.js';
 
 const results = [];
 
@@ -899,6 +900,39 @@ test('a delete and a put on the same table are never merged into one request', (
   ]);
   eq(batches.length, 2);
   eq(batches.map((b) => b.op), ['put', 'delete']);
+});
+
+// ------------------------------------------------------------------ who may be where
+//
+// Capability, not role. A person who coaches and is also coached holds a trainers row and a
+// clients row on one auth user, and comparing a single role string would pick one and lock them
+// out of the other half of the app.
+
+test('a plain client can reach client screens and no trainer screen', () => {
+  const client = { role: 'client', clientId: 'c1', trainerId: null, isStaff: false };
+  ok(can(client, 'client'), 'a client cannot reach their own logging screen');
+  ok(!can(client, 'trainer'), 'a client was given the coaching side');
+});
+
+test('a plain trainer can reach trainer screens and no client screen', () => {
+  const trainer = { role: 'trainer', clientId: null, trainerId: 't1', isStaff: false };
+  ok(can(trainer, 'trainer'));
+  ok(!can(trainer, 'client'), 'a trainer with no client row was given a logging screen');
+});
+
+test('somebody who is both reaches both', () => {
+  const both = { role: 'both', clientId: 'c1', trainerId: 't1', isStaff: true };
+  ok(can(both, 'client'));
+  ok(can(both, 'trainer'));
+});
+
+// The regression this replaced. The dev switch used to hand a client their coach's trainer id,
+// which under a capability check would show every client the coaching navigation.
+test('a coach id belonging to somebody else is not a capability', () => {
+  const client = { role: 'client', clientId: 'c1', trainerId: null, isStaff: false };
+  ok(!can(client, 'trainer'), 'trainerId must mean the trainer you are, not the one you train under');
+  ok(!can(null, 'client'), 'no actor is no capability');
+  ok(!can(undefined, 'trainer'));
 });
 
 // ------------------------------------------------------------------ report

@@ -93,8 +93,13 @@ export function createRemote({ client, storage }) {
     const { data, error } = await client.rpc('whoami');
     if (error) throw new Error(`whoami failed: ${error.message}`);
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) return { role: 'none', trainerId: null, clientId: null };
-    return { role: row.actor_role, trainerId: row.trainer_id, clientId: row.client_id };
+    if (!row) return { role: 'none', trainerId: null, clientId: null, isStaff: false };
+    return {
+      role: row.actor_role,
+      trainerId: row.trainer_id,
+      clientId: row.client_id,
+      isStaff: row.is_staff === true,
+    };
   }
 
   /**
