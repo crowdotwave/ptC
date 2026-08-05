@@ -20,27 +20,78 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces. Separation is 2.18:1, which survives glare. Borders back it up anyway.
-   * Names state the role, not the object the colour was sampled from, so widening the palette
-   * later means adding a role rather than inventing another gym object to name it after. */
+  /* Surfaces. Separation is 2.56:1 at the lit face and 2.20:1 at the shaded bottom edge, which
+   * survives glare. Borders back it up anyway. Names state the role, not the object the colour
+   * was sampled from, so widening the palette later means adding a role rather than inventing
+   * another gym object to name it after.
+   *
+   * The old figure here was 2.18, which was never a measurement: it was the stale left column
+   * entry for --text-primary divided by the sound right column one, so it mixed two different
+   * bases. See the correction note below. Real separation was 2.56 before this change and is
+   * 2.56 now, because the luminance did not move.
+   *
+   * The raised surface used to be #46505C, a 14% saturated blue grey. It read as unpainted
+   * chrome rather than as part of this palette, which is what a near neutral does next to two
+   * committed hues. It is now the same luminance at 196 degrees and 37% saturation, so it sits
+   * in the cool half the data axis already occupies and stands opposite the action orange at
+   * roughly 174 degrees. That is the point: warm advances against cool, so a chromatic cool
+   * ground pushes the orange forward without the orange changing at all.
+   *
+   * Luminance was held to within a percent on purpose. Every ratio in the right hand column
+   * below is measured against this surface, and --text-primary sits at 7.13 against it, which
+   * is a tenth of a point of headroom over the 7:1 floor. Any lift here breaks the between
+   * sets tier on the stepper. Hue and chroma were free. Lightness was not.
+   *
+   * Three tokens, one lighting model, one hue: light falls from above, so the face is lit, the
+   * bottom is shaded, and the top edge catches a rim. --surface-raised is the face and stays
+   * the single token for borders, tracks, and flat fills. The other two exist so a gradient
+   * never has to invent a colour at the use site. */
   --surface-base: #000000;
-  --surface-raised: #46505c;
+  --surface-raised: #2d5462; /*        2.56 vs base. The lit face */
+  --surface-raised-shade: #274a57; /*  2.20 vs base. The shaded face, far end of the fall */
+  --surface-raised-rim: #3d6675; /*    1.31 vs the face. The lit top edge, 1px only */
+
+  /* The lit top of a control cut into a raised surface, grading down to --surface-base. Same
+   * hue. --text-primary reads 16.16 on it, so the stepper buttons keep every point of contrast
+   * they had while stopping short of reading as holes punched in the slab. */
+  --surface-base-lit: #0b1418;
 
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
    *
-   * That is the bill for widening the surface separation to 2.18. Raising the surface to
-   * #46505C lifted its luminance, and every text token except --text-primary fell under the
-   * floor on it: --text-secondary lands at 4.39, which misses both the 7:1 between sets rule
-   * and the 4.5:1 large text rule. Written down here so it stops being rediscovered.
+   * That is the bill for widening the surface separation to 2.56. Raising the surface lifted
+   * its luminance, and every text token except --text-primary fell under the floor on it:
+   * --text-secondary lands at 4.41, which misses both the 7:1 between sets rule and the 4.5:1
+   * large text rule. Written down here so it stops being rediscovered.
+   *
+   * The right hand column moved by a hundredth or two when the surface went from #46505C to
+   * #2D5462. That is rounding on a deliberately held luminance, not a new budget.
+   *
+   * The LEFT column was wrong and is now corrected, which is unrelated to the hue change and
+   * worth stating so nobody reads it as one. Every figure in it was understated by a uniform
+   * factor of 1.177, because the column was computed when --surface-base was a lifted near
+   * black around luminance 0.0088 and never redone when the base went to #000000. Solving the
+   * old --text-primary entry backwards recovers that base exactly, and the same factor fits all
+   * twelve entries to four decimals, so this was one stale batch rather than twelve slips.
+   * Nothing here got worse: every real ratio is HIGHER than the number that replaced it, and no
+   * decision in this file was resting on the difference. The 1.14 luminance step between
+   * --accent-data and --pr that the encoding rules lean on is 1.144 measured properly, so that
+   * argument stands untouched.
    *
    * Ratios below are against --surface-base then --surface-raised. */
-  --text-primary: #edeff1; /* 15.48 / 7.11  any size, either surface. The only one on raised */
-  --text-secondary: #b5bfc9; /*  9.57 / 4.39  base only, any size */
+  --text-primary: #edeff1; /* 18.22 / 7.13  any size, either surface. The only one on raised */
+  --text-secondary: #b5bfc9; /* 11.26 / 4.41  base only, any size */
 
   /* Fill only, never text. Both read under the floor on --surface-raised. Their ink is
-   * --surface-base, at 7.62 and 5.07. */
-  --accent-action: #ff8a45; /*  7.62 / 3.50  fill only */
-  --accent-action-pressed: #d9682a; /*  5.07 / 2.33  fill only */
+   * --surface-base, at 8.97 and 5.96.
+   *
+   * --accent-action-shade is the shaded face of the action fill, same hue at 22 degrees, one
+   * step deeper. It is the far end of the log button's gradient, not a state: the pressed state
+   * stays --accent-action-pressed and stays flat, because a flat fill is what a depressed slab
+   * looks like. Black ink reads 7.41 on the shade, so the darkest point of that gradient still
+   * clears the between sets floor even though the label only owes 4.5. */
+  --accent-action: #ff8a45; /*  8.97 / 3.51  fill only */
+  --accent-action-shade: #f2762f; /*  7.41 / 2.90  fill only */
+  --accent-action-pressed: #d9682a; /*  5.96 / 2.33  fill only */
 
   /* The data and progress axis, complementary to the action orange at 165 degrees.
    *
@@ -50,17 +101,17 @@
    * step, and the weakest pair anywhere is --accent-data against --pr at 1.14 luminance,
    * carried by 36 points of saturation plus a ringed dot. Six tokens is the ceiling here.
    * A seventh forces a real trade. */
-  --accent-data-dim: #478d9e; /*  4.73 / 2.17  strokes and 28px up, base only. History */
-  --deload: #7a95de; /*  6.10 / 2.80  base only. A planned back off week */
-  --flat: #9ea7b0; /*  7.31 / 3.36  base only. A week where nothing moved */
-  --accent-data: #6dd0e4; /* 10.02 / 4.60  the series, and informational text */
-  --pr: #1fe3ff; /* 11.46 / 5.26  the record moment. The only token that glows bright */
-  --progress: #ade8f2; /* 13.25 / 6.09  a value that improved */
+  --accent-data-dim: #478d9e; /*  5.57 / 2.18  strokes and 28px up, base only. History */
+  --deload: #7a95de; /*  7.18 / 2.81  base only. A planned back off week */
+  --flat: #9ea7b0; /*  8.61 / 3.37  base only. A week where nothing moved */
+  --accent-data: #6dd0e4; /* 11.79 / 4.61  the series, and informational text */
+  --pr: #1fe3ff; /* 13.49 / 5.28  the record moment. The only token that glows bright */
+  --progress: #ade8f2; /* 15.60 / 6.10  a value that improved */
 
   /* State. --muted is disabled text on --surface-base only. --focus always ships with a
    * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
-  --muted: #828d99; /*  5.28 / 2.43  base only */
-  --focus: #9fe0ff; /* 12.39 / 5.69  ring, never text */
+  --muted: #828d99; /*  6.22 / 2.43  base only */
+  --focus: #9fe0ff; /* 14.58 / 5.71  ring, never text */
 
   /* Glow. One vocabulary for the screen now and chart strokes later, where the same radii
    * drive filter: drop-shadow() instead of box-shadow.
@@ -284,7 +335,7 @@ button {
  * continuously, so the contrast of the countdown varied over the life of the timer and was at
  * its worst somewhere in the middle. A number you read mid set cannot have a contrast ratio
  * that depends on how much rest is left. The track never passes behind text, so the numerals
- * sit on --surface-base at a fixed 10.02 from first second to last.
+ * sit on --surface-base at a fixed 11.79 from first second to last.
  *
  * 8px, not 4. At 65cm under gym lighting a 4px rule is close to invisible, and while the
  * numerals carry the primary signal the track still has to be seen without being looked for. */
@@ -372,15 +423,26 @@ button {
 
 /* ---------------------------------------------------------------- steppers */
 
+/* The gradient runs down, never up. That direction is not a preference, it is the contrast
+ * budget: --text-primary clears the 7:1 between sets floor on --surface-raised by a tenth of a
+ * point, so the lit face is already the lightest this slab is allowed to be. Light falling from
+ * the top edge to --surface-raised-shade at the bottom only ever raises the ratio under the
+ * readout. An up gradient would have to invent a lighter surface and would put the "kg" label
+ * under the floor to do it.
+ *
+ * The rim is inset on the top edge only, so the 1px --muted outline keeps doing its glare job
+ * at 6.22 against the page. A chromatic outline would have cost most of that to buy nothing:
+ * the slab is told apart from the page by 300px of face, not by a hairline. */
 .stepper {
   display: grid;
   grid-template-columns: var(--step-btn) 1fr var(--step-btn);
   align-items: center;
   gap: var(--s-2);
   padding: var(--s-2);
-  background: var(--surface-raised);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
   border: 1px solid var(--muted);
   border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 0 var(--surface-raised-rim);
   --step-btn: 4.5rem;
 }
 
@@ -388,17 +450,24 @@ button {
   --step-btn: 3.75rem;
 }
 
+/* Flat black on the slab read as a hole cut through it rather than as a control sitting in it.
+ * The same fall of light as the slab, one register darker: lit at the top, true --surface-base
+ * at the bottom. --text-primary measures 16.16 at the lightest point, so the plus and the minus
+ * give up nothing for it. */
 .stepper__btn {
   height: 100%;
   min-height: 3.5rem;
   border-radius: calc(var(--radius) - 3px);
-  background: var(--surface-base);
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
   color: var(--text-primary);
   font-size: var(--t-md);
   font-weight: 700;
   line-height: 1;
 }
 
+/* Flat on purpose. The gradient is what makes the button read as raised, so dropping it is what
+ * makes the press read as depressed. The background shorthand clears the image, so this is one
+ * declaration doing both. */
 .stepper__btn:active {
   background: var(--accent-action-pressed);
   color: var(--surface-base);
@@ -452,11 +521,16 @@ button {
 
 /* ---------------------------------------------------------------- the log action */
 
-/* Glow site one. The glow sits outside the fill, so the button's own ink is never on it. */
+/* Glow site one. The glow sits outside the fill, so the button's own ink is never on it.
+ *
+ * Same fall of light as the steppers, in the warm half. Black ink reads 8.97 at the top of the
+ * gradient and 7.41 at the bottom, so the label clears the between sets floor across the whole
+ * fill while only owing 4.5 at 28px and 700. The glow still mixes from --accent-action alone:
+ * it is light thrown by the button, not a second copy of the fill. */
 .log {
   min-height: 6.5rem;
   border-radius: var(--radius);
-  background: var(--accent-action);
+  background: linear-gradient(180deg, var(--accent-action) 0%, var(--accent-action-shade) 100%);
   color: var(--surface-base);
   font-size: var(--t-sm);
   font-weight: 700;

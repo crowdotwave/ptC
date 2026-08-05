@@ -250,10 +250,17 @@ Constraints:
   bold weight. 7:1 is the AAA threshold for normal text, not for large text, and applying it
   to 64px numerals over-constrains the palette for no legibility gain.
 - On `--surface-raised`, text is `--text-primary` only. This is the cost of widening the
-  surface separation to 2.18:1, which is what makes two surfaces tell apart under glare.
+  surface separation to 2.56:1, which is what makes two surfaces tell apart under glare.
   Lifting the raised surface lifted its luminance, and every other text token fell under the
-  floor on it: `--text-secondary` measures 4.39, missing both the 7:1 and the 4.5:1 rules.
+  floor on it: `--text-secondary` measures 4.41, missing both the 7:1 and the 4.5:1 rules.
   Anything that needs a second text colour needs a different surface, not a different token.
+- The raised surface is a chromatic deep teal at 196 degrees, not a near neutral grey. Its
+  luminance is fixed: `--text-primary` clears the 7:1 floor on it by a tenth of a point, so the
+  hue and the chroma are open to change and the lightness is not.
+- Raised surfaces carry a fall of light, top lit, via `--surface-raised-shade` and
+  `--surface-raised-rim`. A gradient on a surface that holds mid set text always runs downward
+  from the token value, never upward, because the token value is already the contrast ceiling.
+  Pressed states drop the gradient and go flat: that is what makes a press read as depressed.
 - Minimum touch target 44px, and the primary log action considerably larger
 - Navigation is a tab bar fixed to the bottom, plus a menu button top right carrying identity
   and sign out. Tabs are chosen by capability, never by role name, so somebody who coaches and
@@ -274,7 +281,7 @@ a position, or a word.
 
 **No intensity-only encoding either.** This one is measured, not assumed. The data axis is
 cyan, and cyan clusters at high luminance in sRGB, so an intensity ladder in it has very
-little room. Against `--surface-base`, `--accent-data` reads 10.02 and `--pr` reads 11.46,
+little room. Against `--surface-base`, `--accent-data` reads 11.79 and `--pr` reads 13.49,
 a ratio of 1.14 between them. `--progress` and `--pr` sit 1 degree apart in hue. On the
 logging screen that is fine, because a record also carries glow, animation, a pill, a position
 in the top band, and a sentence naming the lift. In a static chart it is not fine: a record
