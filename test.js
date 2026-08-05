@@ -11,7 +11,10 @@ import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js
 import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_MS } from './js/hold.js';
 import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
-import { parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine } from './js/program.js';
+import {
+  parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
+  isBodyweightLoad,
+} from './js/program.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
 import { can } from './js/boot.js';
 import { validate } from './js/schema.js';
@@ -1044,6 +1047,94 @@ test('a weighted lift stays weighted even once a bodyweight session appears', ()
   eq(p.kind, 'load', 'one unloaded session does not rewrite the history of a loaded lift');
   eq(p.e1rm.series.length, 1, 'only the loaded session has a strength number');
   eq(p.e1rm.series[0].sessionId, 's1');
+});
+
+// ------------------------------------------------------------------ eight real workbooks
+//
+// Measured against 306 exercise rows across 56 day blocks in eight real client workbooks, not
+// invented. Each count below is how many rows the rule covers, and each one was a row the
+// parser previously got wrong or dropped.
+
+// 29 rows. RPE written directly was ignored entirely, so every one of them silently lost its
+// effort target. It appears in both orders, as ranges, and buried inside a longer cell.
+test('RPE is read in whichever order and shape the trainer wrote it', () => {
+  eq(parseLoad('RPE 9').rpe, 9);
+  eq(parseLoad('8 RPE').rpe, 8);
+  eq(parseLoad('RPE 8').rpe, 8);
+  eq(parseLoad('RPE 8 - 9').rpe, 9, 'a range takes the harder end');
+  eq(parseLoad('8-9 RPE').rpe, 9);
+  eq(parseLoad('RPE 7-8').rpe, 8);
+  eq(parseLoad('5 MINS RPE 3-4').rpe, 4, 'buried inside a longer cell');
+  eq(parseLoad('RPE 7-8 - 10 MINS').rpe, 8);
+});
+
+// RIR and RPE point opposite ways numerically and the same way in meaning: both take the
+// harder end. Fewer reps in reserve is harder, a higher RPE is harder.
+test('RIR and RPE both resolve to the harder end of a range', () => {
+  eq(parseLoad('1-2 RIR').rpe, 9);
+  eq(parseLoad('3 - 5 RIR').rpe, 7);
+  eq(parseLoad('1- 2 RIR').rpe, 9, 'spacing varies between workbooks');
+  eq(parseLoad('RPE 8 - 9').rpe, 9);
+});
+
+// Everything genuinely without an effort target still gets null rather than a guess. 55 rows.
+test('a load that is not an effort still gets no RPE', () => {
+  for (const cell of ['1 MIN EMOM', 'BW', 'MODERATE', '25 - 45 LBS', '2 PLATES',
+                      '5-7 SPEED', 'ASSISTED BW', '90 CALS', '450 METERS', '35 MINUTES']) {
+    eq(parseLoad(cell).rpe, null, `${cell} was given an RPE it does not have`);
+    eq(parseLoad(cell).text, cell, 'the trainer text survives verbatim');
+  }
+});
+
+// 16 rows. The Rest column sometimes holds a rep count, and reading it as seconds put a wrong
+// rest on the client's screen. A wrong number is worse than a missing one.
+test('a rep count sitting in the Rest column is not read as a duration', () => {
+  eq(parseRest('5 PER SIDE'), null);
+  eq(parseRest('3 PER SIDE'), null);
+  eq(parseRest('5 PER  SIDE'), null, 'double spacing appears in the real files');
+  eq(parseRest('60 SEC'), 60, 'a real rest still parses');
+  eq(parseRest('90 SEC'), 90);
+});
+
+// 6 rows. Seconds in the Reps column is a hold. Minutes are deliberately excluded, because a
+// Reps cell reading '10 MINS' is a cardio block rather than something anybody holds.
+test('seconds in the reps column is a hold, minutes are not', () => {
+  eq(inferLogging({ repsText: '30 SEC', loadText: '1 RIR', sets: 3 }),
+     { isLogged: true, logMode: 'time_hold' });
+  eq(inferLogging({ repsText: '45 SEC', loadText: 'BW', sets: 3 }),
+     { isLogged: true, logMode: 'time_hold' });
+  eq(inferLogging({ repsText: '10 MINS', loadText: '5-7 SPEED', sets: null }).logMode,
+     'weight_only', 'a ten minute block is not a hold');
+});
+
+// 9 rows. A Load cell naming the body is a bodyweight lift, which now has its own mode rather
+// than being a weighted lift that happens to weigh nothing.
+test('a load naming the body makes it a bodyweight lift', () => {
+  ok(isBodyweightLoad('BW'));
+  ok(isBodyweightLoad('BODY WEIGHT'));
+  ok(isBodyweightLoad('ASSISTED BW'));
+  ok(!isBodyweightLoad('25 - 45 LBS'));
+  ok(!isBodyweightLoad('1 RIR'));
+
+  eq(inferLogging({ repsText: '12', loadText: 'BODY WEIGHT', sets: 3 }),
+     { isLogged: true, logMode: 'bodyweight_reps' });
+  eq(inferLogging({ repsText: '12', loadText: '1 RIR', sets: 3 }),
+     { isLogged: true, logMode: 'weight_reps' });
+});
+
+// AMRAP in the Reps column is one exercise taken to failure, so it is a rep count the client
+// discovers. It is not the rounds mode, which is a circuit.
+test('AMRAP is a rep count to discover, not a circuit', () => {
+  eq(inferLogging({ repsText: 'AMRAP', loadText: 'BODY WEIGHT', sets: 1 }),
+     { isLogged: true, logMode: 'bodyweight_reps' });
+  eq(inferLogging({ repsText: 'AMRAP', loadText: '1 RIR', sets: 1 }),
+     { isLogged: true, logMode: 'weight_reps' });
+});
+
+// 1 row. A unilateral count is still a count.
+test('a per side rep count is a rep count', () => {
+  eq(parseReps('8 PER SIDE'), { low: 8, high: 8, text: '8 PER SIDE' });
+  eq(parseReps('10 EACH SIDE').low, 10);
 });
 
 // ------------------------------------------------------------------ report
