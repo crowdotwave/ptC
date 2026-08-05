@@ -16,6 +16,7 @@ import {
   isBodyweightLoad,
 } from './js/program.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
+import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
 import { validate } from './js/schema.js';
 
@@ -1135,6 +1136,142 @@ test('AMRAP is a rep count to discover, not a circuit', () => {
 test('a per side rep count is a rep count', () => {
   eq(parseReps('8 PER SIDE'), { low: 8, high: 8, text: '8 PER SIDE' });
   eq(parseReps('10 EACH SIDE').low, 10);
+});
+
+// ------------------------------------------------------------------ importing a workbook
+//
+// Grids here are the real shapes, trimmed. The point of every one is that no two of the eight
+// workbooks agree on wording, so nothing may be matched by literal string in a fixed cell.
+
+// col:      0        1                 2           7        9      10     12     16
+const wide = (n, ex, adjust, sets, reps, load, rest, dayType, split) => {
+  const row = new Array(17).fill('');
+  row[0] = n; row[1] = ex; row[2] = dayType || ''; row[7] = adjust;
+  row[9] = split || sets; row[10] = reps; row[12] = load; row[16] = rest;
+  return row;
+};
+
+function sheet(headerWords, dayWord) {
+  const rows = [];
+  const day = new Array(17).fill('');
+  day[0] = dayWord; day[2] = 'STRENGTH'; day[9] = 'FULL BODY';
+  rows.push(day);
+  const labels = new Array(17).fill('');
+  labels[0] = 'Stretch/Mobility'; labels[6] = 'General Warm Up'; labels[12] = 'Specific Prep';
+  rows.push(labels);
+  const warm = new Array(17).fill('');
+  warm[0] = 'HIP CARS X10'; warm[6] = 'BW SQUAT X10'; warm[12] = 'INCREASE HR';
+  rows.push(warm);
+  const header = new Array(17).fill('');
+  header[0] = '#'; header[1] = headerWords; header[7] = 'Adjust';
+  header[9] = 'Sets'; header[10] = 'Reps'; header[12] = 'Load'; header[16] = 'Rest';
+  rows.push(header);
+  return rows;
+}
+
+test('a day block is found whether it says Day or DAY 1', () => {
+  for (const word of ['Day', 'DAY 1', 'DAY 4']) {
+    const rows = sheet('Exercise', word);
+    rows.push(wide('1', 'GOBLET SQUAT', 'ROM', '4', '10', '1 RIR', '60 SEC'));
+    const out = readSheet(rows, 'Sheet1');
+    eq(out.days.length, 1, `${word} did not start a day`);
+    eq(out.days[0].items.length, 1);
+  }
+});
+
+// The workbook that broke the first version of this: it heads the exercise column WORKING SETS.
+test('the exercise column is found by header, not by position', () => {
+  const rows = sheet('WORKING SETS', 'DAY 1');
+  rows.push(wide('1', 'SLED PUSH', 'WEIGHT', '5', 'N/A', 'RPE 8', '30 SEC'));
+  const out = readSheet(rows, 'Sheet1');
+  eq(out.days[0].items[0].exerciseName, 'SLED PUSH');
+  eq(out.days[0].items[0].targetRpe, 8, 'RPE written directly still reaches the item');
+});
+
+test('columns are mapped from the header row in whatever order they appear', () => {
+  const header = new Array(8).fill('');
+  header[0] = '#'; header[1] = 'REST'; header[2] = 'Exercise'; header[3] = 'LOAD';
+  header[4] = 'sets'; header[5] = 'Reps'; header[6] = 'ADJUST';
+  const columns = mapColumns(header);
+  eq(columns.exercise, 2);
+  eq(columns.rest, 1);
+  eq(columns.load, 3);
+  eq(columns.sets, 4);
+  eq(columns.reps, 5);
+  eq(columns.adjust, 6);
+});
+
+test('a warm up is split across its three columns and the label row is not part of it', () => {
+  const rows = sheet('Exercise', 'Day');
+  rows.push(wide('1', 'GOBLET SQUAT', 'ROM', '4', '10', '1 RIR', '60 SEC'));
+  const day = readSheet(rows, 'Sheet1').days[0];
+  eq(day.warmup.mobility, ['HIP CARS X10']);
+  eq(day.warmup.general, ['BW SQUAT X10']);
+  eq(day.warmup.specific, ['INCREASE HR']);
+});
+
+test('a comments block ends the table and is kept as the day comments', () => {
+  const rows = sheet('Exercise', 'Day');
+  rows.push(wide('1', 'GOBLET SQUAT', 'ROM', '4', '10', '1 RIR', '60 SEC'));
+  const c = new Array(17).fill(''); c[1] = 'Comments'; rows.push(c);
+  const c1 = new Array(17).fill(''); c1[1] = 'Use a kettlebell if the rack is busy.'; rows.push(c1);
+  const day = readSheet(rows, 'Sheet1').days[0];
+  eq(day.items.length, 1, 'the comment lines did not become exercises');
+  eq(day.comments, ['Use a kettlebell if the rack is busy.']);
+});
+
+// A day block with no Load column prescribes no load, so its rep counts are bodyweight. One
+// workbook's mobility days are exactly this, and without it every stretch asks for a weight.
+test('a table with no load column logs bodyweight reps', () => {
+  const rows = [];
+  const day = new Array(17).fill(''); day[0] = 'DAY 3'; day[2] = 'MOBILITY'; day[9] = 'HIP FOCUSED';
+  rows.push(day);
+  const header = new Array(17).fill(''); header[0] = '#'; header[1] = 'WORKING SETS'; header[16] = 'REPS';
+  rows.push(header);
+  const item = new Array(17).fill(''); item[0] = '1'; item[1] = 'WORLDS GREATEST STRETCH'; item[16] = '3 PER SIDE';
+  rows.push(item);
+
+  const out = readSheet(rows, 'Sheet2');
+  const first = out.days[0].items[0];
+  eq(first.logMode, 'bodyweight_reps');
+  eq(first.targetRepsLow, 3, 'a per side count is still a count');
+  eq(first.restSeconds, null, 'nothing was read as a rest, because there is no rest column');
+  eq(out.warnings, [], 'and nothing was dropped, so nothing is warned about');
+});
+
+// Three days that are all FULL BODY, separated only by their type. Three identical entries in
+// the client's day picker is a picker nobody can use.
+test('a day is named by both halves when they differ', () => {
+  eq(dayName('STRENGTH', 'FULL BODY', 'Day'), 'STRENGTH, FULL BODY');
+  eq(dayName('ENDURANCE', 'FULL BODY', 'Day'), 'ENDURANCE, FULL BODY');
+  eq(dayName('CARDIO', 'CARDIO', 'Day'), 'CARDIO', 'not CARDIO, CARDIO');
+  eq(dayName('', 'PUSH/PULL', 'Day'), 'PUSH/PULL');
+  eq(dayName('', '', 'DAY 7'), 'DAY 7');
+});
+
+test('an empty exercise cell ends the table without ending the sheet', () => {
+  const rows = sheet('Exercise', 'Day');
+  rows.push(wide('1', 'GOBLET SQUAT', 'ROM', '4', '10', '1 RIR', '60 SEC'));
+  rows.push(new Array(17).fill(''));
+  rows.push(...sheet('Exercise', 'DAY 2'));
+  rows.push(wide('1', 'BENCH ROW', 'WEIGHT', '3', '12', '2 RIR', '45 SEC'));
+  const out = readSheet(rows, 'Sheet1');
+  eq(out.days.length, 2);
+  eq(out.days[0].items.length, 1);
+  eq(out.days[1].items.length, 1);
+});
+
+test('the summary counts what a trainer is about to create', () => {
+  const rows = sheet('Exercise', 'Day');
+  rows.push(wide('1', 'GOBLET SQUAT', 'ROM', '4', '10', '1 RIR', '60 SEC'));
+  rows.push(wide('2', 'PUSH UPS', 'BW', '3', '12', 'BODY WEIGHT', '60 SEC'));
+  const out = readSheet(rows, 'Sheet1');
+  const s = summarise(out);
+  eq(s.days, 1);
+  eq(s.items, 2);
+  eq(s.distinctExercises, 2);
+  eq(s.modes.bodyweight_reps, 1, 'a body weight load is its own mode');
+  eq(s.modes.weight_reps, 1);
 });
 
 // ------------------------------------------------------------------ report

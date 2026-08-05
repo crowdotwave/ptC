@@ -15,9 +15,15 @@ import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import { wireNav } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './js/program.js';
+import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
 const el = (id) => document.getElementById(id);
-const state = { storage: null, trainer: null, template: null, days: [], items: new Map(), exercises: [] };
+const state = {
+  storage: null, trainer: null, template: null, days: [], items: new Map(), exercises: [],
+  // The parsed spreadsheet, held in memory only while the review screen is up. Nothing reaches
+  // the database until Create is pressed.
+  draft: null,
+};
 
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -27,6 +33,7 @@ const esc = (v) =>
 async function showList() {
   el('list-view').hidden = false;
   el('edit-view').hidden = true;
+  el('import-view').hidden = true;
   el('view-title').textContent = 'Programs';
 
   const templates = await state.storage.query('program_templates', { trainer_id: state.trainer.id });
@@ -54,6 +61,58 @@ async function showList() {
 }
 
 // ------------------------------------------------------------------ editor
+
+// ------------------------------------------------------------------ importing
+
+function showImportError(message) {
+  const node = el('import-error');
+  node.hidden = !message;
+  node.textContent = message ?? '';
+}
+
+async function startImport(file) {
+  showImportError('');
+  try {
+    state.draft = await readFile(file);
+  } catch (error) {
+    showImportError(error.message);
+    return;
+  }
+  el('list-view').hidden = true;
+  el('edit-view').hidden = true;
+  el('import-view').hidden = false;
+  el('view-title').textContent = 'Review before creating';
+  el('view-note').textContent = state.draft.fileName;
+  el('import-progress').textContent = '';
+  el('import-draft').innerHTML = renderDraft(state.draft);
+}
+
+async function commitImport() {
+  if (!state.draft) return;
+  const create = el('import-create');
+  create.disabled = true;
+  const progress = el('import-progress');
+
+  try {
+    const template = await createProgram(state.draft, {
+      storage: state.storage,
+      trainerId: state.trainer.id,
+      resolveExercise,
+      makeRecord,
+      onProgress: (done, total) => {
+        progress.textContent = `${done} of ${total}`;
+      },
+    });
+    state.draft = null;
+    await openTemplate(template.id);
+  } catch (error) {
+    showImportError(error.message);
+    el('import-view').hidden = true;
+    await showList();
+  } finally {
+    create.disabled = false;
+  }
+}
 
 async function openTemplate(templateId) {
   state.template = await state.storage.get('program_templates', templateId);
@@ -420,6 +479,28 @@ function wire() {
     await state.storage.put('program_templates', next);
     state.template = next;
     el('view-title').textContent = next.name;
+  });
+
+  el('import-file').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    // Cleared so choosing the same file twice in a row still fires a change event.
+    event.target.value = '';
+    if (file) await startImport(file);
+  });
+
+  el('import-cancel').addEventListener('click', async () => {
+    state.draft = null;
+    await showList();
+  });
+
+  el('import-create').addEventListener('click', commitImport);
+
+  // The Log column is the one thing on the review screen that edits the draft.
+  el('import-draft').addEventListener('change', (event) => {
+    const select = event.target.closest('.import__mode');
+    if (!select || !state.draft) return;
+    setMode(state.draft, Number(select.dataset.day), Number(select.dataset.item), select.value);
+    select.closest('tr')?.classList.remove('import__row--review');
   });
 
   el('add-day').addEventListener('click', addDay);

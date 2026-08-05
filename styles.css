@@ -1239,3 +1239,76 @@ button.navlink:disabled {
   color: var(--text-secondary);
   font-size: var(--t-body);
 }
+
+/* ---------------------------------------------------------------- spreadsheet import
+ *
+ * A review screen, shown before anything is written. Desktop only in practice, which is why it
+ * is allowed to be dense: a trainer checking 56 days of imported program is at a desk with two
+ * hands, the opposite of the logging screen.
+ */
+
+.import__summary {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-body);
+  color: var(--text-secondary);
+}
+
+.import__summary b {
+  color: var(--text-primary);
+}
+
+.import__error {
+  margin: var(--s-3) 0 0;
+  padding: var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+
+.import__warnings {
+  margin: 0 0 var(--s-3);
+  padding-left: var(--s-4);
+  font-size: var(--t-small);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.import__meta,
+.import__warm,
+.import__comments {
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}
+
+.import__warm,
+.import__comments {
+  margin: 0 0 var(--s-2);
+}
+
+.import__target {
+  font-size: var(--t-small);
+  color: var(--accent-data);
+}
+
+.import__none {
+  color: var(--muted);
+}
+
+/* No hue-only encoding. A row needing a look carries a left bar and a heavier target line, not
+ * just a tint, so it survives a screenshot, a projector, and colour blindness alike. */
+.import__row--review {
+  box-shadow: inset 3px 0 0 var(--accent-action);
+}
+
+.import__row--review .import__target {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.import__progress {
+  align-self: center;
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}

@@ -23,8 +23,24 @@
       <section id="list-view">
         <div class="secondary">
           <button type="button" class="button-secondary" id="new-program">New program</button>
+          <!-- The label is the control. A bare file input cannot be styled and reads as a
+               browser artefact next to a real button. -->
+          <label class="button-secondary" for="import-file">Import a spreadsheet</label>
+          <input class="visually-hidden" type="file" id="import-file" accept=".xlsx" />
         </div>
+        <p class="import__error" id="import-error" hidden role="status"></p>
         <ul class="clientlist" id="program-list"></ul>
+      </section>
+
+      <!-- Review, between reading the file and writing anything. Nothing exists in the database
+           while this is on screen. -->
+      <section id="import-view" hidden>
+        <div class="secondary">
+          <button type="button" class="button-secondary" id="import-cancel">Cancel</button>
+          <button type="button" class="button-secondary" id="import-create">Create this program</button>
+          <span class="import__progress num" id="import-progress"></span>
+        </div>
+        <div id="import-draft"></div>
       </section>
 
       <section id="edit-view" hidden>
