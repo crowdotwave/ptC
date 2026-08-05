@@ -16,7 +16,8 @@
 // formats also let the gateway reject a secret key arriving from something that looks like a
 // browser, which the legacy JWTs cannot do.
 //
-// Nothing imports this yet. The app is IndexedDB only until step 4 of the build order.
+// Imported by js/supabase.js and by nothing else. Every other module takes a client as an
+// argument, so this file has exactly one reader.
 
 export const SUPABASE_URL = "https://dhybzlcjdavsawrmsfte.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRoeWJ6bGNqZGF2c2F3cm1zZnRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MTY3MzAsImV4cCI6MjEwMTI5MjczMH0._dP6ryv5Im6y3VVv8Kt4soxNHMrHB3lURSoRfhzplhk";

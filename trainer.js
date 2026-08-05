@@ -5,9 +5,7 @@
 // and no inference can supply it. See suggestDeloadWeeks in js/progression.js for why the
 // suggestion is shown here and nowhere else.
 
-import { openStorage } from './js/storage.js';
-import { seed, isSeeded } from './js/seed.js';
-import { initActor } from './js/actor.js';
+import { boot, gate } from './js/boot.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 import { activeSetLogs } from './js/history.js';
@@ -181,17 +179,25 @@ function showList() {
 }
 
 async function main() {
-  const storage = await openStorage();
-  state.storage = storage;
-  if (!(await isSeeded(storage))) await seed(storage);
+  const booted = await boot();
+  if (!gate(booted)) return;
 
-  const actor = await initActor(storage);
-  const trainerId = actor.trainerId;
+  const { storage, actor } = booted;
+  state.storage = storage;
+
+  if (booted.mode === 'unbound') {
+    el('trainer-name').textContent = 'Not set up yet';
+    el('view-note').textContent = 'You are signed in, but this account is neither a trainer nor a client.';
+    return;
+  }
+
+  const trainerId = actor?.trainerId ?? null;
   state.trainer = trainerId ? await storage.get('trainers', trainerId) : null;
 
   if (!state.trainer) {
     el('trainer-name').textContent = 'No trainer';
-    el('view-note').textContent = 'Switch to a trainer with the dev role control to see this view.';
+    el('view-note').textContent =
+      booted.error || 'Switch to a trainer with the dev role control to see this view.';
     return;
   }
   el('trainer-name').textContent = state.trainer.display_name;

@@ -196,17 +196,43 @@ export function createStorage(driver) {
 
     /**
      * Flush the local queue to the remote, then pull remote changes. With no remote attached
-     * this reports what would be pushed and leaves the queue intact, so nothing is lost when
-     * Supabase is wired up later.
+     * this reports what would be pushed and leaves the queue intact, so nothing is lost.
+     *
+     * Push before pull, because the local device is the only place an unsynced write exists and
+     * a pull reconciles deletions. Reversing the order would let a mirror refresh remove a set
+     * the client logged thirty seconds ago in a basement with no signal.
+     *
+     * Never throws. Sync failing is an ordinary state on a gym floor, and a thrown error here
+     * would surface as a broken screen during a set. The result says what happened and the
+     * queue keeps everything that did not land.
      */
     async sync() {
       const queue = await storage.pending();
       if (!remote) {
-        return { remote: false, pushed: 0, pulled: 0, pending: queue.length };
+        return { remote: false, pushed: 0, pulled: 0, pending: queue.length, error: null };
       }
-      const pushed = await remote.push(queue);
-      const pulled = await remote.pull();
-      return { remote: true, pushed, pulled, pending: (await storage.pending()).length };
+      try {
+        const { pushed, blocked } = await remote.push(queue);
+        if (blocked) {
+          return {
+            remote: true,
+            pushed,
+            pulled: 0,
+            pending: (await storage.pending()).length,
+            error: `${blocked.table}: ${blocked.message}`,
+          };
+        }
+        const pulled = await remote.pull();
+        return { remote: true, pushed, pulled, pending: (await storage.pending()).length, error: null };
+      } catch (error) {
+        return {
+          remote: true,
+          pushed: 0,
+          pulled: 0,
+          pending: (await storage.pending()).length,
+          error: error.message,
+        };
+      }
     },
 
     /** Row counts per table. Used by the shell and by the seed to decide if it should run. */
@@ -225,6 +251,34 @@ export function createStorage(driver) {
     },
     async _clearAll() {
       return driver.clearAll();
+    },
+
+    // ---- outbox maintenance, for the remote adapter only ----
+
+    /** Entries that reached the server and are no longer owed to it. */
+    async _outboxDone(ids) {
+      return driver.deleteRows(OUTBOX_STORE, ids);
+    },
+
+    /**
+     * An entry that failed. It stays in the queue, because dropping a write nobody has accepted
+     * loses a client's set silently, which is the one outcome this whole design exists to avoid.
+     * The count and the message are recorded so a queue stuck on a permanent error can say what
+     * is wrong instead of only that it is deep.
+     */
+    async _outboxFail(entry, message) {
+      return driver.put(OUTBOX_STORE, {
+        ...entry,
+        attempts: (entry.attempts ?? 0) + 1,
+        last_error: message,
+        last_attempt_at: now(),
+      });
+    },
+
+    /** Removes rows the server no longer has. No outbox entry, and append only does not apply. */
+    async _mirrorDelete(table, ids) {
+      if (!TABLES[table]) throw new Error(`Unknown table: ${table}`);
+      return driver.deleteRows(table, ids);
     },
     getMeta: (key) => driver.getMeta(key),
     setMeta: (key, value) => driver.setMeta(key, value),

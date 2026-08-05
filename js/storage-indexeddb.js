@@ -312,6 +312,16 @@ export function createIndexedDbDriver(db) {
       return records.length;
     },
 
+    /** Deletes rows by id with no outbox entry. Used by sync to maintain the mirror. */
+    async deleteRows(store, ids) {
+      if (!ids.length) return 0;
+      const tx = write([store]);
+      const objectStore = tx.objectStore(store);
+      for (const id of ids) objectStore.delete(id);
+      await txDone(tx);
+      return ids.length;
+    },
+
     async clearAll() {
       const stores = [...TABLE_NAMES, OUTBOX_STORE, META_STORE];
       const tx = write(stores);

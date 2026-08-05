@@ -390,6 +390,97 @@ end $$;
 
 reset role;
 
+-- ================================================================ whoami, and what 0005 opened
+--
+-- The sync adapter asks the database who is holding this session, because a browser cannot read
+-- trainers.auth_user_id or clients.auth_user_id to work it out for itself.
+--
+-- The upsert check below is the one that looks like trivia and is not. PostgREST compiles
+-- .upsert() to `insert ... on conflict (id) do update set <every column in the payload>`, and
+-- Postgres checks the update privilege on every column in that SET list whether or not its
+-- value changed. clients had a deliberately narrow update grant, so before 0005 the adapter
+-- could not write a client row at all. Asserting the exact generated shape is the only way this
+-- stays true, because nothing else in the repo would notice the grant being tightened again.
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}', true);
+
+do $$
+declare v_role text; v_tid uuid; v_cid uuid; v_name text;
+begin
+  select w.actor_role, w.trainer_id, w.client_id into v_role, v_tid, v_cid from public.whoami() w;
+  if v_role <> 'trainer' then raise exception 'whoami called by a trainer returned %', v_role; end if;
+  if v_tid <> '10000000-0000-4000-8000-000000000001' then
+    raise exception 'whoami gave a trainer the wrong trainer_id: %', v_tid;
+  end if;
+  if v_cid is not null then raise exception 'whoami gave a trainer a client_id of %', v_cid; end if;
+
+  -- Exactly what PostgREST generates, conflict target included in the SET list.
+  insert into public.clients
+    (id, created_at, updated_at, trainer_id, display_name, email, status, weight_unit)
+  values ('20000000-0000-4000-8000-00000000000a', now(), now(), '10000000-0000-4000-8000-000000000001',
+          'Renamed By Upsert', 'client.a@example.com', 'active', 'kg')
+  on conflict (id) do update set
+    id = excluded.id, created_at = excluded.created_at, updated_at = excluded.updated_at,
+    trainer_id = excluded.trainer_id, display_name = excluded.display_name,
+    email = excluded.email, status = excluded.status, weight_unit = excluded.weight_unit;
+
+  select display_name into v_name from public.clients where id = '20000000-0000-4000-8000-00000000000a';
+  if v_name <> 'Renamed By Upsert' then raise exception 'the adapter upsert did not land, name is %', v_name; end if;
+end $$;
+
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+
+do $$
+declare v_role text; v_cid uuid; v_name text; v_owner uuid; blocked boolean;
+begin
+  select w.actor_role, w.client_id into v_role, v_cid from public.whoami() w;
+  if v_role <> 'client' then raise exception 'whoami called by a client returned %', v_role; end if;
+  if v_cid <> '20000000-0000-4000-8000-00000000000a' then
+    raise exception 'whoami gave a client the wrong client_id: %', v_cid;
+  end if;
+
+  -- positive control: a client can still edit their own row, which is the reason
+  -- clients_self_update exists at all
+  update public.clients set display_name = 'Self Renamed'
+   where id = '20000000-0000-4000-8000-00000000000a';
+  select display_name into v_name from public.clients where id = '20000000-0000-4000-8000-00000000000a';
+  if v_name <> 'Self Renamed' then raise exception 'a client cannot edit their own display name'; end if;
+
+  -- THE HOLE 0005 HAD TO CLOSE. Granting update on clients.trainer_id, which the adapter's
+  -- upsert requires, would otherwise let a client hand their entire training history to a
+  -- different trainer through the self update policy.
+  blocked := false;
+  begin
+    update public.clients set trainer_id = '10000000-0000-4000-8000-000000000002'
+     where id = '20000000-0000-4000-8000-00000000000a';
+  exception when others then blocked := true;
+  end;
+  select trainer_id into v_owner from public.clients where id = '20000000-0000-4000-8000-00000000000a';
+  if not blocked or v_owner <> '10000000-0000-4000-8000-000000000001' then
+    raise exception 'ISOLATION FAILURE: a client reassigned themselves to another trainer';
+  end if;
+end $$;
+
+reset role;
+
+-- a signed in user who is neither gets told so, rather than getting an empty program that looks
+-- like a program with nothing in it
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","role":"authenticated"}', true);
+
+do $$
+declare v_role text;
+begin
+  select w.actor_role into v_role from public.whoami() w;
+  if v_role <> 'none' then raise exception 'whoami called by an unbound user returned %', v_role; end if;
+end $$;
+
+reset role;
+
 -- ================================================================ timestamps are the server's
 --
 -- A browser clock is attacker controlled and conflict resolution is last write wins on
@@ -472,6 +563,14 @@ begin
   exception when others then blocked := true;
   end;
   if not blocked then raise exception 'ISOLATION FAILURE: anon called the auth binding function'; end if;
+
+  -- nor whoami, which would otherwise be a free oracle for whether an address has an account
+  blocked := false;
+  begin
+    perform * from public.whoami();
+  exception when others then blocked := true;
+  end;
+  if not blocked then raise exception 'ISOLATION FAILURE: anon called whoami'; end if;
 end $$;
 
 reset role;

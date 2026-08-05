@@ -11,9 +11,8 @@
 // optimistically: this is somebody at a desk, not a thumb between sets, and knowing it saved is
 // worth the wait.
 
-import { openStorage, makeRecord, newId } from './js/storage.js';
-import { seed, isSeeded } from './js/seed.js';
-import { initActor } from './js/actor.js';
+import { makeRecord, newId } from './js/storage.js';
+import { boot, gate } from './js/boot.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './js/program.js';
 
 const el = (id) => document.getElementById(id);
@@ -477,16 +476,17 @@ function wire() {
 }
 
 async function main() {
-  const storage = await openStorage();
-  state.storage = storage;
-  if (!(await isSeeded(storage))) await seed(storage);
+  const booted = await boot();
+  if (!gate(booted)) return;
 
-  const actor = await initActor(storage);
-  state.trainer = actor.trainerId ? await storage.get('trainers', actor.trainerId) : null;
+  const { storage, actor } = booted;
+  state.storage = storage;
+  state.trainer = actor?.trainerId ? await storage.get('trainers', actor.trainerId) : null;
 
   if (!state.trainer) {
     el('trainer-name').textContent = 'No trainer';
-    el('view-note').textContent = 'Switch to a trainer with the dev role control to build a program.';
+    el('view-note').textContent =
+      booted.error || 'Switch to a trainer with the dev role control to build a program.';
     return;
   }
   el('trainer-name').textContent = state.trainer.display_name;

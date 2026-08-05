@@ -1,14 +1,12 @@
-// Who the app is acting as. This seam is permanent.
+// Who the app is acting as, and the one door to the dev role switch.
 //
-// Today it resolves to the seeded default, or to whatever the dev role switch selected. At
-// step 4 the body of resolveActor becomes a Supabase auth lookup and every caller stays the
-// same, because no page ever asks "which client am I" any other way.
+// Resolving an identity now lives in boot.js, because the answer comes from the database
+// (public.whoami) rather than from anything this file can see. What stays here is the part that
+// was always local: the deletable dev switch, and the override it sets.
 //
 // The dev switch is loaded dynamically from here and nowhere else. Removing it for good is
 // deleting js/dev-role.js and the one block below marked as its only entry point. No page
 // imports it, so no page has to be untangled.
-
-import { getDefaultClientId } from './seed.js';
 
 const DEV_PARAM = 'dev';
 const DEV_ON_KEY = 'ptc.dev.on';
@@ -21,6 +19,10 @@ let override = null;
  */
 export function setActorOverride(actor) {
   override = actor;
+}
+
+export function actorOverride() {
+  return override;
 }
 
 /**
@@ -39,33 +41,12 @@ export function devEnabled() {
   }
 }
 
-/**
- * Resolves the acting identity, mounting the dev switch first if it is turned on so its
- * choice is already in place before any page reads this.
- *
- * Returns { role, clientId, trainerId }.
- */
-export async function initActor(storage) {
+/** Mounts the switch if it is turned on, so its choice is in place before any page reads it. */
+export async function mountDevSwitch(storage) {
   // ---- the dev switch, and its only entry point anywhere in the app ----
-  if (devEnabled()) {
-    const module = await import('./dev-role.js');
-    await module.mount(storage);
-  }
+  if (!devEnabled()) return false;
+  const module = await import('./dev-role.js');
+  await module.mount(storage);
+  return true;
   // ---- end dev switch ----
-
-  return resolveActor(storage);
-}
-
-export async function resolveActor(storage) {
-  if (override) return override;
-
-  // No auth yet, so the client app opens as the seeded default. This is the part that becomes
-  // a session lookup at step 4.
-  const clientId = await getDefaultClientId(storage);
-  const client = clientId ? await storage.get('clients', clientId) : null;
-  return {
-    role: 'client',
-    clientId: client ? client.id : null,
-    trainerId: client ? client.trainer_id : null,
-  };
 }

@@ -11,9 +11,8 @@
 //
 // The adapter is the only persistence surface here. This file never touches IndexedDB.
 
-import { openStorage, makeRecord, getDeviceId } from './js/storage.js';
-import { seed, isSeeded } from './js/seed.js';
-import { initActor } from './js/actor.js';
+import { makeRecord, getDeviceId } from './js/storage.js';
+import { boot, gate } from './js/boot.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
@@ -804,22 +803,33 @@ function wire() {
 }
 
 async function main() {
-  let storage;
+  let booted;
   try {
-    storage = await openStorage();
+    booted = await boot();
   } catch (error) {
     ui.exerciseName.textContent = 'Cannot open storage';
     showNotice(`${error.message} Serve this folder over http, not file://`);
     return;
   }
+  if (!gate(booted)) return;
+
+  const { storage, actor, mode } = booted;
   state.storage = storage;
 
-  if (!(await isSeeded(storage))) await seed(storage);
+  if (mode === 'unbound') {
+    ui.exerciseName.textContent = 'Not set up yet';
+    showNotice('You are signed in, but no trainer has added this email as a client.');
+    return;
+  }
+  if (booted.error) showNotice(booted.error);
 
-  const actor = await initActor(storage);
-  if (!actor.clientId) {
+  if (!actor || !actor.clientId) {
     ui.exerciseName.textContent = 'No client selected';
-    showNotice('Switch to a client with the dev role control, or open the trainer view.');
+    showNotice(
+      actor?.role === 'trainer'
+        ? 'You are signed in as a trainer. Open the trainer view.'
+        : 'Switch to a client with the dev role control, or open the trainer view.',
+    );
     return;
   }
   const { client, assignment, sessions } = await loadClientData(storage, actor.clientId);

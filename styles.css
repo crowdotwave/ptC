@@ -1097,3 +1097,104 @@ button {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------- sign in
+ *
+ * The one screen in the app that is read standing still, indoors, with two hands, before any
+ * training has started. So it drops the mid-set type tier entirely: nothing here has to be
+ * legible at arm's length, and blowing an email address up to 40px only makes it wrap.
+ *
+ * Inputs sit at 17px, which is also what stops iOS Safari zooming the viewport on focus. That
+ * zoom is not cosmetic here: it leaves the page scrolled sideways with the submit button off
+ * screen, on the one screen a person cannot get past.
+ */
+
+.auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 100dvh;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: var(--s-5) var(--s-4) calc(var(--s-4) + env(safe-area-inset-bottom, 0px));
+  justify-content: center;
+}
+
+.auth__title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.auth__lede {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-body);
+  color: var(--text-secondary);
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+}
+
+.auth__label {
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}
+
+.auth__input {
+  min-height: 52px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 17px;
+}
+
+.auth__input:focus {
+  border-color: var(--accent-data);
+}
+
+.auth__go {
+  min-height: 52px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent-action);
+  color: var(--surface-base);
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth__go:active {
+  background: var(--accent-action-pressed);
+}
+
+.auth__go:disabled {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: default;
+}
+
+.auth__note {
+  margin: 0;
+  min-height: 3em;
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}
+
+/* No hue-only encoding, so the two outcomes differ by weight as well as by colour. */
+.auth__note[data-kind='ok'] {
+  color: var(--accent-data);
+}
+
+.auth__note[data-kind='fail'] {
+  color: var(--text-primary);
+  font-weight: 700;
+}

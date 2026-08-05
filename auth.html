@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Sign in to ptC</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="auth">
+      <h1 class="auth__title">ptC</h1>
+      <p class="auth__lede" id="lede">Enter the email your trainer has for you.</p>
+
+      <form class="auth__form" id="email-form" novalidate>
+        <label class="auth__label" for="email">Email</label>
+        <input
+          class="auth__input"
+          id="email"
+          type="email"
+          name="email"
+          inputmode="email"
+          autocomplete="email"
+          autocapitalize="off"
+          spellcheck="false"
+          required
+        />
+        <button class="auth__go" id="send" type="submit">Send me a link</button>
+      </form>
+
+      <!-- The typed code. Hidden until a link has been sent, because offering two ways in at
+           once makes the first decision on the screen a choice nobody has enough information
+           to make. -->
+      <form class="auth__form" id="code-form" hidden novalidate>
+        <label class="auth__label" for="code">Or paste the code from the email</label>
+        <input
+          class="auth__input num"
+          id="code"
+          type="text"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="8"
+        />
+        <button class="auth__go" id="verify" type="submit">Sign in</button>
+      </form>
+
+      <p class="auth__note" id="note" role="status"></p>
+    </main>
+
+    <script type="module" src="auth-page.js"></script>
+  </body>
+</html>

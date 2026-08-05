@@ -6,9 +6,7 @@
 // because volume misreports strength in both directions and estimated 1RM is the only series
 // here designed to cross a change of rep scheme.
 
-import { openStorage } from './js/storage.js';
-import { seed, isSeeded } from './js/seed.js';
-import { initActor } from './js/actor.js';
+import { boot, gate } from './js/boot.js';
 import { buildProgression } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 
@@ -125,16 +123,21 @@ async function selectExercise(exerciseId) {
 }
 
 async function main() {
-  const storage = await openStorage();
-  state.storage = storage;
-  if (!(await isSeeded(storage))) await seed(storage);
+  const booted = await boot();
+  if (!gate(booted)) return;
 
-  const actor = await initActor(storage);
-  const clientId = new URLSearchParams(location.search).get('client') || actor.clientId;
+  const { storage, actor } = booted;
+  state.storage = storage;
+
+  // A trainer opens this with ?client=. A client only ever gets their own, and asking for
+  // somebody else's id returns nothing, because the local mirror only holds what RLS let
+  // through in the first place.
+  const clientId = new URLSearchParams(location.search).get('client') || actor?.clientId;
   state.client = clientId ? await storage.get('clients', clientId) : null;
   if (!state.client) {
     el('exercise-name').textContent = 'No client selected';
-    el('headline').textContent = 'Switch to a client with the dev role control.';
+    el('headline').textContent =
+      booted.error || 'Switch to a client with the dev role control.';
     return;
   }
 

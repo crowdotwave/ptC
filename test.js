@@ -12,6 +12,7 @@ import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_M
 import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
 import { parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine } from './js/program.js';
+import { toWire, fromWire, batchQueue } from './js/remote.js';
 
 const results = [];
 
@@ -815,6 +816,89 @@ test('a repless row does not appear as a load line', () => {
   ];
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
   eq(p.repsAtLoad.lines, [], 'reps at load has nothing to draw without reps');
+});
+
+// ------------------------------------------------------------------ what goes over the wire
+//
+// These three functions are where the browser and the database's grants meet, and every rule in
+// them was put there by a specific line in a migration rather than by taste. A test that pins
+// the rule to its reason is what stops the next person deleting it as redundant.
+
+// 0002 withholds auth_user_id from every role that writes, so sending it turns a legitimate
+// write into a permission error. This is the note that migration left for step 4.
+test('auth_user_id never leaves the browser on a trainer or client write', () => {
+  const client = {
+    id: 'c1', created_at: 't', updated_at: 't', trainer_id: 'tr1', auth_user_id: 'u1',
+    display_name: 'Someone', email: 'a@b.c', status: 'active', weight_unit: 'kg',
+  };
+  ok(!('auth_user_id' in toWire('clients', client)), 'clients leaked auth_user_id');
+  eq(toWire('clients', client).display_name, 'Someone', 'the rest of the row still goes');
+
+  const trainer = {
+    id: 'tr1', created_at: 't', updated_at: 't', auth_user_id: 'u1',
+    display_name: 'Clay', brand_color: '#ff8a45', logo_url: null, weight_unit: 'kg',
+  };
+  ok(!('auth_user_id' in toWire('trainers', trainer)), 'trainers leaked auth_user_id');
+});
+
+test('a set log goes over the wire whole, since nothing on it is withheld', () => {
+  const row = {
+    id: 's1', created_at: 't', session_id: 'sess1', exercise_id: 'e1', set_index: 0,
+    weight_kg: 100, reps: 5, rounds: null, rpe: null, is_warmup: false,
+    logged_at: 't', supersedes_id: null, is_void: false, is_extra: false, device_id: 'd1',
+  };
+  eq(Object.keys(toWire('set_logs', row)).length, Object.keys(row).length);
+  ok(!('updated_at' in toWire('set_logs', row)), 'append only tables have no updated_at');
+});
+
+// trainers has a column level select grant, so a pulled row simply has no auth_user_id key.
+// Restoring it as null is what lets the row pass the schema validator on the way to disk.
+test('a column this role cannot read comes back as null, not as missing', () => {
+  const pulled = fromWire('trainers', {
+    id: 'tr1', created_at: 't', updated_at: 't', display_name: 'Clay',
+    brand_color: '#ff8a45', logo_url: null, weight_unit: 'kg',
+  });
+  eq(pulled.auth_user_id, null);
+  eq(pulled.display_name, 'Clay');
+});
+
+// PostgREST is entitled to send a numeric as a string. A weight that arrives as "100.5" and is
+// stored unconverted turns every chart on that lift into string concatenation.
+test('numerics and ints are coerced rather than trusted', () => {
+  const pulled = fromWire('set_logs', {
+    id: 's1', created_at: 't', session_id: 'sess1', exercise_id: 'e1', set_index: '2',
+    weight_kg: '100.5', reps: '5', rounds: null, rpe: null, is_warmup: false,
+    logged_at: 't', supersedes_id: null, is_void: false, is_extra: false, device_id: 'd1',
+  });
+  eq(pulled.weight_kg, 100.5);
+  eq(pulled.reps, 5);
+  eq(pulled.set_index, 2);
+  eq(pulled.rounds, null, 'a real null stays null rather than becoming zero');
+});
+
+// The queue is causally ordered: a session insert sits ahead of the set logs pointing at it.
+// Batching may only merge neighbours, because reordering would push a child before its parent.
+test('batching preserves order and never merges across a table boundary', () => {
+  const entry = (id, table, op = 'put') => ({ id, table, op, record_id: id, payload: { id } });
+  const batches = batchQueue([
+    entry('1', 'sessions'),
+    entry('2', 'set_logs'),
+    entry('3', 'set_logs'),
+    entry('4', 'sessions'),
+    entry('5', 'set_logs'),
+  ]);
+  eq(batches.map((b) => `${b.table}x${b.entries.length}`), [
+    'sessionsx1', 'set_logsx2', 'sessionsx1', 'set_logsx1',
+  ]);
+});
+
+test('a delete and a put on the same table are never merged into one request', () => {
+  const batches = batchQueue([
+    { id: '1', table: 'clients', op: 'put', record_id: '1', payload: { id: '1' } },
+    { id: '2', table: 'clients', op: 'delete', record_id: '2', payload: null },
+  ]);
+  eq(batches.length, 2);
+  eq(batches.map((b) => b.op), ['put', 'delete']);
 });
 
 // ------------------------------------------------------------------ report
