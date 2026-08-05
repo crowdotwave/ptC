@@ -635,8 +635,24 @@ function adjustWeight(direction) {
   renderValues();
 }
 
+/**
+ * Reps move in halves, rounds move in whole numbers.
+ *
+ * A half rep is the one that got most of the way up, and a real log kept by hand is full of
+ * them: roughly a quarter of the sets in the first one this app was pointed at. There is no way
+ * to reach that with a thumb unless the step is a half.
+ *
+ * The cost is honest and worth stating: any change now takes twice the taps it used to. That is
+ * bounded by the prefill, which starts the stepper on last session's number, so the common case
+ * is still zero taps and the next most common is one or two. Hold to repeat covers the rest.
+ *
+ * Half a round is not a thing anybody has written down, so a circuit still steps by one.
+ */
 function adjustReps(direction) {
-  state.reps = Math.max(1, state.reps + direction);
+  const step = currentEntry()?.logMode === 'rounds' ? 1 : 0.5;
+  // Rounded because repeated addition of 0.5 in binary floating point drifts, and a readout
+  // saying 10.499999999999998 mid set would be the end of anybody trusting the numbers.
+  state.reps = Math.max(step, Math.round((state.reps + direction * step) * 10) / 10);
   renderValues();
 }
 
@@ -664,9 +680,9 @@ function exitTypingMode() {
 
 function commitTyped() {
   const weight = Number.parseFloat(ui.weightInput.value);
-  const reps = Number.parseInt(ui.repsInput.value, 10);
+  const reps = Number.parseFloat(ui.repsInput.value);
   if (Number.isFinite(weight) && weight >= 0) state.weightKg = fromDisplay(weight);
-  if (Number.isInteger(reps) && reps >= 1) state.reps = reps;
+  if (Number.isFinite(reps) && reps > 0) state.reps = Math.round(reps * 10) / 10;
   renderValues();
 }
 

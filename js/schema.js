@@ -198,7 +198,12 @@ export const TABLES = {
       // Null on a carry or a sled, where the load is the whole point and there are no reps to
       // count. Anything that computes volume or an estimated 1RM skips these rows rather than
       // inventing a number for them.
-      reps: { type: INT, nullable: true },
+      //
+      // Numeric, not an integer, because a half rep is a real thing people write down: the rep
+      // that got most of the way up. Rounding it away throws out the difference between a
+      // session that improved and one that did not, and rounding it up invents a rep nobody
+      // completed. Epley and volume are both indifferent to it.
+      reps: { type: NUMERIC, nullable: true },
       // Rounds completed in an AMRAP block. Null everywhere else.
       rounds: { type: INT, nullable: true },
       rpe: { type: NUMERIC, nullable: true },

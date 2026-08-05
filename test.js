@@ -14,6 +14,7 @@ import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDe
 import { parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine } from './js/program.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
 import { can } from './js/boot.js';
+import { validate } from './js/schema.js';
 
 const results = [];
 
@@ -933,6 +934,42 @@ test('a coach id belonging to somebody else is not a capability', () => {
   ok(!can(client, 'trainer'), 'trainerId must mean the trainer you are, not the one you train under');
   ok(!can(null, 'client'), 'no actor is no capability');
   ok(!can(undefined, 'trainer'));
+});
+
+// ------------------------------------------------------------------ half reps
+//
+// From a training log kept by hand: pushups 14 - 14 - 12 - 10.5, pullups 6 - 6.5 - 5.5.
+// Roughly a quarter of the sets carry a half. It is the rep that got most of the way up.
+
+test('a half rep survives the schema instead of being rejected as a non integer', () => {
+  const stored = validate('set_logs', {
+    id: '00000000-0000-4000-8000-000000000001',
+    created_at: '2026-08-05T00:00:00.000Z',
+    session_id: '00000000-0000-4000-8000-000000000002',
+    exercise_id: '00000000-0000-4000-8000-000000000003',
+    set_index: 3, weight_kg: 0, reps: 10.5, rounds: null, rpe: null,
+    is_warmup: false, logged_at: '2026-08-05T00:00:00.000Z',
+    supersedes_id: null, is_void: false, is_extra: false, device_id: 'test',
+  });
+  eq(stored.reps, 10.5, 'the half was not stored');
+});
+
+test('a half rep is not the same estimated 1RM as rounding it either way', () => {
+  const half = epley1rm(60, 10.5);
+  ok(half > epley1rm(60, 10), 'rounding down would have understated the session');
+  ok(half < epley1rm(60, 11), 'rounding up would have invented a rep nobody completed');
+  eq(half, 81);
+});
+
+test('half reps carry through volume and a chart without going NaN', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 0, reps: 14 }),
+    row({ session_id: 's2', weight_kg: 0, reps: 10.5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points.length, 2);
+  for (const point of p.points) ok(Number.isFinite(point.prescribed), 'volume went NaN on a half rep');
 });
 
 // ------------------------------------------------------------------ report
