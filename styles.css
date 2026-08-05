@@ -1312,3 +1312,89 @@ button.navlink:disabled {
   font-size: var(--t-small);
   color: var(--text-secondary);
 }
+
+/* ---------------------------------------------------------------- the builder table, sized
+ *
+ * The builder was capped at 60rem while its table needed 62, so it scrolled sideways at every
+ * window size, including a 27 inch monitor. Two causes, both fixed here: the container was the
+ * same width as the client list, and every input carried the same 7rem minimum whether it held
+ * an exercise name or the number 4.
+ *
+ * This is the one screen in the app designed for a desk. It gets the width of the desk.
+ */
+
+.screen--table {
+  max-width: 108rem;
+}
+
+/* Fixed layout, so the columns are what is declared here rather than whatever the longest cell
+ * argues for. The minimum is what makes it degrade to a scroll on a narrow laptop instead of
+ * crushing the exercise name to nothing. */
+.ptable {
+  table-layout: fixed;
+  min-width: 62rem;
+}
+
+.col--num { width: 3.5rem; }
+.col--adjust { width: 8rem; }
+.col--sets { width: 4rem; }
+.col--reps { width: 6rem; }
+.col--load { width: 8rem; }
+.col--rest { width: 6rem; }
+.col--log { width: 9.5rem; }
+.col--actions { width: 6.5rem; }
+/* Exercise takes what is left, which on a desktop is most of it. */
+
+/* The blanket minimum is gone. Widths now come from the colgroup, and an input that has to fit
+ * inside a 4rem Sets column must be allowed to. */
+.cell {
+  min-width: 0;
+}
+
+.ptable td {
+  padding: var(--s-1) var(--s-1);
+}
+
+/* What the client reads, in the colour they read it in. The same tie the import review makes,
+ * because the question a trainer is answering in both places is the same one. */
+.ptable__target {
+  margin: 2px 0 0;
+  padding: 0 var(--s-2);
+  font-size: var(--t-small);
+  line-height: 1.3;
+  color: var(--accent-data);
+}
+
+.ptable__target:empty::before {
+  content: 'Nothing for the client to read yet';
+  color: var(--muted);
+}
+
+/* Three words became three glyphs, which is what freed the width for the exercise name. The
+ * label is still there for a screen reader and on hover, so nothing is encoded by shape alone. */
+.iconbtn {
+  min-width: 1.75rem;
+  min-height: var(--tap);
+  padding: 0 var(--s-1);
+  border: 1px solid var(--surface-raised);
+  border-radius: calc(var(--radius) - 4px);
+  color: var(--text-secondary);
+  font-size: var(--t-body);
+  line-height: 1;
+}
+
+.iconbtn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-data);
+}
+
+.legend {
+  margin: 0 0 var(--s-4);
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}
+
+.legend__swatch {
+  color: var(--accent-data);
+  font-weight: 700;
+}

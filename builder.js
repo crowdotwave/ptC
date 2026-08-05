@@ -14,7 +14,7 @@
 import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import { wireNav } from './js/nav.js';
-import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './js/program.js';
+import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } from './js/program.js';
 import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
 const el = (id) => document.getElementById(id);
@@ -187,6 +187,11 @@ function renderDay(day) {
 
     <div class="tablewrap">
       <table class="ptable">
+        <colgroup>
+          <col class="col--num" /><col class="col--exercise" /><col class="col--adjust" />
+          <col class="col--sets" /><col class="col--reps" /><col class="col--load" />
+          <col class="col--rest" /><col class="col--log" /><col class="col--actions" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col">#</th>
@@ -218,17 +223,39 @@ function renderDay(day) {
   </section>`;
 }
 
+// Short enough to read inside the column rather than being cut off by it. The two added here
+// were missing entirely, so a bodyweight lift or a timed hold could be imported but never built.
+const LOG_MODES = [
+  ['weight_reps', 'Weight + reps'],
+  ['bodyweight_reps', 'Bodyweight'],
+  ['time_hold', 'Hold, seconds'],
+  ['weight_only', 'Weight only'],
+  ['rounds', 'Rounds'],
+];
+
+/** The sentence this row puts on the client's phone. Empty when the row is not logged. */
+function clientLine(item) {
+  if (item.is_logged === false) return 'Shown, never logged';
+  return targetLine({
+    target_sets: item.target_sets,
+    target_reps_text: item.target_reps_text,
+    target_load: item.target_load,
+    rest_seconds: item.rest_seconds,
+  });
+}
+
 function renderRow(item) {
   const name = state.exercises.find((e) => e.id === item.exercise_id)?.name ?? '';
-  const modes = [
-    ['weight_reps', 'Weight and reps'],
-    ['weight_only', 'Weight only'],
-    ['rounds', 'Rounds'],
-  ];
+  const modes = LOG_MODES;
   return `
   <tr data-item="${item.id}">
     <td><input class="cell cell--narrow" data-col="group_label" value="${esc(item.group_label)}" placeholder="1" aria-label="Set number" /></td>
-    <td><input class="cell" data-col="exercise" list="exercise-options" value="${esc(name)}" placeholder="Exercise" aria-label="Exercise" /></td>
+    <td>
+      <input class="cell" data-col="exercise" list="exercise-options" value="${esc(name)}" placeholder="Exercise" aria-label="Exercise" />
+      <!-- What the client actually reads, in the data colour it is shown in on their phone.
+           Derived from the four cells to the right, so it updates as they are typed. -->
+      <p class="ptable__target" data-target="${item.id}">${esc(clientLine(item))}</p>
+    </td>
     <td><input class="cell" data-col="variation" value="${esc(item.variation)}" placeholder="BARBELL" aria-label="Adjust" /></td>
     <td><input class="cell cell--narrow" data-col="sets" value="${esc(item.target_sets ?? '')}" placeholder="3" aria-label="Sets" /></td>
     <td><input class="cell cell--narrow" data-col="reps" value="${esc(item.target_reps_text)}" placeholder="6-8" aria-label="Reps" /></td>
@@ -246,9 +273,9 @@ function renderRow(item) {
       </select>
     </td>
     <td class="ptable__actions">
-      <button type="button" class="button-secondary" data-act="row-up">Up</button>
-      <button type="button" class="button-secondary" data-act="row-down">Down</button>
-      <button type="button" class="button-secondary" data-act="row-delete">Delete</button>
+      <button type="button" class="iconbtn" data-act="row-up" title="Move up" aria-label="Move up">&uarr;</button>
+      <button type="button" class="iconbtn" data-act="row-down" title="Move down" aria-label="Move down">&darr;</button>
+      <button type="button" class="iconbtn" data-act="row-delete" title="Delete row" aria-label="Delete row">&times;</button>
     </td>
   </tr>`;
 }
@@ -342,7 +369,22 @@ async function saveRow(dayId, itemId, col, value) {
   await state.storage.put('template_items', next);
   Object.assign(item, next);
 
-  if (col === 'reps' || col === 'load' || col === 'log_mode') renderDays();
+  // Deliberately not renderDays(). Rebuilding every table on each keystroke threw away the
+  // caret, so editing Reps meant retyping it. Only the two derived things are refreshed, in
+  // place, and the input the trainer is inside is never replaced.
+  refreshDerived(dayId, item);
+}
+
+/** Updates the client sentence and the Log column without touching the inputs around them. */
+function refreshDerived(dayId, item) {
+  const line = document.querySelector(`[data-target="${item.id}"]`);
+  if (line) line.textContent = clientLine(item);
+
+  const row = document.querySelector(`tr[data-item="${item.id}"]`);
+  const select = row?.querySelector('[data-col="log_mode"]');
+  if (select && document.activeElement !== select) {
+    select.value = item.is_logged ? item.log_mode : 'off';
+  }
 }
 
 async function addRow(dayId) {
