@@ -12,6 +12,12 @@
 -- either way. The fixture uuids are fixed and obviously synthetic, so a collision with real
 -- data fails loudly rather than corrupting anything.
 --
+-- One rule that keeps it safe once the database is no longer empty: any count taken as the owner
+-- must be scoped to a fixture, because the owner has bypassrls and sees real rows too. Counts
+-- taken inside `set local role authenticated` need no such care, since RLS has already narrowed
+-- them to the fixture trainer. An unscoped owner count passed on an empty database and started
+-- failing the day the first real trainer existed.
+--
 -- How to run: paste the whole file into the Supabase SQL editor and execute. A pass prints one
 -- row saying so. A failure raises with the name of the check that broke.
 
@@ -251,7 +257,7 @@ reset role;
 -- Supabase internal table.
 
 do $$
-declare outcome text; n bigint;
+declare outcome text; n bigint; v_status text;
 begin
   -- the whole point: a program is waiting before the person has ever signed up
   select count(*) into n from public.assignments where client_id = '20000000-0000-4000-8000-00000000000d';
@@ -267,9 +273,17 @@ begin
 
   select count(*) into n from public.clients
    where id = '20000000-0000-4000-8000-00000000000d'
-     and auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
-     and status = 'active';
+     and auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   if n <> 1 then raise exception 'client D did not bind on the email match'; end if;
+
+  -- Bound, and still not active. Supabase creates the auth user when a link is requested, not
+  -- when it is used, so binding here means "somebody typed this address", which is not the same
+  -- as "this person has arrived". 'invited' is the only signal a trainer has for the difference,
+  -- and it used to be burned by anyone who typed a pending client's address into the sign in box.
+  select status into v_status from public.clients where id = '20000000-0000-4000-8000-00000000000d';
+  if v_status <> 'invited' then
+    raise exception 'binding claimed the client as %, before they ever opened the link', v_status;
+  end if;
 
   -- and no trainer was created for them
   select count(*) into n from public.trainers where auth_user_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -389,6 +403,45 @@ begin
 end $$;
 
 reset role;
+
+-- ================================================================ active means signed in
+--
+-- The binding above is deliberately silent about status. This is the other half: opening the
+-- link is what claims the row. Driven through auth.users rather than by calling the function,
+-- because the trigger is the thing being tested and it fires on a column changing.
+
+do $$
+declare v_uid uuid := 'eeeeeeee-1111-4111-8111-111111111111'; v_status text;
+begin
+  insert into public.clients (id, trainer_id, display_name, email, status, weight_unit)
+  values ('2f000000-0000-4000-8000-00000000000e', '10000000-0000-4000-8000-000000000001',
+          'Client E', 'client.e@example.com', 'invited', 'kg');
+
+  -- A link is requested. Supabase creates the user unconfirmed and the insert trigger binds.
+  insert into auth.users (id, email, aud, role)
+  values (v_uid, 'client.e@example.com', 'authenticated', 'authenticated');
+
+  select status into v_status from public.clients where id = '2f000000-0000-4000-8000-00000000000e';
+  if v_status <> 'invited' then
+    raise exception 'requesting a link made client E %, which it should not', v_status;
+  end if;
+
+  -- They open it.
+  update auth.users set email_confirmed_at = now() where id = v_uid;
+  select status into v_status from public.clients where id = '2f000000-0000-4000-8000-00000000000e';
+  if v_status <> 'active' then
+    raise exception 'opening the link left client E as %, so the trigger did not fire', v_status;
+  end if;
+
+  -- An archived client signing in again is not a decision to un-archive them.
+  update public.clients set status = 'archived' where id = '2f000000-0000-4000-8000-00000000000e';
+  update auth.users set email_confirmed_at = null where id = v_uid;
+  update auth.users set email_confirmed_at = now() where id = v_uid;
+  select status into v_status from public.clients where id = '2f000000-0000-4000-8000-00000000000e';
+  if v_status <> 'archived' then
+    raise exception 'a returning archived client was silently un-archived to %', v_status;
+  end if;
+end $$;
 
 -- ================================================================ whoami, and what 0005 opened
 --
