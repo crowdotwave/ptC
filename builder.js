@@ -13,7 +13,7 @@
 
 import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
-import { wireNav } from './js/nav.js';
+import { mountShell } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } from './js/program.js';
 import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
@@ -605,7 +605,7 @@ async function main() {
 
   const { storage, actor } = booted;
   state.storage = storage;
-  wireNav(booted);
+  mountShell(booted, 'programs');
   state.trainer = actor?.trainerId ? await storage.get('trainers', actor.trainerId) : null;
 
   if (!state.trainer) {

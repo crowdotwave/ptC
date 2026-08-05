@@ -13,7 +13,7 @@
 
 import { makeRecord, getDeviceId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
-import { wireNav } from './js/nav.js';
+import { mountShell } from './js/nav.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
@@ -777,11 +777,13 @@ function renderDayPicker(snapshot, sessions) {
   ui.dayPicker.innerHTML = days
     .map((day) => {
       const on = day.day_index === state.day.day_index;
+      // The split only. The day type above it said STRENGTH on almost every chip, which is a
+      // word that distinguishes nothing when it is on all of them, and it doubled the height of
+      // the one control on this screen that has to be scanned rather than read.
       const label = day.split || day.name;
-      const type = day.day_type ? `<span class="daypicker__type">${escapeText(day.day_type)}</span>` : '';
       return (
         `<button type="button" class="button-secondary daypicker__item${on ? ' is-on' : ''}" ` +
-        `data-day="${day.day_index}"${on ? ' aria-current="true"' : ''}>${type}${escapeText(label)}</button>`
+        `data-day="${day.day_index}"${on ? ' aria-current="true"' : ''}>${escapeText(label)}</button>`
       );
     })
     .join('');
@@ -869,7 +871,7 @@ async function main() {
 
   const { storage, actor, mode } = booted;
   state.storage = storage;
-  wireNav(booted);
+  mountShell(booted, 'log');
 
   if (mode === 'unbound') {
     ui.clientName.textContent = 'Not set up yet';

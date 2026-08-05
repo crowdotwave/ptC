@@ -6,7 +6,7 @@
 // suggestion is shown here and nowhere else.
 
 import { boot, gate } from './js/boot.js';
-import { wireNav } from './js/nav.js';
+import { mountShell } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 import { activeSetLogs } from './js/history.js';
@@ -196,7 +196,7 @@ async function main() {
 
   const { storage, actor } = booted;
   state.storage = storage;
-  wireNav(booted);
+  mountShell(booted, 'clients');
 
   if (booted.mode === 'unbound') {
     el('trainer-name').textContent = 'Not set up yet';

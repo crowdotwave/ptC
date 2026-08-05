@@ -255,6 +255,13 @@ Constraints:
   floor on it: `--text-secondary` measures 4.39, missing both the 7:1 and the 4.5:1 rules.
   Anything that needs a second text colour needs a different surface, not a different token.
 - Minimum touch target 44px, and the primary log action considerably larger
+- Navigation is a tab bar fixed to the bottom, plus a menu button top right carrying identity
+  and sign out. Tabs are chosen by capability, never by role name, so somebody who coaches and
+  is also coached sees all four. An earlier rule here kept the bottom band clear for the log
+  action, on the grounds that a tab bar would sit in the thumb arc it owns. That was reversed
+  deliberately: the log action stays far larger and keeps a gap beneath it, and the bar is what
+  makes this read as an app rather than a page. The cost is a mis-tap risk between two targets
+  of very different size, which is a thing to watch in real use
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
 - Responsive down to a 360px viewport, designed mobile first, desktop is the trainer view

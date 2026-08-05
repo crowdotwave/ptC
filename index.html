@@ -18,15 +18,23 @@
       <!-- Top third. Nothing here is interactive: on a 6.7 inch phone held in one hand this
            band is out of the thumb's reach, so it carries reading material only. -->
       <header class="context">
-        <!-- The only navigation on this screen, and it sits in the unreachable top band on
-             purpose. A bottom tab bar is the standard answer and it is wrong here: it would
-             land in the thumb arc the log action owns. You never navigate mid set. -->
-        <p class="context__who">
-          <span id="client-name">Loading</span> <span id="day-name"></span>
-          <a class="navlink" href="progress.html">Progress</a>
-          <a class="navlink" href="trainer.html" data-needs="trainer" hidden>Clients</a>
-          <a class="navlink" href="builder.html" data-needs="trainer" hidden>Programs</a>
-        </p>
+        <!-- Navigation is a menu button here and a tab bar along the bottom. This used to be a
+             line of text links, kept out of the thumb arc on the grounds that a bottom bar would
+             sit where the log action lives. That reasoning was right about the risk and wrong
+             about the balance. See js/nav.js. -->
+        <div class="shell">
+          <button class="shell__menu" id="menu-toggle" type="button"
+                  aria-expanded="false" aria-controls="menu-panel" aria-label="Menu">
+            <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round">
+              <path d="M4 6h12M4 10h12M4 14h12" />
+            </svg>
+          </button>
+          <div class="shell__panel" id="menu-panel" hidden>
+            <p class="shell__who"><span id="client-name">Loading</span> <span id="day-name"></span></p>
+            <button class="shell__item" type="button" data-signout hidden>Sign out</button>
+          </div>
+        </div>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <p class="context__set num" id="set-position">&nbsp;</p>
         <!-- The client picks the day. A five day rotation is not done in order, so guessing
@@ -109,6 +117,11 @@
         </button>
       </div>
     </main>
+
+    <!-- Bottom navigation. Reverses the CLAUDE.md rule that kept this band clear for Log set,
+         which is explained in js/nav.js. The log action stays larger and keeps a gap. -->
+    <nav class="tabbar" id="tabbar" aria-label="Sections" hidden></nav>
+
 
     <script type="module" src="app.js"></script>
   </body>

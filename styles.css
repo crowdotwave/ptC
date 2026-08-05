@@ -791,10 +791,32 @@ button {
   gap: var(--s-5);
 }
 
+/* One row that scrolls, rather than a block that wraps.
+ *
+ * Wrapping cost four rows of a phone screen for seven lifts, which pushed the first chart below
+ * the fold on the one page whose entire job is showing a chart. Scrolling trades a little
+ * discoverability for that height, and the trade is worth it because the lift you want is
+ * almost always the one you were just on, which is the one already in view. */
 .lifts {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--s-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Bleeds to the screen edge so a half visible chip says there is more, which is the only
+   * affordance a scroller of this kind gets. */
+  margin: 0 calc(var(--s-4) * -1);
+  padding: var(--s-1) var(--s-4);
+  scroll-snap-type: x proximity;
+}
+
+.lifts::-webkit-scrollbar {
+  display: none;
+}
+
+.lifts__item {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
 }
 
 .lifts__item.is-on {
@@ -804,9 +826,12 @@ button {
 
 /* ---------------------------------------------------------------- navigation
  *
- * There are two destinations, which does not need a navigation system, it needs two links.
- * Both live in the top band, which is the read only zone out of thumb reach, because a bottom
- * bar would sit in the arc the log action owns and nobody navigates mid set.
+ * Superseded. Navigation now lives in .shell and .tabbar at the bottom of this file. These
+ * rules remain for the few text links left inside pages, such as the back links in the builder.
+ *
+ * What was here said two destinations need two links rather than a navigation system, and that
+ * both belonged in the top band because a bottom bar would sit in the arc the log action owns.
+ * The first half stopped being true when the app grew to four destinations and two roles.
  */
 
 .navlink {
@@ -1397,4 +1422,155 @@ button.navlink:disabled {
 .legend__swatch {
   color: var(--accent-data);
   font-weight: 700;
+}
+
+/* ---------------------------------------------------------------- the app shell
+ *
+ * A menu button top right and a tab bar along the bottom, replacing a line of text links that
+ * ran across the top of every screen and put the app's identity above the thing the app is for.
+ *
+ * The bottom bar reverses the rule that kept this band clear for Log set. The reasoning is in
+ * js/nav.js. What that rule was protecting is preserved here by size and distance rather than by
+ * absence: the log action stays far larger and the bar keeps its own gap under it.
+ */
+
+/* Anchored to the screen, not the page. Absolute against <body> put it under the sticky dev
+ * bar, which is only visible with ?dev=1 but is exactly where somebody testing would look for
+ * it. Anchoring to the padded content area also keeps it aligned with the text it sits beside. */
+.screen,
+.auth {
+  position: relative;
+}
+
+.shell {
+  position: absolute;
+  top: var(--s-4);
+  right: var(--s-4);
+  z-index: 3;
+}
+
+.shell__menu {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  /* A tiny amount of light, so it reads as a control rather than a mark on the background. */
+  box-shadow: inset 0 0 0 1px var(--surface-raised);
+}
+
+.shell__menu svg {
+  width: 20px;
+  height: 20px;
+}
+
+.shell__menu:hover,
+.shell__menu[aria-expanded='true'] {
+  color: var(--accent-data);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-data),
+    0 0 var(--glow-radius-rest) color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+}
+
+.shell__panel {
+  position: absolute;
+  top: calc(var(--tap) + var(--s-2));
+  right: 0;
+  min-width: 13rem;
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+}
+
+.shell__who {
+  margin: 0;
+  font-size: var(--t-small);
+  color: var(--text-secondary);
+}
+
+.shell__item {
+  align-self: flex-start;
+  min-height: var(--tap);
+  color: var(--accent-data);
+  font-size: var(--t-body);
+}
+
+/* ---------------------------------------------------------------- tab bar */
+
+/* Room for the button, so a long lift name wraps before it reaches it rather than under it. */
+.context__exercise,
+.context__who {
+  padding-right: calc(var(--tap) + var(--s-2));
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: space-around;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2) calc(var(--s-1) + env(safe-area-inset-bottom, 0px));
+  background: var(--surface-base);
+  border-top: 1px solid var(--surface-raised);
+}
+
+/* The gap the log action keeps for itself. Only the pages that carry a tab bar pay for it. */
+.has-tabbar .screen {
+  padding-bottom: calc(var(--tap) + var(--s-5) + env(safe-area-inset-bottom, 0px));
+}
+
+.tab {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--tap);
+  padding: var(--s-1) 0;
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.6875rem;
+  letter-spacing: 0.01em;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+.tab__icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* Selected carries colour, a glow, and a heavier label. Three signals, because CLAUDE.md says
+ * no state may be encoded by hue alone, and a tab bar is exactly where that is tempting. */
+.tab.is-on {
+  color: var(--accent-data);
+  font-weight: 700;
+}
+
+.tab.is-on .tab__icon {
+  filter: drop-shadow(
+    0 0 var(--glow-radius-rest) color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent)
+  );
+}
+
+/* The fade on press. Opacity rather than a background flash, so it reads as the same surface
+ * dimming rather than a new one appearing. */
+.tab:active {
+  opacity: 0.55;
+  transition-duration: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
 }

@@ -20,12 +20,19 @@
       <a class="resume" id="resume" href="index.html" hidden></a>
 
       <header class="context">
-        <p class="context__who">
-          <span id="client-name">Loading</span>
-          <a class="navlink" href="index.html">Back to logging</a>
-          <a class="navlink" href="trainer.html" data-needs="trainer" hidden>Clients</a>
-          <button class="navlink" type="button" data-signout hidden>Sign out</button>
-        </p>
+        <div class="shell">
+          <button class="shell__menu" id="menu-toggle" type="button"
+                  aria-expanded="false" aria-controls="menu-panel" aria-label="Menu">
+            <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round">
+              <path d="M4 6h12M4 10h12M4 14h12" />
+            </svg>
+          </button>
+          <div class="shell__panel" id="menu-panel" hidden>
+            <p class="shell__who"><span id="client-name">Loading</span></p>
+            <button class="shell__item" type="button" data-signout hidden>Sign out</button>
+          </div>
+        </div>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <p class="context__last num" id="headline">&nbsp;</p>
       </header>
@@ -41,15 +48,6 @@
         <p class="chart__caption" id="lead-caption"></p>
       </section>
 
-      <section class="chart" id="second-chart" aria-labelledby="second-title">
-        <div class="chart__head">
-          <h2 class="chart__title" id="second-title">Volume</h2>
-          <span class="chart__value num" id="second-value"></span>
-        </div>
-        <div id="second-plot"></div>
-        <p class="chart__caption" id="second-caption"></p>
-      </section>
-
       <section class="chart" id="reps-chart" aria-labelledby="reps-title">
         <div class="chart__head">
           <h2 class="chart__title" id="reps-title">Reps at each load</h2>
@@ -58,7 +56,24 @@
         <div id="reps-plot"></div>
         <p class="chart__caption" id="reps-caption"></p>
       </section>
+
+      <!-- Last, on purpose. It is the slowest moving number here and the one that spans blocks,
+           so it answers "am I stronger than I was" rather than "how did today go". Putting it
+           first meant a client opened their progress on the line least likely to have moved. -->
+      <section class="chart" id="second-chart" aria-labelledby="second-title">
+        <div class="chart__head">
+          <h2 class="chart__title" id="second-title">Estimated 1RM</h2>
+          <span class="chart__value num" id="second-value"></span>
+        </div>
+        <div id="second-plot"></div>
+        <p class="chart__caption" id="second-caption"></p>
+      </section>
     </main>
+
+    <!-- Bottom navigation. Reverses the CLAUDE.md rule that kept this band clear for Log set,
+         which is explained in js/nav.js. The log action stays larger and keeps a gap. -->
+    <nav class="tabbar" id="tabbar" aria-label="Sections" hidden></nav>
+
 
     <script type="module" src="progress.js"></script>
   </body>

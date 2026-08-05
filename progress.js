@@ -7,7 +7,7 @@
 // here designed to cross a change of rep scheme.
 
 import { boot, gate } from './js/boot.js';
-import { wireNav } from './js/nav.js';
+import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import {
   renderE1rmChart,
@@ -113,35 +113,39 @@ function render() {
       ).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
     : 'No sessions on this lift yet.';
 
-  const lead = leadFor(data);
   const loaded = data.kind === 'load';
 
-  // Lead slot
+  // First slot: what this lift is actually measured by. Volume for a loaded lift, the rep count
+  // for a bodyweight one, seconds for a hold.
+  const lead = loaded
+    ? { title: 'Volume per session', render: renderVolumeChart, view: data.volume, unit: ' kg', key: 'volume' }
+    : leadFor(data);
   setCopy('lead-title', lead.title);
   setCopy('lead-value', lead.view.change ? `${round1(lead.view.change.last)}${lead.unit}` : '');
   lead.render(el('lead-plot'), data);
-  setCopy('lead-caption', captionFor(data.leadView, data));
+  const extraTotal = data.points.reduce((t, p) => t + p.extra, 0);
+  setCopy(
+    'lead-caption',
+    captionFor(lead.key ?? data.leadView, data) +
+      (loaded && extraTotal > 0
+        ? ` Plus ${Math.round(extraTotal).toLocaleString()} kg you added beyond the plan.`
+        : ''),
+  );
 
-  // Second slot. With load there are two altitudes and this carries whichever did not lead.
-  // Without load there is only one real measurement, so a second chart would be filler: volume
-  // computes to a row of zeroes and an estimated 1RM does not exist. The slot goes away.
-  el('second-chart').hidden = !loaded;
+  // Reps at load and estimated 1RM are both load only. Without load, volume computes to a row
+  // of zeroes and an estimated 1RM does not exist, so the slots go away rather than showing a
+  // measurement that is really an absence.
   el('reps-chart').hidden = !loaded;
+  el('second-chart').hidden = !loaded;
 
   if (!loaded) return;
 
-  const leadIsStrength = data.leadView === 'e1rm';
-  setCopy('second-title', leadIsStrength ? 'Volume per session' : 'Estimated 1RM');
-  const secondChange = leadIsStrength ? data.volume.change : data.e1rm.change;
-  setCopy('second-value', secondChange ? kg(secondChange.last) : '');
-  if (leadIsStrength) renderVolumeChart(el('second-plot'), data);
-  else renderE1rmChart(el('second-plot'), data);
-  const extraTotal = data.points.reduce((t, p) => t + p.extra, 0);
-  setCopy(
-    'second-caption',
-    (leadIsStrength ? captionFor('volume', data) : captionFor('e1rm', data)) +
-      (extraTotal > 0 ? ` Plus ${Math.round(extraTotal).toLocaleString()} kg you added beyond the plan.` : ''),
-  );
+  // Last. The slowest moving number, and the only one designed to cross a change of rep scheme,
+  // so it answers a question about months rather than about today.
+  setCopy('second-title', 'Estimated 1RM');
+  setCopy('second-value', data.e1rm.change ? kg(data.e1rm.change.last) : '');
+  renderE1rmChart(el('second-plot'), data);
+  setCopy('second-caption', captionFor('e1rm', data));
 
   // Reps at load. Always visible for a loaded lift, because for an intermediate this is the only
   // place a block of real progress shows up at all. Hidden without load, where every value would
@@ -177,7 +181,7 @@ async function main() {
 
   const { storage, actor } = booted;
   state.storage = storage;
-  wireNav(booted);
+  mountShell(booted, 'progress');
 
   // A trainer opens this with ?client=. A client only ever gets their own, and asking for
   // somebody else's id returns nothing, because the local mirror only holds what RLS let
