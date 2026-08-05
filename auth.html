@@ -25,7 +25,11 @@
           spellcheck="false"
           required
         />
-        <button class="auth__go" id="send" type="submit">Send me a link</button>
+        <!-- Starts disabled. supabase-js comes from a CDN, so there is a window on a slow
+             connection where this button is on screen and its submit handler is not attached
+             yet. A tap in that window does nothing at all, which reads as a broken app on the
+             one screen nobody can get past. -->
+        <button class="auth__go" id="send" type="submit" disabled>Loading</button>
       </form>
 
       <!-- The typed code, behind a disclosure rather than shown alongside the link.

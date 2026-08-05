@@ -92,6 +92,10 @@ async function main() {
     say('Paste the six digit code from the email. Some setups send only a link.', '');
   });
 
+  // Everything is wired now, so the button can mean what it says.
+  sendButton.disabled = false;
+  sendButton.textContent = 'Send me a link';
+
   codeForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const code = codeInput.value.trim();
