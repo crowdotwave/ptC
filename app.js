@@ -75,6 +75,7 @@ const state = {
   logged: [],
   best: new Map(),
   increments: new Map(),
+  equipment: new Map(),
   // Placeholder only. Every real value comes from history or from js/prefill.js before the
   // first render, so nothing this file invents ever reaches a stepper.
   weightKg: 0,
@@ -203,20 +204,38 @@ async function buildPlan(storage, day, sessions) {
     // No history for this lift, so this runs exactly once per client per exercise. The
     // trainer's starting_weight_kg is the real answer. When it is blank, prefill.js falls back
     // to a fact about the equipment rather than a guess about the person, deliberately light.
+    // Optional chaining on the snapshot, deliberately. A snapshot is frozen JSON that can be
+    // written by the seed, by the builder, by an importer, or by hand, and one missing nested
+    // field must not take the whole logging screen down to a blank page mid gym. The live
+    // exercises table is the fallback, which is also where increment_kg is read from anyway.
     const opening = openingWeight({
       startingWeightKg: item.starting_weight_kg ?? null,
-      equipment: item.exercise.equipment,
+      equipment: item.exercise?.equipment ?? state.equipment.get(item.exercise_id) ?? null,
       incrementKg: state.increments.get(item.exercise_id),
     });
-    for (let setIndex = 0; setIndex < item.target_sets; setIndex += 1) {
+
+    // A hold has no rep target at all, and a carry may not have one either, so the second
+    // stepper needs an opening value that is not null. Ten seconds and one rep are both
+    // obviously too little on purpose, the same bet the opening weight makes: erring low costs
+    // a few taps, erring high costs a failed set.
+    const openingCount =
+      item.target_reps_low ?? (item.log_mode === 'time_hold' ? 10 : 1);
+
+    // A hold prescribes sets but no load, and target_sets can be null on a row a trainer left
+    // blank, so the plan needs at least one set to step through or the lift silently vanishes.
+    const setCount = Number.isInteger(item.target_sets) && item.target_sets > 0 ? item.target_sets : 1;
+
+    for (let setIndex = 0; setIndex < setCount; setIndex += 1) {
       plan.push({
         item,
         setIndex,
         isWarmup: false,
         isExtra: false,
         logMode: item.log_mode ?? 'weight_reps',
-        weightKg: opening.kg,
-        reps: item.target_reps_low,
+        // A lift with no external load opens at zero, which is the truth rather than a fallback.
+        weightKg:
+          item.log_mode === 'bodyweight_reps' || item.log_mode === 'time_hold' ? 0 : opening.kg,
+        reps: openingCount,
         lastWeightKg: null,
         lastReps: null,
         lastOn: null,
@@ -893,6 +912,7 @@ async function main() {
   // the room, not the program, so a rack that changes should reach an old assignment too.
   const exercises = await storage.query('exercises', {});
   state.increments = new Map(exercises.map((row) => [row.id, row.increment_kg]));
+  state.equipment = new Map(exercises.map((row) => [row.id, row.equipment]));
 
   const snapshot = assignment.snapshot;
   state.day = pickDay(snapshot, sessions);
