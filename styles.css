@@ -1230,3 +1230,12 @@ button.navlink:disabled {
   font-size: var(--t-small);
   cursor: pointer;
 }
+
+/* Empty list copy. Sits where rows would, so the eye lands on it rather than on nothing. */
+.clientlist__empty {
+  padding: var(--s-4);
+  border: 1px dashed var(--surface-raised);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--t-body);
+}

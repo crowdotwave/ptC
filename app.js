@@ -852,6 +852,20 @@ async function main() {
   state.client = client;
   state.assignment = assignment;
 
+  // The state every client is in for the minutes or days between being added and being given a
+  // program. It used to throw on assignment.snapshot and leave the word "Loading" on screen
+  // forever, which is the first thing a new person would ever have seen of this app.
+  //
+  // Not phrased as an apology, and not offering an action, because there is genuinely nothing
+  // for them to do here: only their trainer can assign a program. Naming who it is waiting on
+  // is the honest version.
+  if (!assignment) {
+    ui.clientName.textContent = client?.display_name ?? 'You';
+    ui.exerciseName.textContent = 'No program yet';
+    showNotice('Your trainer has not assigned a program yet. It will be here when they do.');
+    return;
+  }
+
   // Read live rather than from the frozen snapshot: the increment describes the equipment in
   // the room, not the program, so a rack that changes should reach an old assignment too.
   const exercises = await storage.query('exercises', {});

@@ -35,6 +35,15 @@ function renderList() {
     return b.lastSession.localeCompare(a.lastSession);
   });
 
+  // A new coach's first screen. An empty list with a heading that says "0 clients" reads like
+  // the app failed to load rather than like there is nobody here yet.
+  if (!rows.length) {
+    el('client-list').innerHTML =
+      '<li class="clientlist__empty">Nobody here yet. Clients appear once they are added, ' +
+      'and their training appears once they log a set.</li>';
+    return;
+  }
+
   el('client-list').innerHTML = rows
     .map((c) => {
       const last = c.lastSession
