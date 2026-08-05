@@ -6,6 +6,15 @@
     <meta name="color-scheme" content="dark" />
     <title>Sign in to ptC</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="ptC" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="ptC" />
   </head>
   <body>
     <main class="auth">
@@ -39,6 +48,24 @@
            link is worse than not offering it. The link is the path. This is the escape hatch
            for a phone whose mail app opens links somewhere unhelpful. -->
       <button class="auth__alt" id="show-code" type="button" hidden>Have a code instead?</button>
+
+      <!-- The way in for a home screen app. On iOS that runs in its own storage container, so a
+           link tapped in Mail signs you in to Safari and leaves this app signed out. Pasting the
+           link here exchanges its token in the container that will actually keep it. -->
+      <form class="auth__form" id="link-form" hidden novalidate>
+        <label class="auth__label" for="link">Paste the sign in link from the email</label>
+        <input
+          class="auth__input"
+          id="link"
+          type="text"
+          inputmode="url"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          placeholder="https://..."
+        />
+        <button class="auth__go" id="verify-link" type="submit">Sign in</button>
+      </form>
 
       <form class="auth__form" id="code-form" hidden novalidate>
         <label class="auth__label" for="code">Or paste the code from the email</label>

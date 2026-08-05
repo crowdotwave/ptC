@@ -4,7 +4,10 @@
 // before showing anything useful. Everything else in the app is the opposite.
 
 import { getSupabase, hasConfig } from './js/supabase.js';
-import { currentSession, sendSignInEmail, verifyCode } from './js/auth.js';
+import {
+  currentSession, sendSignInEmail, verifyCode,
+  isStandalone, tokenFromLink, verifyLink,
+} from './js/auth.js';
 
 const emailForm = document.getElementById('email-form');
 const codeForm = document.getElementById('code-form');
@@ -15,6 +18,9 @@ const verifyButton = document.getElementById('verify');
 const note = document.getElementById('note');
 const lede = document.getElementById('lede');
 const showCode = document.getElementById('show-code');
+const linkForm = document.getElementById('link-form');
+const linkInput = document.getElementById('link');
+const verifyLinkButton = document.getElementById('verify-link');
 
 /** Where to land after signing in. Same origin only, so a crafted next cannot send anyone off. */
 function destination() {
@@ -31,6 +37,7 @@ function say(text, kind = '') {
 function busy(on) {
   sendButton.disabled = on;
   verifyButton.disabled = on;
+  verifyLinkButton.disabled = on;
 }
 
 async function main() {
@@ -75,9 +82,21 @@ async function main() {
       // person who typed the wrong address needs to find that out now, not after waiting for an
       // email that is never coming.
       lede.textContent = 'Check your email.';
-      say(`Sent to ${email}. Open the link in that email on this device.`, 'ok');
       emailForm.hidden = true;
-      showCode.hidden = false;
+
+      // A home screen app cannot receive that link. Saying so, and saying what to do instead, is
+      // the difference between a person getting in and a person deciding the app is broken.
+      if (isStandalone()) {
+        linkForm.hidden = false;
+        say(
+          `Sent to ${email}. Tapping the link will sign you in to your browser instead of here, ` +
+            `so copy the link and paste it below.`,
+          'ok',
+        );
+      } else {
+        say(`Sent to ${email}. Open the link in that email on this device.`, 'ok');
+        showCode.hidden = false;
+      }
     } catch (error) {
       say(error.message, 'fail');
     } finally {
@@ -95,6 +114,24 @@ async function main() {
   // Everything is wired now, so the button can mean what it says.
   sendButton.disabled = false;
   sendButton.textContent = 'Send me a link';
+
+  linkForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const parsed = tokenFromLink(linkInput.value);
+    if (!parsed) {
+      say('That does not look like the sign in link. Copy the whole thing from the email.', 'fail');
+      return;
+    }
+    busy(true);
+    say('Checking.');
+    try {
+      await verifyLink(client, parsed);
+      location.replace(destination());
+    } catch (error) {
+      say(error.message, 'fail');
+      busy(false);
+    }
+  });
 
   codeForm.addEventListener('submit', async (event) => {
     event.preventDefault();
