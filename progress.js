@@ -7,6 +7,7 @@
 // here designed to cross a change of rep scheme.
 
 import { boot, gate } from './js/boot.js';
+import { wireNav } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 
@@ -123,11 +124,14 @@ async function selectExercise(exerciseId) {
 }
 
 async function main() {
+  // No role here on purpose. A client reads their own progress and a trainer opens the same
+  // page with ?client=, so this is the one screen both roles legitimately land on.
   const booted = await boot();
   if (!gate(booted)) return;
 
   const { storage, actor } = booted;
   state.storage = storage;
+  wireNav(booted);
 
   // A trainer opens this with ?client=. A client only ever gets their own, and asking for
   // somebody else's id returns nothing, because the local mirror only holds what RLS let

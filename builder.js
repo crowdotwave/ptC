@@ -13,6 +13,7 @@
 
 import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
+import { wireNav } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './js/program.js';
 
 const el = (id) => document.getElementById(id);
@@ -476,11 +477,12 @@ function wire() {
 }
 
 async function main() {
-  const booted = await boot();
+  const booted = await boot({ role: 'trainer' });
   if (!gate(booted)) return;
 
   const { storage, actor } = booted;
   state.storage = storage;
+  wireNav(booted);
   state.trainer = actor?.trainerId ? await storage.get('trainers', actor.trainerId) : null;
 
   if (!state.trainer) {

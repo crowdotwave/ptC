@@ -6,6 +6,7 @@
 // suggestion is shown here and nowhere else.
 
 import { boot, gate } from './js/boot.js';
+import { wireNav } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 import { activeSetLogs } from './js/history.js';
@@ -179,14 +180,16 @@ function showList() {
 }
 
 async function main() {
-  const booted = await boot();
+  const booted = await boot({ role: 'trainer' });
   if (!gate(booted)) return;
 
   const { storage, actor } = booted;
   state.storage = storage;
+  wireNav(booted);
 
   if (booted.mode === 'unbound') {
     el('trainer-name').textContent = 'Not set up yet';
+    el('view-title').textContent = 'Nothing here yet';
     el('view-note').textContent = 'You are signed in, but this account is neither a trainer nor a client.';
     return;
   }

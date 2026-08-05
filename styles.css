@@ -820,6 +820,24 @@ button {
   border-bottom-color: var(--accent-data);
 }
 
+/* Sign out is a button because it performs an action rather than going somewhere, and it sits
+ * beside real links, so it has to shed every default a button carries and read as one of them. */
+button.navlink {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--accent-data-dim);
+  border-radius: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.navlink:disabled {
+  color: var(--muted);
+  border-bottom-color: transparent;
+  cursor: default;
+}
+
 /* Sticky at the top, never the bottom. Present only while a session is open. */
 .resume {
   position: sticky;

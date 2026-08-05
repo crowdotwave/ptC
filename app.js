@@ -13,6 +13,7 @@
 
 import { makeRecord, getDeviceId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
+import { wireNav } from './js/nav.js';
 import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
@@ -805,7 +806,7 @@ function wire() {
 async function main() {
   let booted;
   try {
-    booted = await boot();
+    booted = await boot({ role: 'client' });
   } catch (error) {
     ui.exerciseName.textContent = 'Cannot open storage';
     showNotice(`${error.message} Serve this folder over http, not file://`);
@@ -815,21 +816,20 @@ async function main() {
 
   const { storage, actor, mode } = booted;
   state.storage = storage;
+  wireNav(booted);
 
   if (mode === 'unbound') {
-    ui.exerciseName.textContent = 'Not set up yet';
-    showNotice('You are signed in, but no trainer has added this email as a client.');
+    ui.clientName.textContent = 'Not set up yet';
+    ui.exerciseName.textContent = 'Nothing assigned';
+    showNotice('You are signed in, but no trainer has added this email as a client yet.');
     return;
   }
   if (booted.error) showNotice(booted.error);
 
   if (!actor || !actor.clientId) {
+    ui.clientName.textContent = 'No client';
     ui.exerciseName.textContent = 'No client selected';
-    showNotice(
-      actor?.role === 'trainer'
-        ? 'You are signed in as a trainer. Open the trainer view.'
-        : 'Switch to a client with the dev role control, or open the trainer view.',
-    );
+    showNotice('Switch to a client with the dev role control.');
     return;
   }
   const { client, assignment, sessions } = await loadClientData(storage, actor.clientId);

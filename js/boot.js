@@ -63,7 +63,16 @@ async function alignIdentity(storage, identity) {
   return true;
 }
 
-export async function boot({ allowLocal = true } = {}) {
+// Where each role belongs when it turns up somewhere it does not. The client logging screen and
+// the trainer view are different products sharing a deploy, not two tabs of one thing.
+const HOME = { trainer: 'trainer.html', client: 'index.html' };
+
+/** True when this page serves one role and the person looking at it is the other one. */
+function misrouted(role, actor) {
+  return Boolean(role && actor && actor.role !== role && HOME[actor.role]);
+}
+
+export async function boot({ allowLocal = true, role = null } = {}) {
   const storage = await openStorage();
   const client = await getSupabase();
   const session = await currentSession(client);
@@ -83,18 +92,16 @@ export async function boot({ allowLocal = true } = {}) {
     await mountDevSwitch(storage);
     const clientId = await getDefaultClientId(storage);
     const row = clientId ? await storage.get('clients', clientId) : null;
-    return {
-      mode: 'local',
-      storage,
-      client,
-      session: null,
-      actor: actorOverride() ?? {
-        role: 'client',
-        clientId: row?.id ?? null,
-        trainerId: row?.trainer_id ?? null,
-      },
-      error: null,
+    const localActor = actorOverride() ?? {
+      role: 'client',
+      clientId: row?.id ?? null,
+      trainerId: row?.trainer_id ?? null,
     };
+    // The same role routing as a real session, so the dev switch exercises the app people will
+    // actually use rather than a variant of it. Picking a trainer here sends you to the trainer
+    // view, and picking a client sends you back, which is also the fastest way to demo both.
+    const localMode = misrouted(role, localActor) ? 'wrong-role' : 'local';
+    return { mode: localMode, storage, client, session: null, actor: localActor, error: null };
   }
 
   const wiped = await alignIdentity(storage, `auth:${session.user.id}`);
@@ -128,19 +135,31 @@ export async function boot({ allowLocal = true } = {}) {
     first.catch(() => {});
   }
 
+  // A trainer opening the client logging screen is a routing mistake, not a state to explain.
+  // Telling somebody to "open the trainer view" with no way to open it is how you end up
+  // reading URLs out loud to a person holding a phone.
+  if (misrouted(role, actor)) {
+    return { mode: 'wrong-role', storage, client, session, actor, error };
+  }
+
   return { mode: 'connected', storage, client, session, actor, error };
 }
 
 /**
- * The redirect every page does when there is no session. Returns false when the page should
- * stop rendering, so a caller reads as `if (!gate(result)) return;` and nothing after it runs
- * against a null actor.
+ * The routing every page does before it renders. Returns false when the page should stop, so a
+ * caller reads as `if (!gate(result)) return;` and nothing after it runs against a null actor.
  */
 export function gate(result) {
-  if (result.mode !== 'signed-out') return true;
-  const here = location.pathname.split('/').pop() + location.search;
-  location.replace(`auth.html?next=${encodeURIComponent(here)}`);
-  return false;
+  if (result.mode === 'signed-out') {
+    const here = location.pathname.split('/').pop() + location.search;
+    location.replace(`auth.html?next=${encodeURIComponent(here)}`);
+    return false;
+  }
+  if (result.mode === 'wrong-role') {
+    location.replace(HOME[result.actor.role]);
+    return false;
+  }
+  return true;
 }
 
 /**
