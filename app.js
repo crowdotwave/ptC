@@ -837,6 +837,7 @@ async function main() {
   if (mode === 'unbound') {
     ui.clientName.textContent = 'Not set up yet';
     ui.exerciseName.textContent = 'Nothing assigned';
+    ui.controls.hidden = true;
     showNotice('You are signed in, but no trainer has added this email as a client yet.');
     return;
   }
@@ -845,6 +846,7 @@ async function main() {
   if (!actor || !actor.clientId) {
     ui.clientName.textContent = 'No client';
     ui.exerciseName.textContent = 'No client selected';
+    ui.controls.hidden = true;
     showNotice('Switch to a client with the dev role control.');
     return;
   }
@@ -862,6 +864,9 @@ async function main() {
   if (!assignment) {
     ui.clientName.textContent = client?.display_name ?? 'You';
     ui.exerciseName.textContent = 'No program yet';
+    // The steppers and Log set have to go with it. Leaving a live primary action on a screen
+    // with no plan behind it invites a tap that writes a set against nothing.
+    ui.controls.hidden = true;
     showNotice('Your trainer has not assigned a program yet. It will be here when they do.');
     return;
   }
