@@ -213,11 +213,12 @@ export const TABLES = {
       // count. Anything that computes volume or an estimated 1RM skips these rows rather than
       // inventing a number for them.
       //
-      // Numeric, not an integer, because a half rep is a real thing people write down: the rep
-      // that got most of the way up. Rounding it away throws out the difference between a
-      // session that improved and one that did not, and rounding it up invents a rep nobody
-      // completed. Epley and volume are both indifferent to it.
-      reps: { type: NUMERIC, nullable: true },
+      // Whole reps only. Halves were built, shipped, and used, and they did not survive contact
+      // with a real session: the argument for them was that a half is real information, and the
+      // argument that beat it is that doubling the taps on the one control used most under
+      // fatigue costs more than the information is worth. A partial rep goes in the session
+      // note, where it costs nothing to write and nothing to read.
+      reps: { type: INT, nullable: true },
       // Rounds completed in an AMRAP block. Null everywhere else.
       rounds: { type: INT, nullable: true },
       // How long a hold lasted, in seconds. An L sit and a hollow body have no reps and no

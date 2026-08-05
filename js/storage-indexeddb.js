@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 8;
+export const DB_VERSION = 9;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -198,6 +198,24 @@ const MIGRATIONS = [
       // that lasted no time rather than as an exercise that is not measured in seconds.
       rewriteRows(tx, 'set_logs', (row) =>
         row.hold_seconds === undefined ? { ...row, hold_seconds: null } : row,
+      );
+    },
+  },
+  {
+    version: 9,
+    describe: 'drop half reps back to whole ones on any device that recorded them',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Floor, not round to nearest. 10.5 means ten completed reps and a partial, so rounding it
+      // up would write down an eleventh rep nobody finished. Erring low is the same bet the
+      // opening weight makes, and it is the only direction that cannot overstate a session.
+      //
+      // Reads do not re-validate, so a stray half left here would keep charting as 10.5 forever
+      // while the schema said integers.
+      rewriteRows(tx, 'set_logs', (row) =>
+        Number.isFinite(row.reps) && !Number.isInteger(row.reps)
+          ? { ...row, reps: Math.max(1, Math.floor(row.reps)) }
+          : row,
       );
     },
   },

@@ -676,26 +676,20 @@ function adjustWeight(direction) {
 }
 
 /**
- * Reps move in halves, rounds move in whole numbers.
+ * Reps and rounds move in whole numbers. Seconds move in fives.
  *
- * A half rep is the one that got most of the way up, and a real log kept by hand is full of
- * them: roughly a quarter of the sets in the first one this app was pointed at. There is no way
- * to reach that with a thumb unless the step is a half.
+ * Half reps were built and then removed after real use. The case for them was that a half is
+ * genuine information, common in a hand kept log, and unreachable by thumb unless the step is a
+ * half. The case that won is that it doubles the taps on the control used most under fatigue,
+ * every session, for everybody, to record something that belongs in a note. Kept here because
+ * the reasoning is easy to rediscover and the answer is not.
  *
- * The cost is honest and worth stating: any change now takes twice the taps it used to. That is
- * bounded by the prefill, which starts the stepper on last session's number, so the common case
- * is still zero taps and the next most common is one or two. Hold to repeat covers the rest.
- *
- * Half a round is not a thing anybody has written down, so a circuit still steps by one.
+ * Seconds move in fives because a hold is timed by feel to about that resolution, and stepping
+ * to 45 one second at a time is nine taps for a precision nobody actually measured.
  */
 function adjustReps(direction) {
-  const mode = currentEntry()?.logMode;
-  // Seconds move in fives, because a hold is timed by feel to about that resolution and
-  // stepping to 45 one second at a time is nine taps for a number nobody measured that finely.
-  const step = mode === 'time_hold' ? 5 : mode === 'rounds' ? 1 : 0.5;
-  // Rounded because repeated addition of 0.5 in binary floating point drifts, and a readout
-  // saying 10.499999999999998 mid set would be the end of anybody trusting the numbers.
-  state.reps = Math.max(step, Math.round((state.reps + direction * step) * 10) / 10);
+  const step = currentEntry()?.logMode === 'time_hold' ? 5 : 1;
+  state.reps = Math.max(step, state.reps + direction * step);
   renderValues();
 }
 
@@ -723,9 +717,9 @@ function exitTypingMode() {
 
 function commitTyped() {
   const weight = Number.parseFloat(ui.weightInput.value);
-  const reps = Number.parseFloat(ui.repsInput.value);
+  const reps = Number.parseInt(ui.repsInput.value, 10);
   if (Number.isFinite(weight) && weight >= 0) state.weightKg = fromDisplay(weight);
-  if (Number.isFinite(reps) && reps > 0) state.reps = Math.round(reps * 10) / 10;
+  if (Number.isInteger(reps) && reps > 0) state.reps = reps;
   renderValues();
 }
 

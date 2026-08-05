@@ -937,40 +937,39 @@ test('a coach id belonging to somebody else is not a capability', () => {
   ok(!can(undefined, 'trainer'));
 });
 
-// ------------------------------------------------------------------ half reps
+// ------------------------------------------------------------------ whole reps only
 //
-// From a training log kept by hand: pushups 14 - 14 - 12 - 10.5, pullups 6 - 6.5 - 5.5.
-// Roughly a quarter of the sets carry a half. It is the rep that got most of the way up.
+// Half reps were built and removed after real use. This is the guard that keeps them out: the
+// schema is the only thing standing between a stray fractional rep and a chart drawn from it.
 
-test('a half rep survives the schema instead of being rejected as a non integer', () => {
-  const stored = validate('set_logs', {
+test('a fractional rep is rejected by the schema', () => {
+  const base = {
     id: '00000000-0000-4000-8000-000000000001',
     created_at: '2026-08-05T00:00:00.000Z',
     session_id: '00000000-0000-4000-8000-000000000002',
     exercise_id: '00000000-0000-4000-8000-000000000003',
-    set_index: 3, weight_kg: 0, reps: 10.5, rounds: null, hold_seconds: null, rpe: null,
+    set_index: 3, weight_kg: 0, reps: 10, rounds: null, hold_seconds: null, rpe: null,
     is_warmup: false, logged_at: '2026-08-05T00:00:00.000Z',
     supersedes_id: null, is_void: false, is_extra: false, device_id: 'test',
-  });
-  eq(stored.reps, 10.5, 'the half was not stored');
+  };
+  eq(validate('set_logs', base).reps, 10, 'a whole rep still stores');
+
+  let rejected = false;
+  try {
+    validate('set_logs', { ...base, reps: 10.5 });
+  } catch {
+    rejected = true;
+  }
+  ok(rejected, 'a half rep reached storage');
 });
 
-test('a half rep is not the same estimated 1RM as rounding it either way', () => {
-  const half = epley1rm(60, 10.5);
-  ok(half > epley1rm(60, 10), 'rounding down would have understated the session');
-  ok(half < epley1rm(60, 11), 'rounding up would have invented a rep nobody completed');
-  eq(half, 81);
-});
-
-test('half reps carry through volume and a chart without going NaN', () => {
-  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
-  const logs = [
-    row({ session_id: 's1', weight_kg: 0, reps: 14 }),
-    row({ session_id: 's2', weight_kg: 0, reps: 10.5 }),
-  ];
+// A hold is still fractional, and deliberately so. A hold that broke at 12.5 seconds is one
+// observation rather than a half of anything, and nothing about it costs a tap.
+test('a hold may still be fractional even though reps may not', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [row({ session_id: 's1', weight_kg: 0, reps: null, hold_seconds: 12.5 })];
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
-  eq(p.points.length, 2);
-  for (const point of p.points) ok(Number.isFinite(point.prescribed), 'volume went NaN on a half rep');
+  eq(p.points[0].topHold, 12.5);
 });
 
 // ------------------------------------------------------------------ no external load
@@ -1010,7 +1009,7 @@ test('the top set carries the rep series, not the last set or an average', () =>
   const logs = [
     row({ session_id: 's1', set_index: 0, weight_kg: 0, reps: 14 }),
     row({ session_id: 's1', set_index: 1, weight_kg: 0, reps: 12 }),
-    row({ session_id: 's1', set_index: 2, weight_kg: 0, reps: 10.5 }),
+    row({ session_id: 's1', set_index: 2, weight_kg: 0, reps: 10 }),
   ];
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
   eq(p.points[0].topReps, 14);
