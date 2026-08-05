@@ -335,6 +335,17 @@ Canadian trainer and clients, so PIPEDA applies. Consequences:
   Use commas, colons, parentheses, or restructure the sentence.
 - Commit messages: imperative mood, one line, no scope prefixes.
 
+## Development data
+
+There is no role switch and no dev mode. Both accounts hold every capability they need, so
+acting as somebody else is a thing to do by signing in as them, not by picking from a dropdown.
+
+`?local=1` runs the app against seeded fake data with no backend, opening as the seeded client.
+It exists for one reason: that seed is the only data in this project with enough history to draw
+a chart. Real accounts have a handful of sets between them, and will for months. Delete it once
+a real client has a few blocks logged and the progress screens can be developed against those.
+`?local=0` turns it off. It is sticky for the browser session, so following a link keeps it.
+
 ## Build order
 
 1. Storage adapter plus seeded fake data. No backend.

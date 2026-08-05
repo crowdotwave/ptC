@@ -7,7 +7,7 @@
 // Four modes, and each one is a real state rather than a failure:
 //
 //   connected   a session, and the database says which trainer or client it belongs to
-//   local       no backend, seeded fake data, which is how ?dev=1 and the test pages run
+//   local       no backend, seeded fake data, reached with ?local=1
 //   signed-out  no session, so the page should send the person to auth.html
 //   unbound     a session that resolves to neither a trainer nor a client
 
@@ -16,7 +16,6 @@ import { getSupabase, hasConfig } from './supabase.js';
 import { currentSession, signOut } from './auth.js';
 import { createRemote } from './remote.js';
 import { seed, isSeeded, getDefaultClientId } from './seed.js';
-import { mountDevSwitch, actorOverride, devEnabled } from './actor.js';
 
 // What the local database currently holds. Either 'local' for seeded fake data, or the auth
 // user whose rows are mirrored here.
@@ -27,12 +26,12 @@ const IDENTITY_KEY = 'ptc.identity';
 const ACTOR_KEY = 'ptc.actor';
 
 /**
- * A URL flag that sticks for the rest of the browser session, the same way ?dev=1 does.
+ * A URL flag that sticks for the rest of the browser session.
  *
- * Sticky because these flags choose which dataset the app is looking at, and that has to
- * survive following a link. A flag that only lived in the query string would drop you onto the
- * sign in screen the moment you went from the logging screen to Progress, which reads as the
- * app forgetting who you are. `?local=0` turns it back off.
+ * Sticky because it chooses which dataset the app is looking at, and that has to survive
+ * following a link. A flag that only lived in the query string would drop you onto the sign in
+ * screen the moment you went from the logging screen to Progress, which reads as the app
+ * forgetting who you are. `?local=0` turns it back off.
  */
 function stickyFlag(name) {
   const key = `ptc.flag.${name}`;
@@ -100,26 +99,26 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   // No session. Either run on fake data because somebody asked for it, or say so and let the
   // page redirect. Never quietly show a seeded trainer to a person who expected their own data.
   if (!session) {
-    // devEnabled() rather than the raw parameter, because ?dev=1 is sticky for the browser
-    // session by design. Reading only the URL would send you to the sign in screen the moment
-    // you followed a link from the logging screen to the trainer view.
-    const wantsLocal = devEnabled() || stickyFlag('local') || !hasConfig() || !client;
+    const wantsLocal = stickyFlag('local') || !hasConfig() || !client;
     if (!wantsLocal || !allowLocal) {
       return { mode: 'signed-out', storage, client, session: null, actor: null, error: null };
     }
     await alignIdentity(storage, 'local');
     if (!(await isSeeded(storage))) await seed(storage);
-    await mountDevSwitch(storage);
     const clientId = await getDefaultClientId(storage);
     const row = clientId ? await storage.get('clients', clientId) : null;
-    const localActor = actorOverride() ?? {
+
+    // Opens as the seeded client, which is the only account in this app with enough history to
+    // draw a chart. Real accounts have a handful of sets between them, so this is what the
+    // progress screens are still developed against.
+    const localActor = {
       role: 'client',
       clientId: row?.id ?? null,
-      trainerId: row?.trainer_id ?? null,
+      trainerId: null,
+      isStaff: false,
     };
-    // The same role routing as a real session, so the dev switch exercises the app people will
-    // actually use rather than a variant of it. Picking a trainer here sends you to the trainer
-    // view, and picking a client sends you back, which is also the fastest way to demo both.
+    // Routed exactly like a real session, so this exercises the app people use rather than a
+    // variant of it.
     const localMode = misrouted(role, localActor) ? 'wrong-role' : 'local';
     return { mode: localMode, storage, client, session: null, actor: localActor, error: null };
   }
