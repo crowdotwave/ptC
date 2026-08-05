@@ -59,8 +59,48 @@ function widthOf(container, fallback = 328) {
  * breaks: crossing them is the reason this metric exists, since Epley is what makes 3x10 at
  * 60kg and 5x3 at 90kg the same kind of number.
  */
-export function renderE1rmChart(container, progression, { height = 168 } = {}) {
-  const series = progression.e1rm.series;
+export function renderE1rmChart(container, progression, options = {}) {
+  return renderSeriesChart(container, progression, {
+    ...options,
+    series: progression.e1rm.series,
+    value: (point) => point.e1rm,
+    title: 'Estimated one rep max',
+  });
+}
+
+/**
+ * The same line, for a lift with no external load. A pushup has no estimated 1RM and no volume,
+ * so the rep count is not a fallback here, it is the measurement.
+ */
+export function renderRepsChart(container, progression, options = {}) {
+  return renderSeriesChart(container, progression, {
+    ...options,
+    series: progression.reps.series,
+    value: (point) => point.topReps,
+    title: 'Top set reps',
+  });
+}
+
+/** And for a hold, where seconds are the whole of what happened. */
+export function renderHoldChart(container, progression, options = {}) {
+  return renderSeriesChart(container, progression, {
+    ...options,
+    series: progression.hold.series,
+    value: (point) => point.topHold,
+    title: 'Longest hold, seconds',
+  });
+}
+
+/**
+ * One value per session, drawn as one continuous line across the whole history.
+ *
+ * Parametrised rather than copied three times because every rule below is about how to draw a
+ * progression honestly, not about which quantity it is: block boundaries are rules and never
+ * breaks, a segment touching a deload dashes on both sides, and a record carries a ring and a
+ * word rather than only a colour. Duplicating that would mean three places for those rules to
+ * drift apart.
+ */
+function renderSeriesChart(container, progression, { height = 168, series, value, title }) {
   container.innerHTML = '';
   if (!series.length) return;
 
@@ -69,7 +109,7 @@ export function renderE1rmChart(container, progression, { height = 168 } = {}) {
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
-  const values = series.map((p) => p.e1rm);
+  const values = series.map(value);
   const lo = Math.min(...values);
   const hi = Math.max(...values);
   const margin = Math.max((hi - lo) * 0.2, 2);
@@ -79,7 +119,7 @@ export function renderE1rmChart(container, progression, { height = 168 } = {}) {
   const y = linear(yDomain, [pad.top + plotH, pad.top]);
   const px = (p) => x(Date.parse(p.date));
 
-  let out = svgOpen(width, height, `Estimated one rep max, ${series.length} sessions`);
+  let out = svgOpen(width, height, `${title}, ${series.length} sessions`);
 
   // Block boundaries. A rule and a label, never a gap in the line.
   for (const block of progression.blocks.slice(1)) {
@@ -99,17 +139,17 @@ export function renderE1rmChart(container, progression, { height = 168 } = {}) {
     const to = series[i];
     const deload = from.isDeload || to.isDeload;
     const d =
-      `M${px(from).toFixed(1)} ${y(from.e1rm).toFixed(1)} ` +
-      `L${px(to).toFixed(1)} ${y(to.e1rm).toFixed(1)}`;
+      `M${px(from).toFixed(1)} ${y(value(from)).toFixed(1)} ` +
+      `L${px(to).toFixed(1)} ${y(value(to)).toFixed(1)}`;
     out += `<path class="chart__line ${deload ? 'is-deload' : 'is-current'}" d="${d}" />`;
   }
 
   // Points. Deloads are hollow squares, records are ringed dots, ordinary sessions are dots.
   for (const p of series) {
     const cx = px(p).toFixed(1);
-    const cy = y(p.e1rm).toFixed(1);
+    const cy = y(value(p)).toFixed(1);
     if (p.isDeload) {
-      out += `<rect class="chart__mark is-deload" x="${(px(p) - 3.5).toFixed(1)}" y="${(y(p.e1rm) - 3.5).toFixed(1)}" width="7" height="7" />`;
+      out += `<rect class="chart__mark is-deload" x="${(px(p) - 3.5).toFixed(1)}" y="${(y(value(p)) - 3.5).toFixed(1)}" width="7" height="7" />`;
     } else if (p.isRecord) {
       out += `<circle class="chart__mark is-record-ring" cx="${cx}" cy="${cy}" r="6.5" />`;
       out += `<circle class="chart__mark is-record" cx="${cx}" cy="${cy}" r="3.5" />`;
@@ -121,7 +161,7 @@ export function renderE1rmChart(container, progression, { height = 168 } = {}) {
   // Deloads say so in words, so the dash is never the only signal.
   const firstDeload = series.find((p) => p.isDeload);
   if (firstDeload) {
-    out += `<text class="chart__note" x="${px(firstDeload).toFixed(1)}" y="${(y(firstDeload.e1rm) + 16).toFixed(1)}" text-anchor="middle">Planned deload</text>`;
+    out += `<text class="chart__note" x="${px(firstDeload).toFixed(1)}" y="${(y(value(firstDeload)) + 16).toFixed(1)}" text-anchor="middle">Planned deload</text>`;
   }
 
   out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${yDomain[1]}</text>`;

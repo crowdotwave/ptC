@@ -285,10 +285,16 @@ function render() {
 function renderValues() {
   const mode = currentEntry()?.logMode ?? 'weight_reps';
 
-  // A carry has a load and no reps. An AMRAP has a load and rounds. The stepper changes what
-  // it counts rather than pretending everything is sets and reps.
+  // Each mode shows only the numbers that exist for it, rather than pretending everything is
+  // sets and reps. A carry has a load and no reps. An AMRAP has a load and rounds. A pushup has
+  // reps and genuinely no load, and a hold has neither: it has seconds.
+  //
+  // The second stepper is the one that changes meaning, and the unit label under it is what
+  // says so, because a bare number mid set is not self explanatory.
   ui.stepperReps.hidden = mode === 'weight_only';
-  ui.repsUnit.textContent = mode === 'rounds' ? 'rounds' : 'reps';
+  ui.stepperWeight.hidden = mode === 'bodyweight_reps' || mode === 'time_hold';
+  ui.repsUnit.textContent =
+    mode === 'rounds' ? 'rounds' : mode === 'time_hold' ? 'sec' : 'reps';
 
   ui.weightValue.textContent = formatWeight(state.weightKg);
   ui.weightUnit.textContent = unit();
@@ -419,8 +425,13 @@ function logSet() {
     weight_kg: state.weightKg,
     // A carry records a load and no reps. An AMRAP records rounds instead. Nothing invents a
     // rep count, and everything downstream skips a row that has none.
-    reps: entry.logMode === 'weight_reps' ? state.reps : entry.logMode === 'rounds' ? null : null,
+    // Exactly one of these three carries the second number, and the other two are null. Null
+    // rather than zero, because zero is a measurement and null is the absence of one: a hold
+    // has no rep count, and writing 0 there would make it a set of no reps.
+    reps:
+      entry.logMode === 'weight_reps' || entry.logMode === 'bodyweight_reps' ? state.reps : null,
     rounds: entry.logMode === 'rounds' ? state.reps : null,
+    hold_seconds: entry.logMode === 'time_hold' ? state.reps : null,
     rpe: null,
     is_warmup: entry.isWarmup,
     logged_at: new Date().toISOString(),
@@ -500,8 +511,12 @@ function undoLast() {
     exercise_id: last.exerciseId,
     set_index: last.setIndex,
     weight_kg: last.weightKg,
-    reps: last.logMode === 'weight_reps' ? last.reps : null,
+    // A retraction mirrors the row it takes back. Neither counts once is_void is set, so these
+    // values change no number anywhere, but the audit trail is the reason this table is append
+    // only and a retraction that forgot what it was retracting would be a worse record than none.
+    reps: last.logMode === 'weight_reps' || last.logMode === 'bodyweight_reps' ? last.reps : null,
     rounds: last.logMode === 'rounds' ? last.reps : null,
+    hold_seconds: last.logMode === 'time_hold' ? last.reps : null,
     rpe: null,
     is_warmup: last.isWarmup,
     logged_at: new Date().toISOString(),
@@ -649,7 +664,10 @@ function adjustWeight(direction) {
  * Half a round is not a thing anybody has written down, so a circuit still steps by one.
  */
 function adjustReps(direction) {
-  const step = currentEntry()?.logMode === 'rounds' ? 1 : 0.5;
+  const mode = currentEntry()?.logMode;
+  // Seconds move in fives, because a hold is timed by feel to about that resolution and
+  // stepping to 45 one second at a time is nine taps for a number nobody measured that finely.
+  const step = mode === 'time_hold' ? 5 : mode === 'rounds' ? 1 : 0.5;
   // Rounded because repeated addition of 0.5 in binary floating point drifts, and a readout
   // saying 10.499999999999998 mid set would be the end of anybody trusting the numbers.
   state.reps = Math.max(step, Math.round((state.reps + direction * step) * 10) / 10);

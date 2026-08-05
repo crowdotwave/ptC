@@ -128,6 +128,7 @@ async function runAdapterCheck(storage) {
         is_void: true,
         is_extra: existingLog.is_extra === true,
         rounds: existingLog.rounds ?? null,
+        hold_seconds: null,
         device_id: getDeviceId(),
       });
       await storage.put('set_logs', retraction);

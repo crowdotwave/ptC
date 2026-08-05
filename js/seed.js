@@ -511,6 +511,7 @@ export async function seed(storage, { force = false } = {}) {
               is_void: false,
               is_extra: false,
               rounds: null,
+              hold_seconds: null,
               device_id: deviceId,
             });
             setIndex += 1;
@@ -539,6 +540,7 @@ export async function seed(storage, { force = false } = {}) {
               is_void: false,
               is_extra: false,
               rounds: null,
+              hold_seconds: null,
               device_id: deviceId,
             });
           }
@@ -595,6 +597,7 @@ export async function seed(storage, { force = false } = {}) {
           is_void: false, // a correction, not a retraction: the set happened, the count was wrong
           is_extra: false,
           rounds: null,
+          hold_seconds: null,
           device_id: deviceId,
         },
         { created_at: iso(new Date(Date.parse(original.created_at) + 90 * 1000)) },

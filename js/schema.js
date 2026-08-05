@@ -137,10 +137,24 @@ export const TABLES = {
       // where a number would be invented rather than measured.
       is_logged: { type: BOOL },
       // How it is logged when it is.
-      //   weight_reps   the normal case, a weight and a rep count
-      //   weight_only   a carry or a sled, where the load matters and reps do not apply
-      //   rounds        an AMRAP, where the client records rounds completed and the load used
-      log_mode: { type: TEXT, enum: ['weight_reps', 'weight_only', 'rounds'] },
+      //   weight_reps      the normal case, a weight and a rep count
+      //   weight_only      a carry or a sled, where the load matters and reps do not apply
+      //   rounds           an AMRAP, where the client records rounds completed and the load used
+      //   bodyweight_reps  a pushup or a pullup. Reps only, and deliberately no weight.
+      //   time_hold        an L sit or a hollow body. Seconds only, and no reps at all.
+      //
+      // bodyweight_reps exists rather than weight_reps with a zero weight because a zero would
+      // be arithmetic rather than a fact: volume would come out zero and Epley would report an
+      // estimated 1RM of zero, so a client getting visibly stronger would watch a flat line at
+      // the bottom of the chart. The honest series for these is the rep count itself.
+      //
+      // Recording bodyweight instead was considered and rejected. CLAUDE.md makes body weight
+      // opt in and off by default, so multiplying every pushup by it would make the one number
+      // this product refuses to lead with a required input for logging a set.
+      log_mode: {
+        type: TEXT,
+        enum: ['weight_reps', 'weight_only', 'rounds', 'bodyweight_reps', 'time_hold'],
+      },
       // What to put on the bar the first time this client does this lift, set by the trainer
       // when building the program. Used only when the client has no history for the exercise,
       // and never again after that. Null means the trainer did not say, which is a real answer
@@ -206,6 +220,9 @@ export const TABLES = {
       reps: { type: NUMERIC, nullable: true },
       // Rounds completed in an AMRAP block. Null everywhere else.
       rounds: { type: INT, nullable: true },
+      // How long a hold lasted, in seconds. An L sit and a hollow body have no reps and no
+      // load, so this is the whole of what happened. Null everywhere else.
+      hold_seconds: { type: NUMERIC, nullable: true },
       rpe: { type: NUMERIC, nullable: true },
       is_warmup: { type: BOOL },
       logged_at: { type: TS },

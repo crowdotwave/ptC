@@ -57,6 +57,7 @@ function row(overrides = {}) {
     is_void: false,
     is_extra: false,
     rounds: null,
+    hold_seconds: null,
     device_id: 'test',
     ...overrides,
   };
@@ -947,7 +948,7 @@ test('a half rep survives the schema instead of being rejected as a non integer'
     created_at: '2026-08-05T00:00:00.000Z',
     session_id: '00000000-0000-4000-8000-000000000002',
     exercise_id: '00000000-0000-4000-8000-000000000003',
-    set_index: 3, weight_kg: 0, reps: 10.5, rounds: null, rpe: null,
+    set_index: 3, weight_kg: 0, reps: 10.5, rounds: null, hold_seconds: null, rpe: null,
     is_warmup: false, logged_at: '2026-08-05T00:00:00.000Z',
     supersedes_id: null, is_void: false, is_extra: false, device_id: 'test',
   });
@@ -970,6 +971,80 @@ test('half reps carry through volume and a chart without going NaN', () => {
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
   eq(p.points.length, 2);
   for (const point of p.points) ok(Number.isFinite(point.prescribed), 'volume went NaN on a half rep');
+});
+
+// ------------------------------------------------------------------ no external load
+//
+// Five of the twelve exercises in one real three day program carry no weight: pushups, pullups
+// and pike pushups are reps only, an L sit and a hollow body are seconds only. Charting them as
+// weighted lifts would draw a flat line at zero while somebody got visibly stronger.
+
+test('a bodyweight lift produces no estimated 1RM rather than an estimated 1RM of zero', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 0, reps: 12 }),
+    row({ session_id: 's2', weight_kg: 0, reps: 15 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.kind, 'bodyweight');
+  eq(p.e1rm.series, [], 'a zero load must not reach the strength series');
+  for (const point of p.points) eq(point.e1rm, null);
+});
+
+test('a bodyweight lift leads with the rep count, which is the thing that moved', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 0, reps: 12 }),
+    row({ session_id: 's2', weight_kg: 0, reps: 15 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.leadView, 'reps');
+  eq(p.reps.series.length, 2);
+  eq(p.reps.change.first, 12);
+  eq(p.reps.change.last, 15);
+  ok(p.points[1].isRecord, 'beating your own rep count is a record');
+});
+
+test('the top set carries the rep series, not the last set or an average', () => {
+  const sessions = [sess('s1', '2026-07-01')];
+  const logs = [
+    row({ session_id: 's1', set_index: 0, weight_kg: 0, reps: 14 }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 0, reps: 12 }),
+    row({ session_id: 's1', set_index: 2, weight_kg: 0, reps: 10.5 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.points[0].topReps, 14);
+});
+
+test('a hold is measured in seconds and never becomes reps or volume', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 0, reps: null, hold_seconds: 20 }),
+    row({ session_id: 's2', weight_kg: 0, reps: null, hold_seconds: 35 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.kind, 'hold');
+  eq(p.leadView, 'hold');
+  eq(p.hold.change.last, 35);
+  eq(p.e1rm.series, [], 'a hold has no estimated 1RM');
+  for (const point of p.points) {
+    eq(point.prescribed, 0, 'seconds must not multiply into volume');
+    eq(point.topReps, null, 'a hold has no rep count');
+  }
+});
+
+// The reason kind is read off the rows and not off template_items.log_mode. A trainer moving a
+// lift from weighted to bodyweight must not retroactively unload last month's sets.
+test('a weighted lift stays weighted even once a bodyweight session appears', () => {
+  const sessions = [sess('s1', '2026-07-01'), sess('s2', '2026-07-08')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 60, reps: 8 }),
+    row({ session_id: 's2', weight_kg: 0, reps: 15 }),
+  ];
+  const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
+  eq(p.kind, 'load', 'one unloaded session does not rewrite the history of a loaded lift');
+  eq(p.e1rm.series.length, 1, 'only the loaded session has a strength number');
+  eq(p.e1rm.series[0].sessionId, 's1');
 });
 
 // ------------------------------------------------------------------ report

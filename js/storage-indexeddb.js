@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 7;
+export const DB_VERSION = 8;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -187,6 +187,18 @@ const MIGRATIONS = [
       // reps becomes nullable and rounds appears. Nothing already on disk has either state,
       // so this only widens what a future row may hold.
       rewriteRows(tx, 'set_logs', (row) => (row.rounds === undefined ? { ...row, rounds: null } : row));
+    },
+  },
+  {
+    version: 8,
+    describe: 'add set_logs.hold_seconds for timed holds',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Null, not zero. Nothing already on disk was a hold, and a zero would read as a hold
+      // that lasted no time rather than as an exercise that is not measured in seconds.
+      rewriteRows(tx, 'set_logs', (row) =>
+        row.hold_seconds === undefined ? { ...row, hold_seconds: null } : row,
+      );
     },
   },
 ];

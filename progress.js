@@ -9,7 +9,13 @@
 import { boot, gate } from './js/boot.js';
 import { wireNav } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
-import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
+import {
+  renderE1rmChart,
+  renderVolumeChart,
+  renderRepsAtLoadChart,
+  renderRepsChart,
+  renderHoldChart,
+} from './js/charts.js';
 
 const el = (id) => document.getElementById(id);
 const state = { storage: null, client: null, data: null, exerciseId: null, exercises: new Map() };
@@ -20,11 +26,18 @@ function setCopy(id, text) {
   el(id).textContent = text;
 }
 
+const round1 = (v) => Math.round(v * 10) / 10;
+
 /** Claims escalate with evidence: a fact, then a difference, then a direction. */
 function captionFor(kind, progression) {
-  const view = kind === 'e1rm' ? progression.e1rm : progression.volume;
+  const views = {
+    e1rm: [progression.e1rm, 'Estimated 1RM', ' kg'],
+    volume: [progression.volume, 'Prescribed volume', ' kg'],
+    reps: [progression.reps, 'Top set', ' reps'],
+    hold: [progression.hold, 'Longest hold', ' seconds'],
+  };
+  const [view, label, unit] = views[kind] || views.volume;
   const change = view.change;
-  const noun = kind === 'e1rm' ? 'estimated 1RM' : 'prescribed volume';
 
   switch (view.evidence) {
     case 'none':
@@ -33,12 +46,12 @@ function captionFor(kind, progression) {
       return 'First session logged. Log one more and the comparison starts.';
     case 'compare':
       if (!change) return 'Two sessions logged.';
-      return `${noun === 'estimated 1RM' ? 'Estimated 1RM' : 'Prescribed volume'} ${
-        change.absolute >= 0 ? 'up' : 'down'
-      } ${Math.abs(change.absolute).toLocaleString()}${kind === 'e1rm' ? ' kg' : ' kg'} since the session before. Two points, not a trend.`;
+      return `${label} ${change.absolute >= 0 ? 'up' : 'down'} ${round1(
+        Math.abs(change.absolute),
+      )}${unit} since the session before. Two points, not a trend.`;
     default: {
       if (!change) return '';
-      const move = `${change.absolute >= 0 ? 'Up' : 'Down'} ${Math.abs(change.absolute).toLocaleString()} kg${
+      const move = `${change.absolute >= 0 ? 'Up' : 'Down'} ${round1(Math.abs(change.absolute))}${unit}${
         change.percent === null ? '' : `, ${change.percent > 0 ? '+' : ''}${change.percent} percent`
       }`;
       // Estimated 1RM spans everything and says which formula it is, per CLAUDE.md. Volume is
@@ -47,7 +60,12 @@ function captionFor(kind, progression) {
         const n = progression.blocks.length;
         return `${move} across ${n} block${n === 1 ? '' : 's'}. Epley, weight times one plus reps over thirty.`;
       }
-      return `${move} inside this block. Volume is not comparable across a change of rep range.`;
+      if (kind === 'volume') {
+        return `${move} inside this block. Volume is not comparable across a change of rep range.`;
+      }
+      // No load, so there is no formula to name and no rep range change to warn about. The
+      // number is simply the thing that happened.
+      return `${move} across ${progression.totalSessions} sessions.`;
     }
   }
 }
@@ -63,6 +81,26 @@ function renderLiftPicker(items) {
     .join('');
 }
 
+/**
+ * What the lead chart is, for this exercise.
+ *
+ * A pushup has no estimated 1RM and no volume, so offering either would be drawing a zero and
+ * calling it a measurement. progression.kind is read off what was actually logged, so this
+ * follows the history rather than the program.
+ */
+function leadFor(data) {
+  switch (data.leadView) {
+    case 'hold':
+      return { title: 'Longest hold', render: renderHoldChart, view: data.hold, unit: 's' };
+    case 'reps':
+      return { title: 'Top set reps', render: renderRepsChart, view: data.reps, unit: '' };
+    case 'e1rm':
+      return { title: 'Estimated 1RM', render: renderE1rmChart, view: data.e1rm, unit: ' kg' };
+    default:
+      return { title: 'Volume per session', render: renderVolumeChart, view: data.volume, unit: ' kg' };
+  }
+}
+
 function render() {
   const data = state.data;
   const exercise = state.exercises.get(state.exerciseId);
@@ -75,17 +113,24 @@ function render() {
       ).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
     : 'No sessions on this lift yet.';
 
-  const leadIsStrength = data.leadView === 'e1rm';
+  const lead = leadFor(data);
+  const loaded = data.kind === 'load';
 
   // Lead slot
-  setCopy('lead-title', leadIsStrength ? 'Estimated 1RM' : 'Volume per session');
-  const leadChange = leadIsStrength ? data.e1rm.change : data.volume.change;
-  setCopy('lead-value', leadChange ? kg(leadChange.last) : '');
-  if (leadIsStrength) renderE1rmChart(el('lead-plot'), data);
-  else renderVolumeChart(el('lead-plot'), data);
-  setCopy('lead-caption', captionFor(leadIsStrength ? 'e1rm' : 'volume', data));
+  setCopy('lead-title', lead.title);
+  setCopy('lead-value', lead.view.change ? `${round1(lead.view.change.last)}${lead.unit}` : '');
+  lead.render(el('lead-plot'), data);
+  setCopy('lead-caption', captionFor(data.leadView, data));
 
-  // Second slot carries whichever one did not lead
+  // Second slot. With load there are two altitudes and this carries whichever did not lead.
+  // Without load there is only one real measurement, so a second chart would be filler: volume
+  // computes to a row of zeroes and an estimated 1RM does not exist. The slot goes away.
+  el('second-chart').hidden = !loaded;
+  el('reps-chart').hidden = !loaded;
+
+  if (!loaded) return;
+
+  const leadIsStrength = data.leadView === 'e1rm';
   setCopy('second-title', leadIsStrength ? 'Volume per session' : 'Estimated 1RM');
   const secondChange = leadIsStrength ? data.volume.change : data.e1rm.change;
   setCopy('second-value', secondChange ? kg(secondChange.last) : '');
@@ -98,8 +143,9 @@ function render() {
       (extraTotal > 0 ? ` Plus ${Math.round(extraTotal).toLocaleString()} kg you added beyond the plan.` : ''),
   );
 
-  // Reps at load. Always visible, never behind a tab, because for an intermediate this is the
-  // only place a block of real progress shows up at all.
+  // Reps at load. Always visible for a loaded lift, because for an intermediate this is the only
+  // place a block of real progress shows up at all. Hidden without load, where every value would
+  // be one line labelled 0 kg repeating what the lead chart already said.
   renderRepsAtLoadChart(el('reps-plot'), data);
   const lines = data.repsAtLoad.lines;
   setCopy('reps-value', lines.length ? `${lines[lines.length - 1].loadKg} kg` : '');

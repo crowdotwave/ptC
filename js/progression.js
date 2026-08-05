@@ -130,12 +130,32 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
         .reduce((t, r) => t + r.weight_kg * r.reps, 0);
 
       // Prescribed working sets only, so a max single cannot be farmed for a better line.
-      const forStrength = prescribedRows.filter((r) => counted(r) && r.reps <= MAX_REPS_FOR_E1RM);
+      //
+      // A zero load is excluded, not charted as zero. A pushup genuinely has no external weight,
+      // so Epley returns zero for every set of them forever, and a client going from 12 reps to
+      // 15 would watch a flat line along the bottom of a chart titled Estimated 1RM. Dropping
+      // the rows leaves the series empty, which is what makes buildProgression fall through to
+      // the rep count as the lead instead.
+      const forStrength = prescribedRows.filter(
+        (r) => counted(r) && r.reps <= MAX_REPS_FOR_E1RM && r.weight_kg > 0,
+      );
       const best = forStrength.reduce(
         (top, r) => {
           const value = epley1rm(r.weight_kg, r.reps);
           return top === null || value > top.value ? { value, weightKg: r.weight_kg, reps: r.reps } : top;
         },
+        null,
+      );
+
+      // The two series that carry progress when load cannot. Top set, not an average, because a
+      // progression is read off the best set of the session.
+      const topReps = prescribedRows.reduce(
+        (top, r) => (counted(r) && (top === null || r.reps > top) ? r.reps : top),
+        null,
+      );
+      const held = (r) => Number.isFinite(r.hold_seconds) && r.hold_seconds > 0;
+      const topHold = prescribedRows.reduce(
+        (top, r) => (held(r) && (top === null || r.hold_seconds > top) ? r.hold_seconds : top),
         null,
       );
 
@@ -152,20 +172,40 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
         setCount: rows.length,
         extraCount: rows.filter((r) => r.is_extra).length,
         e1rm: best ? best.value : null,
+        topReps,
+        topHold,
         topSet: best ? { weightKg: best.weightKg, reps: best.reps } : null,
         rows: prescribedRows,
       };
     })
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  // What kind of exercise this is, read off the rows rather than off the program.
+  //
+  // Derived from what happened, not from template_items.log_mode, for two reasons. The rows are
+  // the record of the session and the template is only ever the intent, and a client's history
+  // outlives any number of edits to the program that produced it. A trainer switching a lift
+  // from weighted to bodyweight does not retroactively make last month's loaded sets unloaded.
+  const anyHeld = live.some((r) => Number.isFinite(r.hold_seconds) && r.hold_seconds > 0);
+  const withReps = live.filter((r) => Number.isFinite(r.reps) && r.reps > 0);
+  const kind = anyHeld
+    ? 'hold'
+    : withReps.length && withReps.every((r) => r.weight_kg === 0)
+      ? 'bodyweight'
+      : 'load';
+
+  // The number this exercise's progress is actually read from.
+  const leadValue = (p) => (kind === 'hold' ? p.topHold : kind === 'bodyweight' ? p.topReps : p.e1rm);
+
   // A record is a point that beat everything before it. Deloads cannot set records.
   let running = null;
   for (const point of points) {
     point.isRecord = false;
-    if (point.e1rm === null || point.isDeload) continue;
-    if (running === null || point.e1rm > running) {
+    const value = leadValue(point);
+    if (value === null || point.isDeload) continue;
+    if (running === null || value > running) {
       point.isRecord = running !== null;
-      running = point.e1rm;
+      running = value;
     }
   }
 
@@ -200,10 +240,29 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
       evidence: evidenceLevel(currentBlockPoints.filter((p) => !p.isDeload).length),
       change: changeBetween(currentBlockPoints.filter((p) => !p.isDeload).map((p) => p.prescribed)),
     },
+    // Reps and seconds carry the same shape as the strength line, and for a lift with no
+    // external load they carry the only story there is.
+    reps: {
+      series: points.filter((p) => p.topReps !== null),
+      evidence: evidenceLevel(working.filter((p) => p.topReps !== null).length),
+      change: changeBetween(working.filter((p) => p.topReps !== null).map((p) => p.topReps)),
+    },
+    hold: {
+      series: points.filter((p) => p.topHold !== null),
+      evidence: evidenceLevel(working.filter((p) => p.topHold !== null).length),
+      change: changeBetween(working.filter((p) => p.topHold !== null).map((p) => p.topHold)),
+    },
     repsAtLoad: buildRepsAtLoad(currentBlockPoints),
-    // Which altitude leads. One block has no cross block story to tell, so volume leads.
-    // Two or more and the six month question exists, so strength leads.
-    leadView: blocks.length >= 2 ? 'e1rm' : 'volume',
+    kind,
+    // Which altitude leads.
+    //
+    // With no external load there is no choice to make: an estimated 1RM does not exist for a
+    // pushup and volume computes to zero, so the rep count or the hold is the whole story.
+    //
+    // With load, one block has no cross block story to tell, so volume leads. Two or more and
+    // the six month question exists, so strength leads.
+    leadView:
+      kind === 'hold' ? 'hold' : kind === 'bodyweight' ? 'reps' : blocks.length >= 2 ? 'e1rm' : 'volume',
     totalSessions: points.length,
   };
 }
