@@ -18,6 +18,8 @@ import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { targetLine } from './js/program.js';
+import { pickDay, sortedDays, sortedItems, currentAssignment } from './js/snapshot.js';
+import { NO_PROGRAM_YET } from './js/program-view.js';
 import {
   unit,
   toDisplay,
@@ -130,26 +132,11 @@ function clearNotice() {
 
 async function loadClientData(storage, clientId) {
   const client = await storage.get('clients', clientId);
-  const assignments = await storage.query(
-    'assignments',
-    { client_id: clientId },
-    { orderBy: 'starts_on', direction: 'desc', limit: 1 },
-  );
-  const assignment = assignments[0];
+  // Shared with the Programs tab, so the two screens cannot disagree about which program this
+  // person is on.
+  const assignment = await currentAssignment(storage, clientId);
   const sessions = await storage.query('sessions', { client_id: clientId }, { orderBy: 'started_at' });
   return { client, assignment, sessions };
-}
-
-/**
- * Which day comes next. The frozen snapshot decides, never the live template, so editing the
- * program does not rewrite what this client was told to do.
- */
-function pickDay(snapshot, sessions) {
-  const days = [...snapshot.days].sort((a, b) => a.day_index - b.day_index);
-  if (!sessions.length) return days[0];
-  const last = sessions[sessions.length - 1];
-  const position = days.findIndex((day) => day.day_index === last.day_index);
-  return days[(position + 1) % days.length];
 }
 
 /**
@@ -164,7 +151,7 @@ async function buildPlan(storage, day, sessions) {
   const sessionStartById = new Map(sessions.map((s) => [s.id, s.started_at]));
   const plan = [];
 
-  for (const item of [...day.items].sort((a, b) => a.order_index - b.order_index)) {
+  for (const item of sortedItems(day)) {
     // Cardio intervals and anything else the trainer marked as not logged are shown on the
     // day, never stepped through. Recording a number nobody measured is worse than recording
     // nothing.
@@ -769,8 +756,7 @@ function bindHold(button, apply) {
  * in a way the client cannot fix.
  */
 function renderDayPicker(snapshot, sessions) {
-  const days = [...snapshot.days].sort((a, b) => a.day_index - b.day_index);
-  ui.dayPicker.innerHTML = days
+  ui.dayPicker.innerHTML = sortedDays(snapshot)
     .map((day) => {
       const on = day.day_index === state.day.day_index;
       // The split only. The day type above it said STRENGTH on almost every chip, which is a
@@ -795,8 +781,7 @@ async function chooseDay(dayIndex) {
     showNotice('You have already logged a set. Finish or end this session first.');
     return;
   }
-  const days = [...state.assignment.snapshot.days].sort((a, b) => a.day_index - b.day_index);
-  const picked = days.find((d) => d.day_index === Number(dayIndex));
+  const picked = sortedDays(state.assignment.snapshot).find((d) => d.day_index === Number(dayIndex));
   if (!picked || picked.day_index === state.day.day_index) return;
 
   state.day = picked;
@@ -905,7 +890,7 @@ async function main() {
     // The steppers and Log set have to go with it. Leaving a live primary action on a screen
     // with no plan behind it invites a tap that writes a set against nothing.
     ui.controls.hidden = true;
-    showNotice('Your trainer has not assigned a program yet. It will be here when they do.');
+    showNotice(NO_PROGRAM_YET);
     return;
   }
 
@@ -917,6 +902,17 @@ async function main() {
 
   const snapshot = assignment.snapshot;
   state.day = pickDay(snapshot, sessions);
+
+  // A program with no days in it. Reachable today, because deleting the last day of a template
+  // in the builder is allowed. From this side of the app it is the same situation as no program
+  // at all, so it gets the same screen rather than a blank one, and it names the same person.
+  if (!state.day) {
+    ui.exerciseName.textContent = 'No program yet';
+    ui.controls.hidden = true;
+    showNotice(NO_PROGRAM_YET);
+    return;
+  }
+
   state.plan = await buildPlan(storage, state.day, sessions);
 
   const first = state.plan[0];

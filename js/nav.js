@@ -28,11 +28,15 @@ const ICONS = {
   programs: '<rect x="3.5" y="4" width="13" height="12" rx="2" /><path d="M3.5 8h13M8 8v8" opacity=".45" />',
 };
 
+// Programs needs 'any', because that screen answers two different questions with one word: a
+// client reads the program they are on, a trainer reads the ones they build, and somebody who is
+// both reads their own first and then theirs. Splitting it into two tabs would give that person
+// two tabs called almost the same thing.
 const TABS = [
   { key: 'log', href: 'index.html', label: 'Log', needs: 'client' },
   { key: 'progress', href: 'progress.html', label: 'Progress', needs: 'client' },
   { key: 'clients', href: 'trainer.html', label: 'Clients', needs: 'trainer' },
-  { key: 'programs', href: 'builder.html', label: 'Programs', needs: 'trainer' },
+  { key: 'programs', href: 'builder.html', label: 'Programs', needs: 'any' },
 ];
 
 const icon = (key) =>
@@ -41,6 +45,7 @@ const icon = (key) =>
 
 function can(actor, needs) {
   if (!actor) return false;
+  if (needs === 'any') return Boolean(actor.trainerId) || Boolean(actor.clientId);
   return needs === 'trainer' ? Boolean(actor.trainerId) : Boolean(actor.clientId);
 }
 

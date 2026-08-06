@@ -7,7 +7,7 @@
 //
 // No build step and no test runner, in line with the rest of the app. Open test.html.
 
-import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
+import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm, topSet } from './js/history.js';
 import { holdTicks, nextHoldInterval, HOLD_DELAY_MS, HOLD_FLOOR_MS, HOLD_START_MS } from './js/hold.js';
 import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
@@ -15,6 +15,8 @@ import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
   isBodyweightLoad,
 } from './js/program.js';
+import { buildSnapshot, pickDay, sortedDays, sortedItems } from './js/snapshot.js';
+import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
@@ -824,6 +826,336 @@ test('a repless row does not appear as a load line', () => {
   ];
   const p = buildProgression({ setLogs: logs, sessions, assignments: [assign('a1', '2026-07-01')], exerciseId: 'squat' });
   eq(p.repsAtLoad.lines, [], 'reps at load has nothing to draw without reps');
+});
+
+// ------------------------------------------------------------------ freezing a program
+//
+// A snapshot is the only thing in the schema nobody can migrate: it is frozen history by
+// definition, so a field this builder gets wrong is wrong on every assignment ever written from
+// it. Three callers read this shape (the logging screen, a client reading their program, a
+// trainer previewing one), which is exactly why it stopped living inside the seed generator.
+
+const ex = (id, over = {}) => ({
+  id, name: id, slug: id, equipment: 'barbell', increment_kg: 2.5, ...over,
+});
+const tday = (id, day_index, over = {}) => ({
+  id, day_index, name: `Day ${day_index}`, day_type: 'STRENGTH', split: 'FULL',
+  warmup: { mobility: [], general: [], specific: [] }, comments: '', ...over,
+});
+const titem = (id, day_id, order_index, exercise_id, over = {}) => ({
+  id, day_id, order_index, exercise_id, target_sets: 3, is_logged: true, ...over,
+});
+
+const program = {
+  template: { id: 't1', name: 'Foundations', notes: 'Add load before adding sets.' },
+  days: [tday('d1', 0), tday('d2', 1)],
+  items: [titem('i1', 'd1', 0, 'squat'), titem('i2', 'd1', 1, 'bench'), titem('i3', 'd2', 0, 'squat')],
+  exercises: [ex('squat'), ex('bench')],
+};
+
+test('a snapshot carries the exercise inline, since a client can never resolve one by id', () => {
+  const snap = buildSnapshot(program);
+  eq(snap.days[0].items[0].exercise.name, 'squat');
+  eq(snap.days[0].items[0].exercise_id, 'squat', 'the original column survives alongside it');
+});
+
+test('a snapshot carries the five exercise fields and nothing the library grows later', () => {
+  const snap = buildSnapshot({ ...program, exercises: [ex('squat', { secret: 'x' }), ex('bench')] });
+  eq(Object.keys(snap.days[0].items[0].exercise), ['id', 'name', 'slug', 'equipment', 'increment_kg']);
+});
+
+test('days and items come out ordered however the rows arrived', () => {
+  const snap = buildSnapshot({
+    ...program,
+    days: [tday('d2', 1), tday('d1', 0)],
+    items: [titem('i2', 'd1', 1, 'bench'), titem('i3', 'd2', 0, 'squat'), titem('i1', 'd1', 0, 'squat')],
+  });
+  eq(snap.days.map((d) => d.id), ['d1', 'd2']);
+  eq(snap.days[0].items.map((i) => i.id), ['i1', 'i2']);
+});
+
+test('items land on their own day and never on the next one', () => {
+  const snap = buildSnapshot(program);
+  eq(snap.days[0].items.length, 2);
+  eq(snap.days[1].items.map((i) => i.id), ['i3']);
+});
+
+test('freezing does not reorder the caller rows underneath it', () => {
+  const days = [tday('d2', 1), tday('d1', 0)];
+  buildSnapshot({ ...program, days });
+  eq(days.map((d) => d.id), ['d2', 'd1'], 'the caller still holds what it passed in');
+});
+
+test('an exercise the library cannot resolve is refused rather than frozen blank', () => {
+  let message = '';
+  try {
+    buildSnapshot({ ...program, exercises: [ex('squat')] });
+  } catch (error) {
+    message = error.message;
+  }
+  ok(/no longer in the library/i.test(message), `expected a refusal, got "${message}"`);
+});
+
+test('the refusal names the row on the sheet, since a uuid is the one thing nobody can search', () => {
+  let message = '';
+  try {
+    buildSnapshot({
+      ...program,
+      days: [tday('d1', 0, { split: 'UPPER A' })],
+      items: [titem('i2', 'd1', 1, 'bench', { group_label: '2B' })],
+      exercises: [ex('squat')],
+    });
+  } catch (error) {
+    message = error.message;
+  }
+  ok(message.startsWith('UPPER A, 2B '), message);
+  ok(!/[0-9a-f]{8}-[0-9a-f]{4}/.test(message), 'and never a uuid');
+});
+
+// ------------------------------------------------------------------ which day comes next
+
+const frozen = buildSnapshot(program);
+const onDay = (index) => ({ day_index: index });
+
+test('a client with no history opens on the first day', () => {
+  eq(pickDay(frozen, []).day_index, 0);
+});
+
+test('the rotation advances from the last session and wraps', () => {
+  eq(pickDay(frozen, [onDay(0)]).day_index, 1, 'day 0 leads to day 1');
+  eq(pickDay(frozen, [onDay(1)]).day_index, 0, 'the end of the rotation wraps to the start');
+});
+
+test('only the most recent session decides, whatever came before it', () => {
+  eq(pickDay(frozen, [onDay(1), onDay(1), onDay(0)]).day_index, 1);
+});
+
+test('a session on a day this program no longer has starts the rotation again', () => {
+  eq(pickDay(frozen, [onDay(7)]).day_index, 0);
+});
+
+test('a program with no days picks nothing rather than throwing', () => {
+  eq(pickDay({ template: program.template, days: [] }, []), null);
+  eq(pickDay({}, [onDay(0)]), null, 'a snapshot missing the key entirely is the same answer');
+});
+
+test('sorted reads survive a snapshot with a field missing', () => {
+  eq(sortedDays(null), []);
+  eq(sortedItems(undefined), []);
+});
+
+// ------------------------------------------------------------------ the top set last time
+//
+// One line per lift on a screen that lists a whole day. Which set it reports is the whole
+// question: a ramp up and a back off set sit either side of the effort and neither is it.
+
+test('the top set is the heaviest of the most recent session', () => {
+  const rows = [
+    row({ session_id: 's1', weight_kg: 90, reps: 5 }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5 }),
+    row({ session_id: 's1', set_index: 2, weight_kg: 95, reps: 5 }),
+  ];
+  const best = topSet(rows, starts([['s1', '2026-07-01T18:00:00.000Z']]));
+  eq({ weightKg: best.weightKg, reps: best.reps }, { weightKg: 100, reps: 5 });
+});
+
+test('at equal load the better set is the one with more reps', () => {
+  const rows = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 8 }),
+  ];
+  eq(topSet(rows, starts([['s1', '2026-07-01']])).reps, 8);
+});
+
+test('a heavier warmup never becomes the top set', () => {
+  const rows = [
+    row({ session_id: 's1', weight_kg: 140, reps: 1, is_warmup: true }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5 }),
+  ];
+  eq(topSet(rows, starts([['s1', '2026-07-01']])).weightKg, 100);
+});
+
+test('an older heavier session does not outrank the most recent one', () => {
+  const rows = [
+    row({ session_id: 's1', weight_kg: 120, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 100, reps: 5 }),
+  ];
+  const best = topSet(rows, starts([['s1', '2026-07-01'], ['s2', '2026-07-08']]));
+  eq(best.weightKg, 100, 'last time means last time, not best ever');
+  eq(best.on, '2026-07-08');
+});
+
+test('a correction is what gets reported, never the row it replaced', () => {
+  const original = row({ session_id: 's1', weight_kg: 100, reps: 5 });
+  const fixed = row({ session_id: 's1', weight_kg: 90, reps: 5, supersedes_id: original.id });
+  eq(topSet([original, fixed], starts([['s1', '2026-07-01']])).weightKg, 90);
+});
+
+test('a repless row has no weight for reps to state and is skipped', () => {
+  const rows = [
+    row({ session_id: 's1', weight_kg: 60, reps: null }),
+    row({ session_id: 's1', set_index: 1, weight_kg: 40, reps: 10 }),
+  ];
+  eq(topSet(rows, starts([['s1', '2026-07-01']])).weightKg, 40);
+});
+
+test('a session of nothing but repless rows reports nothing rather than a null weight', () => {
+  const rows = [row({ session_id: 's1', weight_kg: 60, reps: null })];
+  eq(topSet(rows, starts([['s1', '2026-07-01']])), null);
+});
+
+test('another client rows never reach the answer', () => {
+  const rows = [row({ session_id: 'theirs', weight_kg: 200, reps: 5 })];
+  eq(topSet(rows, starts([['s1', '2026-07-01']])), null);
+});
+
+// ------------------------------------------------------------------ a program, read
+//
+// One renderer serves the client reading their program and the trainer checking it, so a rule
+// broken here is broken on both screens at once. These pin what the view claims: the counts, the
+// supersets, and the rows a client would otherwise never learn about.
+
+const load = (items) => dayLoad({ items });
+
+test('the load line counts lifts and the sets they ask for', () => {
+  eq(loadLine({ items: [titem('a', 'd', 0, 'squat', { target_sets: 3 }), titem('b', 'd', 1, 'bench', { target_sets: 4 })] }),
+    '2 lifts, 7 sets');
+});
+
+test('a lift with no set count adds no sets rather than a zero', () => {
+  eq(load([titem('a', 'd', 0, 'squat', { target_sets: 3 }), titem('b', 'd', 1, 'bike', { target_sets: null })]),
+    { lifts: 2, sets: 3, shown: 0 });
+});
+
+test('a row the trainer does not log is counted apart, never as a lift with no sets', () => {
+  const items = [titem('a', 'd', 0, 'squat', { target_sets: 3 }), titem('b', 'd', 1, 'bike', { is_logged: false })];
+  eq(load(items), { lifts: 1, sets: 3, shown: 1 });
+  eq(loadLine({ items }), '1 lift, 3 sets, 1 not logged');
+});
+
+test('a day of nothing but instruction still says what is in it', () => {
+  eq(loadLine({ items: [titem('a', 'd', 0, 'bike', { is_logged: false })] }), '1 not logged');
+});
+
+test('an empty day is an invitation rather than a zero', () => {
+  eq(loadLine({ items: [] }), 'Nothing in this day yet.');
+});
+
+test('rows sharing a leading number are one superset', () => {
+  const runs = groupItems({ items: [
+    titem('a', 'd', 0, 'squat', { group_label: '1A' }),
+    titem('b', 'd', 1, 'bench', { group_label: '1B' }),
+    titem('c', 'd', 2, 'row', { group_label: '2' }),
+  ] });
+  eq(runs.map((r) => r.items.length), [2, 1]);
+  eq(runs[0].group, '1');
+  eq(runs[1].group, null, 'a bare number is not a group of one');
+});
+
+test('a letter is what makes a group, so two plain numbers never merge', () => {
+  const runs = groupItems({ items: [
+    titem('a', 'd', 0, 'squat', { group_label: '1' }),
+    titem('b', 'd', 1, 'bench', { group_label: '1' }),
+  ] });
+  eq(runs.length, 2);
+});
+
+test('the same group split by another lift does not reach across it', () => {
+  const runs = groupItems({ items: [
+    titem('a', 'd', 0, 'squat', { group_label: '1A' }),
+    titem('b', 'd', 1, 'bench', { group_label: '2' }),
+    titem('c', 'd', 2, 'row', { group_label: '1B' }),
+  ] });
+  eq(runs.map((r) => r.items.length), [1, 1, 1]);
+});
+
+const view = (over = {}) => buildSnapshot({
+  ...program,
+  items: [
+    titem('i1', 'd1', 0, 'squat', { group_label: '1', target_sets: 3, target_reps_text: '5-8', target_load: '1-2 RIR', rest_seconds: 180, notes: 'Full depth.', ...over }),
+    titem('i3', 'd2', 0, 'bench', { target_sets: 3 }),
+  ],
+});
+
+test('the view renders the prescription sentence, not a rebuilt one', () => {
+  const html = renderProgram(view(), 0);
+  ok(html.includes('3 sets, 5-8, 1-2 RIR, 180s rest'), 'the target line is targetLine output');
+  ok(html.includes('Full depth.'), 'the coaching note reaches the client');
+});
+
+test('the view opens where pickDay would, so a preview and the logging screen agree', () => {
+  const snap = view();
+  ok(renderProgram(snap).includes('>squat<'), 'the first day is what opens');
+  ok(renderProgram(snap, 1).includes('>bench<'), 'and a named day overrides it');
+});
+
+test('a day index the program does not have falls back rather than rendering nothing', () => {
+  ok(renderProgram(view(), 42).includes('>squat<'));
+});
+
+test('a program with no days says so instead of throwing', () => {
+  const html = renderProgram({ template: program.template, days: [] });
+  ok(/no days in this program yet/i.test(html), html);
+  ok(!/sorry|unfortunately|cannot/i.test(html), 'an empty state invites rather than apologises');
+});
+
+test('one day is a label and not a chooser', () => {
+  const single = buildSnapshot({ ...program, days: [tday('d1', 0)], items: [titem('i1', 'd1', 0, 'squat')] });
+  ok(!renderProgram(single).includes('data-plan-day'), 'nothing to choose between');
+  ok(renderProgram(view()).includes('data-plan-day'), 'two days get the chooser');
+});
+
+test('a row the client never logs is named on their program rather than hidden from it', () => {
+  const html = renderProgram(view({ is_logged: false }), 0);
+  ok(html.includes('>squat<'), 'the lift is still on the page');
+  ok(html.includes('Not logged'), 'and says why it will not appear while logging');
+});
+
+test('a client sees what they lifted last time, under what they were asked to lift', () => {
+  const history = new Map([['squat', { weightKg: 100, reps: 5, on: '2026-07-27T18:00:00.000Z' }]]);
+  const html = renderProgram(view(), 0, history);
+  ok(/Top set last time 100 kg for 5, Jul 27/.test(html), html);
+});
+
+test('a lift with no history says nothing rather than a zero', () => {
+  const html = renderProgram(view(), 0, new Map());
+  ok(!html.includes('Top set last time'), 'no invented number for a lift nobody has done');
+});
+
+test('a trainer previewing a template gets no history, because there is nobody whose it would be', () => {
+  ok(!renderProgram(view(), 0).includes('Top set last time'));
+});
+
+test('nothing a trainer typed can close a tag', () => {
+  const html = renderProgram(buildSnapshot({
+    ...program,
+    days: [tday('d1', 0, { split: '<img src=x>' })],
+    items: [titem('i1', 'd1', 0, 'squat', { variation: '"><script>' })],
+  }), 0);
+  ok(!html.includes('<img'), 'the split is escaped');
+  ok(!html.includes('<script>'), 'so is the variation');
+});
+
+// ------------------------------------------------------------------ dates that are not times
+//
+// assignments.starts_on is a date column, so it arrives as 'YYYY-MM-DD'. Date parses that as UTC
+// midnight, which renders as the day before everywhere west of Greenwich, and this app is written
+// in Canada. Every screen that prints one has to force local midnight, the way weekIndexOf
+// already does.
+
+test('a date column is read as local midnight, not as UTC', () => {
+  const asDate = new Date('2026-08-06T00:00:00');
+  eq(asDate.getDate(), 6, 'the 6th is the 6th in the zone the person is standing in');
+  eq(asDate.getMonth(), 7);
+});
+
+test('week one is the week the block starts, counting the way anybody says it', () => {
+  eq(weekIndexOf('2026-08-06T18:00:00.000Z', '2026-08-03'), 0, 'the first week is index zero');
+  eq(weekIndexOf('2026-08-11T18:00:00.000Z', '2026-08-03'), 1);
+});
+
+test('a session before the block starts is a negative week, never week one', () => {
+  ok(weekIndexOf('2026-07-30T18:00:00.000Z', '2026-08-03') < 0);
 });
 
 // ------------------------------------------------------------------ what goes over the wire

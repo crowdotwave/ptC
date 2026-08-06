@@ -20,7 +20,23 @@
         <p class="context__target" id="view-note">&nbsp;</p>
       </header>
 
+      <!-- The program this person is on, for anybody who holds a clients row. Read only, from
+           their own assignment snapshot: 0002_rls.sql gives a client no reach into
+           program_templates at all, so the snapshot is not a shortcut here, it is the only thing
+           their session can see. -->
+      <section id="mine-view" hidden>
+        <div class="context__row">
+          <h2 class="section__title" id="mine-title">Your program</h2>
+          <div class="unitswitch" id="unit-switch" hidden></div>
+        </div>
+        <p class="context__target" id="mine-note"></p>
+        <div id="mine-body"></div>
+      </section>
+
       <section id="list-view">
+        <!-- Only when this person also has a program of their own above. On its own, this list
+             is what the page title already says. -->
+        <h2 class="section__title" id="build-title" hidden></h2>
         <div class="secondary">
           <button type="button" class="button-secondary" id="new-program">New program</button>
           <!-- The label is the control. A bare file input cannot be styled and reads as a
@@ -30,6 +46,14 @@
         </div>
         <p class="import__error" id="import-error" hidden role="status"></p>
         <ul class="clientlist" id="program-list"></ul>
+
+        <!-- Archived programs, in their own section rather than mixed into the list above with
+             "(archived)" glued to the name. Collapsed, because this is the drawer you open when
+             you are looking for something, not part of the list you read every day. -->
+        <details class="archive" id="archived" hidden>
+          <summary class="archive__summary" id="archived-count"></summary>
+          <ul class="clientlist" id="archived-list"></ul>
+        </details>
       </section>
 
       <!-- Review, between reading the file and writing anything. Nothing exists in the database
@@ -43,8 +67,51 @@
         <div id="import-draft"></div>
       </section>
 
+      <!-- The program as the client reads it. Frozen from the live template on the way in, so
+           this is the snapshot an assignment would carry rather than a second rendering of the
+           table above. -->
+      <section id="preview-view" hidden>
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="preview-back">Back to the program</a></p>
+        </div>
+        <p class="legend">
+          This is the whole program, exactly as it reaches a client's phone. Held to a phone's
+          width, so a name that wraps here wraps there.
+        </p>
+        <p class="import__error" id="preview-error" hidden role="status"></p>
+        <div class="preview" id="preview-body"></div>
+      </section>
+
+      <!-- Putting somebody on this program. The write is one row in assignments carrying a frozen
+           copy of the whole thing, which is both what stops a later edit rewriting their history
+           and the only way their phone can read the program at all. -->
+      <section id="assign-view" hidden>
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="assign-back">Back to the program</a></p>
+        </div>
+        <p class="import__error" id="assign-error" hidden role="status"></p>
+        <p class="legend">
+          Each client gets their own frozen copy taken now. Editing this program later changes
+          nothing for anybody already on it.
+        </p>
+        <div class="field">
+          <label class="field__label" for="assign-start">Start date</label>
+          <input class="field__input" id="assign-start" type="date" />
+        </div>
+        <ul class="clientlist" id="assign-list"></ul>
+      </section>
+
       <section id="edit-view" hidden>
-        <p class="backlink"><a href="#" id="back-to-list">Back to programs</a></p>
+        <!-- Preview sits in the top row rather than beside Add day, because checking what you
+             wrote is something you reach for at any point, and the bottom of a five day table
+             is a long way from wherever you are. -->
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="back-to-list">Back to programs</a></p>
+          <div class="secondary">
+            <button type="button" class="button-secondary" id="preview">Preview as client</button>
+            <button type="button" class="button-secondary" id="assign">Assign to a client</button>
+          </div>
+        </div>
 
         <p class="suggest" id="live-warning" hidden></p>
 
@@ -65,11 +132,15 @@
           <button type="button" class="button-secondary" id="add-day">Add day</button>
           <button type="button" class="button-secondary" id="archive">Archive program</button>
         </div>
+
+        <!-- The question anybody archiving a program is actually asking, answered before they
+             tap rather than after. -->
+        <p class="legend" id="archive-note"></p>
       </section>
 
       <!-- Who you are signed in as, and the way out. Quietest type on the page. -->
       <footer class="account">
-        <span class="account__who" id="trainer-name"></span>
+        <span class="account__who" id="viewer-name"></span>
         <button class="account__out" type="button" data-signout hidden>Sign out</button>
       </footer>
     </main>

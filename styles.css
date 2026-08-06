@@ -1501,6 +1501,82 @@ button.navlink:disabled {
   font-size: var(--t-body);
 }
 
+/* Names one half of a screen that has two. Appears only when both halves are there: on its own,
+ * a section heading repeating the page title is furniture. */
+.section__title {
+  margin: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+}
+
+/* A client and the one thing you came here to do to them.
+ *
+ * Not a .clientlist__button like every other row on this screen, because the row itself does
+ * nothing: the whole surface being pressable would put a 44px target for "assign a program to
+ * another person" under every accidental tap. The action is the button and only the button.
+ *
+ * It wraps under the name at narrow widths rather than squeezing beside it, so a long name never
+ * has to share its line with a control. */
+.assignrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+}
+
+.assignrow__who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- the archive
+ *
+ * A drawer, not a filter and not a suffix on a name. Archived programs used to sit in the live
+ * list with "(archived)" appended, while the count above it counted only the live ones, so the
+ * screen said "3 programs" over a list of six.
+ *
+ * A details element, so open and closed is native, keyboard reachable and free. The disclosure
+ * triangle is left alone deliberately: it is the shape that says which way this is, and drawing
+ * a replacement would be spending effort to arrive back where the browser already was.
+ *
+ * Nothing in here is recoloured against a live row. What separates the two lists is a heading
+ * and a position, which is a word and a place, and the encoding rule asks for one of those
+ * rather than for a hue. Archived is not an alarm. */
+.archive {
+  margin-top: var(--s-5);
+}
+
+.archive__summary {
+  min-height: var(--tap);
+  padding: var(--s-2) 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.archive__summary:hover {
+  color: var(--text-primary);
+}
+
+/* Under the row rather than beside it. Restore, Delete and the question all have to fit at a
+ * 360px viewport, and a name cell that has to share its line with three controls is a name cell
+ * that truncates. */
+.archived__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
 /* ---------------------------------------------------------------- spreadsheet import
  *
  * A review screen, shown before anything is written. Desktop only in practice, which is why it
@@ -1658,6 +1734,220 @@ button.navlink:disabled {
 .legend__swatch {
   color: var(--accent-data);
   font-weight: 700;
+}
+
+/* The preview frame.
+ *
+ * Held to a phone's width on purpose. The builder is the widest screen in the app and the thing
+ * it is building is read on the narrowest, so a preview that filled a desktop would show the
+ * trainer line lengths no client will ever see and hide every wrap that matters. 390px is a
+ * current phone. The 360px floor the rest of the app is designed to is narrower still, which is
+ * what the browser window is for.
+ *
+ * A frame rather than an overlay. What a modal would buy here is not worth what the last
+ * absolutely positioned thing in this app cost: see the menu button in js/nav.js. */
+.preview {
+  max-width: 390px;
+  margin: 0 auto;
+  padding: var(--s-4);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+}
+
+/* ---------------------------------------------------------------- a program, read
+ *
+ * The read only view of a program: what a client is in for, and what a trainer sees when they
+ * check their own work. One set of rules, because it is one screen with two readers.
+ *
+ * --muted does not appear anywhere below. It measures 6.22 against base, which is under the 7:1
+ * floor for text at 14px, and the builder gets away with it because the builder is a desk tool
+ * read at desk distance. This view goes on a phone in a gym, so the quiet things here are quiet
+ * by size, weight and position instead, and every one of them is --text-secondary at 11.26.
+ *
+ * Cyan means the prescription, exactly as it does under each row of the builder table and in the
+ * import review. The day's load line is cyan for the same reason, and it outranks the target
+ * lines by size and weight rather than by taking a second hue, because there is no fifth hue to
+ * spend and the meaning is identical: this is what you were asked to do. */
+.plan__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.plan__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+/* STRENGTH, CARDIO, ATHLETIC. On its own line above the split, and quiet, because on a real
+ * sheet it says the same word on almost every day. */
+.plan__type {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.plan__split {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+/* The answer to the question this screen exists for, so it sits directly under the day name and
+ * above everything else. */
+.plan__load {
+  margin: 0;
+  color: var(--accent-data);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+.plan__section {
+  margin: 0 0 var(--s-2);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 650;
+}
+
+/* The trainer's three warm up columns, in their order. They collapse to one column on a phone
+ * and sit side by side on a desk, which is the same grid the builder writes them in. */
+.plan__cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--s-3);
+}
+
+.plan__collabel {
+  margin: 0 0 var(--s-1);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.plan__lines {
+  margin: 0;
+  padding-left: var(--s-4);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  line-height: 1.5;
+}
+
+.plan__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The trainer's own set number keeps its own column, so the names all start on one line however
+ * long or short the numbering is. */
+.plan__item {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  gap: var(--s-2);
+  align-items: start;
+}
+
+.plan__num {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.plan__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.plan__name {
+  margin: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+/* BARBELL, MED GRIP, SIT/STAND. A modifier on the lift, so it rides with the name rather than
+ * taking a line of its own. */
+.plan__variation {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.plan__target,
+.plan__last,
+.plan__note,
+.plan__tag {
+  margin: 0;
+  font-size: var(--t-small);
+  line-height: 1.4;
+}
+
+.plan__target {
+  color: var(--accent-data);
+}
+
+/* What this person actually lifted, under what they were asked to lift.
+ *
+ * Not --accent-data-dim, which is the history token in the chart table. That measures 5.57
+ * against base and is declared for strokes and for text at 28px and up, so at 14px it is under
+ * the floor. History is separated from prescription here by the words it starts with, by tabular
+ * figures, and by a heavier weight, which is three signals and none of them a hue. */
+.plan__last {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* The coaching cue on the row. Prose, so it reads at the same weight as the warm up lines and
+ * never competes with the prescription above it. */
+.plan__note {
+  color: var(--text-secondary);
+}
+
+/* A hollow pill, because a word alone in a quiet colour is a hue signal wearing a label. The
+ * outline is the shape that survives a glance. */
+.plan__tag {
+  align-self: start;
+  padding: 2px var(--s-2);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* A superset, bracketed and named. Rows sharing a leading number are one thing on the trainer's
+ * sheet, and a flat list is where that instruction goes to die. */
+.plan__group {
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--surface-raised-rim);
+}
+
+.plan__grouplabel {
+  margin: 0 0 var(--s-2);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.plan__items--nested {
+  gap: var(--s-3);
+}
+
+.plan__empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-body);
 }
 
 /* ---------------------------------------------------------------- the app shell

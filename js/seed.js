@@ -11,6 +11,7 @@
 import { makeRecord, newId, getDeviceId } from './storage.js';
 import { epley1rm } from './history.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging } from './program.js';
+import { buildSnapshot } from './snapshot.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
@@ -412,35 +413,14 @@ export async function seed(storage, { force = false } = {}) {
   items.push(...trainerItems);
 
   // The snapshot freezes the program as assigned. Editing the template later must not rewrite
-  // what a client was already told to do.
-  const snapshot = {
-    template: { id: template.id, name: template.name, notes: template.notes },
-    days: trainerDays.map((day) => ({
-      id: day.id,
-      day_index: day.day_index,
-      name: day.name,
-      day_type: day.day_type,
-      split: day.split,
-      warmup: day.warmup,
-      comments: day.comments,
-      items: trainerItems
-        .filter((item) => item.day_id === day.id)
-        .sort((a, b) => a.order_index - b.order_index)
-        .map((item) => {
-          const exercise = exercises.find((ex) => ex.id === item.exercise_id);
-          return {
-            ...item,
-            exercise: {
-              id: exercise.id,
-              name: exercise.name,
-              slug: exercise.slug,
-              equipment: exercise.equipment,
-              increment_kg: exercise.increment_kg,
-            },
-          };
-        }),
-    })),
-  };
+  // what a client was already told to do. Built by the same function a real assignment will use,
+  // so the fake data cannot drift into a shape the app never actually sees.
+  const snapshot = buildSnapshot({
+    template,
+    days: trainerDays,
+    items: trainerItems,
+    exercises,
+  });
 
   trainerClients.forEach((client, clientIndex) => {
     const spec = tspec.clients[clientIndex];
