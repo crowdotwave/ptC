@@ -20,24 +20,17 @@
       <a class="resume" id="resume" href="index.html" hidden></a>
 
       <header class="context">
-        <div class="shell">
-          <button class="shell__menu" id="menu-toggle" type="button"
-                  aria-expanded="false" aria-controls="menu-panel" aria-label="Menu">
-            <svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor"
-                 stroke-width="1.7" stroke-linecap="round">
-              <path d="M4 6h12M4 10h12M4 14h12" />
-            </svg>
-          </button>
-          <div class="shell__panel" id="menu-panel" hidden>
-            <p class="shell__who"><span id="client-name">Loading</span></p>
-            <button class="shell__item" type="button" data-signout hidden>Sign out</button>
-          </div>
-        </div>
+        <!-- Whose data this is. Shown only when a trainer is reading somebody else's progress,
+             because a client does not need their own name on their own screen. -->
+        <p class="context__who" id="client-name" hidden></p>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <p class="context__last num" id="headline">&nbsp;</p>
       </header>
 
-      <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+      <div class="pickerrow">
+        <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+        <div class="unitswitch" id="unit-switch" hidden></div>
+      </div>
 
       <section class="chart" id="lead-chart" aria-labelledby="lead-title">
         <div class="chart__head">
@@ -68,6 +61,13 @@
         <div id="second-plot"></div>
         <p class="chart__caption" id="second-caption"></p>
       </section>
+
+      <!-- Who you are signed in as, and the way out. Last thing on the page, in the quietest
+           type on it, because signing out is something you do once when a bug happens. -->
+      <footer class="account">
+        <span class="account__who" id="account-name"></span>
+        <button class="account__out" type="button" data-signout hidden>Sign out</button>
+      </footer>
     </main>
 
     <!-- Bottom navigation. Reverses the CLAUDE.md rule that kept this band clear for Log set,

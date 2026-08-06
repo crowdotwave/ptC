@@ -1,8 +1,12 @@
-// The app shell: a menu button top right, and a tab bar along the bottom.
+// The app shell: a tab bar along the bottom, and a sign out link at the foot of the page.
 //
 // This replaces a line of text links that read "Chris Merryweather, Back and chest, Progress,
 // Clients, Programs" across the top of every screen. That line was honest and it was clutter,
 // and it put the app's identity above the thing the app is for.
+//
+// It briefly replaced that with a menu button top right, which was the same mistake in a smaller
+// package: a permanent control holding a name and a sign out link. The top right corner now
+// belongs to the unit switch, which labels every number on the screen and is worth the space.
 //
 // The bottom bar is a deliberate reversal of a rule in CLAUDE.md, which said the bottom band
 // belongs to Log set and a tab bar would land in the thumb arc that owns. That reasoning was
@@ -67,33 +71,20 @@ function renderTabs(actor, current) {
     .join('');
 }
 
-function wireMenu({ storage, client, session }) {
-  const toggle = document.getElementById('menu-toggle');
-  const panel = document.getElementById('menu-panel');
-  if (!toggle || !panel) return;
-
-  const close = () => {
-    panel.hidden = true;
-    toggle.setAttribute('aria-expanded', 'false');
-  };
-
-  toggle.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const open = panel.hidden;
-    panel.hidden = !open;
-    toggle.setAttribute('aria-expanded', String(open));
-  });
-
-  // Anywhere else, and Escape. A menu that can only be closed by the button that opened it is a
-  // menu people leave open.
-  document.addEventListener('click', (event) => {
-    if (!panel.hidden && !panel.contains(event.target)) close();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') close();
-  });
-
-  for (const control of panel.querySelectorAll('[data-signout]')) {
+/**
+ * Sign out, at the bottom of the page, in the quietest type on the screen.
+ *
+ * This replaces a circular button top right that opened a panel containing a name and this one
+ * link. It cost a 44px target on every screen, an absolute layer, a z-index, open and close
+ * handlers, outside click and Escape handling, and on the progress screen it landed on top of the
+ * resume bar. Sign out is used once, when something has gone wrong. It does not need any of that,
+ * and it does not need to be reachable in one tap from the top of every screen.
+ *
+ * The logging screen deliberately has no footer, because it must never scroll. Anyone who can
+ * reach it can reach Progress, which has one, and the tab bar is never fewer than two tabs.
+ */
+function wireAccount({ storage, client, session }) {
+  for (const control of document.querySelectorAll('[data-signout]')) {
     if (!session) {
       control.hidden = true;
       continue;
@@ -109,14 +100,14 @@ function wireMenu({ storage, client, session }) {
 }
 
 /**
- * Mounts both. `current` names the tab this page is, so it can light up.
+ * Mounts the shell. `current` names the tab this page is, so it can light up.
  *
  * Kept as one call because a page should not be able to have one without the other: a tab bar
- * with no way to sign out, or a menu with no way to move, are both half a shell.
+ * with no way to sign out, or a way out with no way to move, are both half a shell.
  */
 export function mountShell(booted, current) {
   renderTabs(booted.actor, current);
-  wireMenu(booted);
+  wireAccount(booted);
 }
 
 // The old name, still used by pages that only ever wanted the sign out wiring.

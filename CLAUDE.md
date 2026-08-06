@@ -163,7 +163,16 @@ payments
 ### Schema rules that are expensive to get wrong later
 
 - **Weight is always stored in kilograms** as `weight_kg`. Pounds are a display conversion
-  only. Never store a unit alongside a number in the same table.
+  only. Never store a unit alongside a number in the same table. All conversion lives in
+  `js/units.js` and nothing else may format a weight: the progress and trainer screens each
+  hardcoded `kg` for a while, so a client set to pounds read pounds while logging and kilograms
+  everywhere else.
+- **`weight_unit` belongs to the viewer, never to the person being viewed.** A trainer reading a
+  client's progress reads it in the trainer's own unit and cannot reach the unit that client's
+  phone shows. `progress.html` renders somebody else's data whenever a trainer opens it with
+  `?client=`, so resolving the preference from the row on screen would let one person's tap
+  change an app on another person's phone. Resolve it from the actor. Somebody who holds both a
+  clients row and a trainers row gets one preference, taken from the clients row.
 - **`assignments.snapshot` is mandatory.** When a trainer edits a template, it must not
   retroactively rewrite what a client was already told to do. The snapshot freezes the
   program as assigned. History stays truthful.
@@ -269,13 +278,21 @@ Constraints:
   from the token value, never upward, because the token value is already the contrast ceiling.
   Pressed states drop the gradient and go flat: that is what makes a press read as depressed.
 - Minimum touch target 44px, and the primary log action considerably larger
-- Navigation is a tab bar fixed to the bottom, plus a menu button top right carrying identity
-  and sign out. Tabs are chosen by capability, never by role name, so somebody who coaches and
-  is also coached sees all four. An earlier rule here kept the bottom band clear for the log
-  action, on the grounds that a tab bar would sit in the thumb arc it owns. That was reversed
+- Navigation is a tab bar fixed to the bottom. Tabs are chosen by capability, never by role name,
+  so somebody who coaches and is also coached sees all four. An earlier rule here kept the bottom
+  band clear for the log action, on the grounds that a tab bar would sit in the thumb arc it owns.
+  That was reversed
   deliberately: the log action stays far larger and keeps a gap beneath it, and the bar is what
   makes this read as an app rather than a page. The cost is a mis-tap risk between two targets
   of very different size, which is a thing to watch in real use
+- The top right corner holds the kg/lb switch, not a menu. There was a circular menu button there
+  carrying a name and a sign out link, which did not earn a permanent control on every screen and
+  which overlapped the resume bar, because an absolutely positioned element cannot see a sticky
+  sibling in flow. Sign out now sits in the page footer, in the quietest type on the screen, on
+  the scrolling screens only. The logging screen must never scroll and so has none.
+- Anything pinned beside a scrolling chooser goes in the row, never floated over it. Position
+  absolute against the padded content area cannot account for the resume bar, so a floating
+  control will collide with it again the moment somebody re-adds one.
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
 - Responsive down to a 360px viewport, designed mobile first, desktop is the trainer view

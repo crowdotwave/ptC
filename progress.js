@@ -10,6 +10,15 @@ import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import {
+  unit,
+  toDisplay,
+  weightLabel,
+  loadUnit,
+  mountUnitSwitch,
+  onUnitChange,
+  viewerName,
+} from './js/units.js';
+import {
   renderE1rmChart,
   renderVolumeChart,
   renderRepsAtLoadChart,
@@ -20,23 +29,36 @@ import {
 const el = (id) => document.getElementById(id);
 const state = { storage: null, client: null, data: null, exerciseId: null, exercises: new Map() };
 
-const kg = (v) => `${Math.round(v * 10) / 10} kg`;
-
 function setCopy(id, text) {
   el(id).textContent = text;
 }
 
 const round1 = (v) => Math.round(v * 10) / 10;
 
+/**
+ * Volume is sets by reps by weight, so it carries the weight unit and scales with it exactly as a
+ * single load does. Rounded whole in both units, because a tenth of a kilogram is noise on a
+ * four figure number.
+ */
+const volumeLabel = (v) => `${Math.round(toDisplay(v)).toLocaleString()} ${unit()}`;
+
+/** Seconds and rep counts are not weights and never convert. */
+const plainLabel = (suffix) => (v) => `${round1(v)}${suffix}`;
+
 /** Claims escalate with evidence: a fact, then a difference, then a direction. */
 function captionFor(kind, progression) {
+  // Each view carries its own formatter, because the precision is not the same for all four. A
+  // load wants a tenth of a kilogram and a whole pound; a volume in the thousands wants neither,
+  // and printing "Up 612.9 lb" next to a headline of "3,468 lb" is the kind of mismatch that
+  // makes a number look computed rather than measured. Reps and seconds are not weights at all
+  // and never convert.
   const views = {
-    e1rm: [progression.e1rm, 'Estimated 1RM', ' kg'],
-    volume: [progression.volume, 'Prescribed volume', ' kg'],
-    reps: [progression.reps, 'Top set', ' reps'],
-    hold: [progression.hold, 'Longest hold', ' seconds'],
+    e1rm: [progression.e1rm, 'Estimated 1RM', weightLabel],
+    volume: [progression.volume, 'Prescribed volume', volumeLabel],
+    reps: [progression.reps, 'Top set', (v) => `${round1(v)} reps`],
+    hold: [progression.hold, 'Longest hold', (v) => `${round1(v)} seconds`],
   };
-  const [view, label, unit] = views[kind] || views.volume;
+  const [view, label, amount] = views[kind] || views.volume;
   const change = view.change;
 
   switch (view.evidence) {
@@ -46,12 +68,13 @@ function captionFor(kind, progression) {
       return 'First session logged. Log one more and the comparison starts.';
     case 'compare':
       if (!change) return 'Two sessions logged.';
-      return `${label} ${change.absolute >= 0 ? 'up' : 'down'} ${round1(
+      return `${label} ${change.absolute >= 0 ? 'up' : 'down'} ${amount(
         Math.abs(change.absolute),
-      )}${unit} since the session before. Two points, not a trend.`;
+      )} since the session before. Two points, not a trend.`;
     default: {
       if (!change) return '';
-      const move = `${change.absolute >= 0 ? 'Up' : 'Down'} ${round1(Math.abs(change.absolute))}${unit}${
+      // The percentage is a ratio, so it is the same number in either unit and never converts.
+      const move = `${change.absolute >= 0 ? 'Up' : 'Down'} ${amount(Math.abs(change.absolute))}${
         change.percent === null ? '' : `, ${change.percent > 0 ? '+' : ''}${change.percent} percent`
       }`;
       // Estimated 1RM spans everything and says which formula it is, per CLAUDE.md. Volume is
@@ -91,13 +114,13 @@ function renderLiftPicker(items) {
 function leadFor(data) {
   switch (data.leadView) {
     case 'hold':
-      return { title: 'Longest hold', render: renderHoldChart, view: data.hold, unit: 's' };
+      return { title: 'Longest hold', render: renderHoldChart, view: data.hold, format: plainLabel('s') };
     case 'reps':
-      return { title: 'Top set reps', render: renderRepsChart, view: data.reps, unit: '' };
+      return { title: 'Top set reps', render: renderRepsChart, view: data.reps, format: plainLabel('') };
     case 'e1rm':
-      return { title: 'Estimated 1RM', render: renderE1rmChart, view: data.e1rm, unit: ' kg' };
+      return { title: 'Estimated 1RM', render: renderE1rmChart, view: data.e1rm, format: weightLabel };
     default:
-      return { title: 'Volume per session', render: renderVolumeChart, view: data.volume, unit: ' kg' };
+      return { title: 'Volume per session', render: renderVolumeChart, view: data.volume, format: volumeLabel };
   }
 }
 
@@ -118,18 +141,16 @@ function render() {
   // First slot: what this lift is actually measured by. Volume for a loaded lift, the rep count
   // for a bodyweight one, seconds for a hold.
   const lead = loaded
-    ? { title: 'Volume per session', render: renderVolumeChart, view: data.volume, unit: ' kg', key: 'volume' }
+    ? { title: 'Volume per session', render: renderVolumeChart, view: data.volume, format: volumeLabel, key: 'volume' }
     : leadFor(data);
   setCopy('lead-title', lead.title);
-  setCopy('lead-value', lead.view.change ? `${round1(lead.view.change.last)}${lead.unit}` : '');
+  setCopy('lead-value', lead.view.change ? lead.format(lead.view.change.last) : '');
   lead.render(el('lead-plot'), data);
   const extraTotal = data.points.reduce((t, p) => t + p.extra, 0);
   setCopy(
     'lead-caption',
     captionFor(lead.key ?? data.leadView, data) +
-      (loaded && extraTotal > 0
-        ? ` Plus ${Math.round(extraTotal).toLocaleString()} kg you added beyond the plan.`
-        : ''),
+      (loaded && extraTotal > 0 ? ` Plus ${volumeLabel(extraTotal)} you added beyond the plan.` : ''),
   );
 
   // Reps at load and estimated 1RM are both load only. Without load, volume computes to a row
@@ -143,7 +164,7 @@ function render() {
   // Last. The slowest moving number, and the only one designed to cross a change of rep scheme,
   // so it answers a question about months rather than about today.
   setCopy('second-title', 'Estimated 1RM');
-  setCopy('second-value', data.e1rm.change ? kg(data.e1rm.change.last) : '');
+  setCopy('second-value', data.e1rm.change ? weightLabel(data.e1rm.change.last) : '');
   renderE1rmChart(el('second-plot'), data);
   setCopy('second-caption', captionFor('e1rm', data));
 
@@ -152,7 +173,7 @@ function render() {
   // be one line labelled 0 kg repeating what the lead chart already said.
   renderRepsAtLoadChart(el('reps-plot'), data);
   const lines = data.repsAtLoad.lines;
-  setCopy('reps-value', lines.length ? `${lines[lines.length - 1].loadKg} kg` : '');
+  setCopy('reps-value', lines.length ? weightLabel(lines[lines.length - 1].loadKg) : '');
   setCopy(
     'reps-caption',
     lines.length === 0
@@ -183,6 +204,12 @@ async function main() {
   state.storage = storage;
   mountShell(booted, 'progress');
 
+  // The VIEWER's unit, not the viewed client's. This screen renders somebody else's data whenever
+  // a trainer opens it with ?client=, and reading that client's preference here would have let a
+  // trainer's tap change the app on a phone in another building.
+  await loadUnit(storage, actor);
+  el('account-name').textContent = viewerName();
+
   // A trainer opens this with ?client=. A client only ever gets their own, and asking for
   // somebody else's id returns nothing, because the local mirror only holds what RLS let
   // through in the first place.
@@ -204,7 +231,18 @@ async function main() {
     resume.hidden = false;
     resume.textContent = 'Back to your set';
   }
-  el('client-name').textContent = state.client.display_name;
+  // Only when somebody else is reading. A client does not need their own name on their own
+  // screen, but a trainer three clients deep very much needs to know whose numbers these are.
+  if (state.client.id !== actor?.clientId) {
+    const who = el('client-name');
+    who.textContent = state.client.display_name;
+    who.hidden = false;
+  }
+
+  mountUnitSwitch(el('unit-switch'));
+  onUnitChange(() => {
+    if (state.data) render();
+  });
 
   const exercises = await storage.query('exercises', {});
   for (const ex of exercises) state.exercises.set(ex.id, ex);

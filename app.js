@@ -18,13 +18,19 @@ import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { targetLine } from './js/program.js';
-
-const KG_PER_LB = 0.45359237;
+import {
+  unit,
+  toDisplay,
+  fromDisplay,
+  formatWeight,
+  stepSize as snapStep,
+  loadUnit,
+  mountUnitSwitch,
+  onUnitChange,
+} from './js/units.js';
 
 const el = (id) => document.getElementById(id);
 const ui = {
-  clientName: el('client-name'),
-  dayName: el('day-name'),
   exerciseName: el('exercise-name'),
   setPosition: el('set-position'),
   target: el('target'),
@@ -87,28 +93,15 @@ const state = {
 };
 
 // ------------------------------------------------------------------ units
+//
+// The conversion itself lives in js/units.js, because the progress and trainer screens print
+// weights too and used to hardcode kilograms while this screen quietly respected the setting.
+// What stays here is the one part that is about this screen: which increment applies to the lift
+// currently on the steppers.
 
-const unit = () => (state.client ? state.client.weight_unit : 'kg');
-
-/**
- * The smallest load change this lift can make, expressed in whatever unit the client reads.
- *
- * Stored as increment_kg on the exercise, because a barbell, a dumbbell rack, and a machine
- * stack all move differently and a single global step offers weights the gym cannot make.
- * A client reading pounds wants round pounds, so the kilogram increment is converted and then
- * snapped to the nearest 2.5lb, which is what a plate tree actually holds.
- */
+/** The smallest load change this lift can make, in whatever unit is being read. */
 function stepSize(entry = currentEntry()) {
-  const kg = (entry && state.increments.get(entry.item.exercise_id)) || 2.5;
-  if (unit() !== 'lb') return kg;
-  return Math.max(2.5, Math.round(kg / KG_PER_LB / 2.5) * 2.5);
-}
-const toDisplay = (kg) => (unit() === 'lb' ? kg / KG_PER_LB : kg);
-const fromDisplay = (value) => Math.round((unit() === 'lb' ? value * KG_PER_LB : value) * 1000) / 1000;
-
-function formatWeight(kg) {
-  const shown = toDisplay(kg);
-  return unit() === 'lb' ? String(Math.round(shown)) : String(Math.round(shown * 10) / 10);
+  return snapStep(entry && state.increments.get(entry.item.exercise_id));
 }
 
 // ------------------------------------------------------------------ optimistic writes
@@ -816,7 +809,6 @@ async function chooseDay(dayIndex) {
     state.weightKg = first.weightKg;
     state.reps = first.reps;
   }
-  ui.dayName.textContent = `· ${picked.name}`;
   renderDayPicker(state.assignment.snapshot, sessions);
   clearNotice();
   stopRest();
@@ -873,19 +865,24 @@ async function main() {
   state.storage = storage;
   mountShell(booted, 'log');
 
+  // Before anything prints a weight. The viewer on this screen is always the client whose sets
+  // these are, so their own row is both what is read and what a tap would write.
+  await loadUnit(storage, actor);
+
   if (mode === 'unbound') {
-    ui.clientName.textContent = 'Not set up yet';
     ui.exerciseName.textContent = 'Nothing assigned';
     ui.controls.hidden = true;
+    // The only screen this person can reach, so it has to carry the way off it.
+    el('account').hidden = false;
     showNotice('You are signed in, but no trainer has added this email as a client yet.');
     return;
   }
   if (booted.error) showNotice(booted.error);
 
   if (!actor || !actor.clientId) {
-    ui.clientName.textContent = 'No client';
     ui.exerciseName.textContent = 'No client selected';
     ui.controls.hidden = true;
+    el('account').hidden = false;
     showNotice('Switch to a client with the dev role control.');
     return;
   }
@@ -901,7 +898,6 @@ async function main() {
   // for them to do here: only their trainer can assign a program. Naming who it is waiting on
   // is the honest version.
   if (!assignment) {
-    ui.clientName.textContent = client?.display_name ?? 'You';
     ui.exerciseName.textContent = 'No program yet';
     // The steppers and Log set have to go with it. Leaving a live primary action on a screen
     // with no plan behind it invites a tap that writes a set against nothing.
@@ -926,10 +922,17 @@ async function main() {
     state.reps = first.reps;
   }
 
-  ui.clientName.textContent = client.display_name;
-  ui.dayName.textContent = `· ${state.day.name}`;
   renderDayPicker(snapshot, sessions);
   ui.weightInput.step = unit() === 'lb' ? '5' : '2.5';
+
+  // Flipping mid session is safe: state.weightKg is kilograms and stays put, so the number on the
+  // stepper changes and the load on the bar does not. The step changes with it, which is the
+  // point, because 2.5 kg is not a thing a pound gym can add.
+  mountUnitSwitch(el('unit-switch'));
+  onUnitChange(() => {
+    ui.weightInput.step = unit() === 'lb' ? '5' : '2.5';
+    render();
+  });
 
   wire();
   stopRest();

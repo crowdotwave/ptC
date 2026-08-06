@@ -10,6 +10,7 @@ import { mountShell } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 import { activeSetLogs } from './js/history.js';
+import { unit, toDisplay, weightLabel, loadUnit, mountUnitSwitch, onUnitChange } from './js/units.js';
 
 const el = (id) => document.getElementById(id);
 const state = { storage: null, trainer: null, clients: [], exercises: new Map(), client: null, data: null };
@@ -71,8 +72,10 @@ function renderDetail() {
 
   const leadChange = leadIsStrength ? data.e1rm.change : data.volume.change;
   const secondChange = leadIsStrength ? data.volume.change : data.e1rm.change;
-  el('lead-value').textContent = leadChange ? `${Math.round(leadChange.last * 10) / 10} kg` : '';
-  el('second-value').textContent = secondChange ? `${Math.round(secondChange.last * 10) / 10} kg` : '';
+  // The trainer's own unit, not this client's. A coach who thinks in kilograms reads every client
+  // in kilograms, and none of them can tell.
+  el('lead-value').textContent = leadChange ? weightLabel(leadChange.last) : '';
+  el('second-value').textContent = secondChange ? weightLabel(secondChange.last) : '';
 
   if (leadIsStrength) {
     renderE1rmChart(el('lead-plot'), data);
@@ -86,11 +89,13 @@ function renderDetail() {
   const extra = data.points.reduce((t, p) => t + p.extra, 0);
   const prescribed = data.points.reduce((t, p) => t + p.prescribed, 0);
   el('lead-caption').textContent = `${data.totalSessions} session${data.totalSessions === 1 ? '' : 's'} on this lift.`;
+  // Volume is sets by reps by weight, so it carries the unit and scales with it.
+  const volume = (v) => `${Math.round(toDisplay(v)).toLocaleString()} ${unit()}`;
   el('second-caption').textContent =
-    `${Math.round(prescribed).toLocaleString()} kg prescribed` +
-    (extra > 0 ? `, ${Math.round(extra).toLocaleString()} kg added beyond the plan.` : '. Nothing added beyond the plan.');
+    `${volume(prescribed)} prescribed` +
+    (extra > 0 ? `, ${volume(extra)} added beyond the plan.` : '. Nothing added beyond the plan.');
   const lines = data.repsAtLoad.lines;
-  el('reps-value').textContent = lines.length ? `${lines[lines.length - 1].loadKg} kg` : '';
+  el('reps-value').textContent = lines.length ? weightLabel(lines[lines.length - 1].loadKg) : '';
   el('reps-caption').textContent = lines.length
     ? `Current block, ${lines.length} load${lines.length === 1 ? '' : 's'}.`
     : 'Nothing logged in this block yet.';
@@ -215,6 +220,14 @@ async function main() {
     return;
   }
   el('trainer-name').textContent = state.trainer.display_name;
+
+  // The trainer's own preference, read from their own row, which is also the only row a tap here
+  // will ever write. Nothing a trainer does on this screen reaches a client's phone.
+  await loadUnit(storage, actor);
+  mountUnitSwitch(el('unit-switch'));
+  onUnitChange(() => {
+    if (state.data) renderDetail();
+  });
 
   const exercises = await storage.query('exercises', {});
   for (const ex of exercises) state.exercises.set(ex.id, ex);

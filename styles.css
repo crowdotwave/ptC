@@ -485,6 +485,75 @@ button {
     0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
+/* ---------------------------------------------------------------- picker row
+ *
+ * A chooser that scrolls, with the unit switch pinned to its right hand end.
+ *
+ * The switch used to be a menu button floating in the corner on position: absolute, which is why
+ * it sat on top of the resume bar: an absolutely positioned element cannot see a sticky sibling
+ * in flow, so it kept its 16px offset whether the orange bar was there or not. Putting the
+ * control in the row makes that collision unrepresentable rather than fixed.
+ *
+ * It also costs no height. This row already existed on all three screens that print a weight. */
+.pickerrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* The scroller keeps its left bleed, so a chip can still be half cut at the screen edge. It
+ * gives up the right one, because the switch is now what that edge runs into, and a chip
+ * disappearing under a pinned control says "there is more" just as well as the edge did. */
+.pickerrow > .daypicker,
+.pickerrow > .lifts {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 0;
+  padding-right: 0;
+}
+
+/* Segmented, not a single button that flips. A lone pill reading KG cannot say whether it means
+ * "you are reading kilograms" or "tap for kilograms", and that ambiguity would sit on top of
+ * every number on the screen. Both halves visible with one filled is the chooser chip rule from
+ * CLAUDE.md applied to the smallest chooser there is.
+ *
+ * One joined pill rather than two loose chips, because these are two states of one control and
+ * the enclosing border is what says so. */
+.unitswitch {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  border: 1px solid var(--surface-raised);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.unitswitch[hidden] {
+  display: none;
+}
+
+.unitswitch__opt {
+  min-height: var(--tap);
+  min-width: 2.75rem;
+  padding: 0 var(--s-3);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Same fill, rim and glow as a selected chooser chip, because it is one. --text-primary reads
+ * 7.26 on the lit face, which is what the 14px label needs. */
+.unitswitch__opt.is-on {
+  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+  color: var(--text-primary);
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px 0 0 var(--surface-raised-rim),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
 /* Secondary actions. Skip and end session are ordinary controls here, deliberately styled the
  * same as type and undo. Nothing about a skipped lift gets a warning colour. */
 .secondary {
@@ -1494,87 +1563,50 @@ button.navlink:disabled {
 
 /* ---------------------------------------------------------------- the app shell
  *
- * A menu button top right and a tab bar along the bottom, replacing a line of text links that
- * ran across the top of every screen and put the app's identity above the thing the app is for.
+ * A tab bar along the bottom, and a sign out link at the foot of the page. This replaced a line
+ * of text links across the top of every screen, then a circular menu button top right, and the
+ * button was the same mistake in a smaller package: a permanent 44px control, an absolute layer,
+ * a z-index, open and close handlers, outside click and Escape handling, all to hold a name and
+ * one link nobody uses. On the progress screen it also landed on top of the resume bar, because
+ * absolute positioning against the padded content area cannot see a sticky element in flow.
  *
  * The bottom bar reverses the rule that kept this band clear for Log set. The reasoning is in
  * js/nav.js. What that rule was protecting is preserved here by size and distance rather than by
  * absence: the log action stays far larger and the bar keeps its own gap under it.
  */
 
-/* Anchored to the screen, not the page. Absolute against <body> put it under the sticky dev
- * bar, which is only visible with ?dev=1 but is exactly where somebody testing would look for
- * it. Anchoring to the padded content area also keeps it aligned with the text it sits beside. */
 .screen,
 .auth {
   position: relative;
 }
 
-.shell {
-  position: absolute;
-  top: var(--s-4);
-  right: var(--s-4);
-  z-index: 3;
-}
-
-.shell__menu {
-  display: grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  border-radius: 50%;
-  color: var(--text-secondary);
-  /* A tiny amount of light, so it reads as a control rather than a mark on the background. */
-  box-shadow: inset 0 0 0 1px var(--surface-raised);
-}
-
-.shell__menu svg {
-  width: 20px;
-  height: 20px;
-}
-
-.shell__menu:hover,
-.shell__menu[aria-expanded='true'] {
-  color: var(--accent-data);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-data),
-    0 0 var(--glow-radius-rest) color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
-}
-
-.shell__panel {
-  position: absolute;
-  top: calc(var(--tap) + var(--s-2));
-  right: 0;
-  min-width: 13rem;
-  padding: var(--s-3);
+/* Signing out is something you do once, when a bug happens. It gets the last line on the page
+ * and the quietest type on it, and only the screens that already scroll carry one. The logging
+ * screen must never scroll, so it has none: anyone who can reach it can reach Progress. */
+.account {
   display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  border: 1px solid var(--surface-raised);
-  border-radius: var(--radius);
-  background: var(--surface-base);
-}
-
-.shell__who {
-  margin: 0;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--surface-raised);
   font-size: var(--t-small);
-  color: var(--text-secondary);
 }
 
-.shell__item {
-  align-self: flex-start;
+.account__who {
+  color: var(--muted);
+}
+
+.account__out {
+  margin-left: auto;
   min-height: var(--tap);
-  color: var(--accent-data);
-  font-size: var(--t-body);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* ---------------------------------------------------------------- tab bar */
-
-/* Room for the button, so a long lift name wraps before it reaches it rather than under it. */
-.context__exercise,
-.context__who {
-  padding-right: calc(var(--tap) + var(--s-2));
-}
 
 .tabbar {
   position: fixed;

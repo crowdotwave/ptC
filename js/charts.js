@@ -18,6 +18,16 @@
 
 const NS = 'http://www.w3.org/2000/svg';
 
+import { weightLabel, toDisplay } from './units.js';
+
+/**
+ * Axis ticks are bare numbers, so they convert without gaining a unit: the headline above the
+ * chart already says which one. The domain itself stays in kilograms, because it only decides
+ * where a point sits, and converting it would move nothing while risking a rounding difference
+ * between the line and its own axis.
+ */
+const kgAxis = (v) => Math.round(toDisplay(v)).toLocaleString();
+
 const esc = (v) =>
   String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -64,6 +74,7 @@ export function renderE1rmChart(container, progression, options = {}) {
     ...options,
     series: progression.e1rm.series,
     value: (point) => point.e1rm,
+    axis: kgAxis,
     title: 'Estimated one rep max',
   });
 }
@@ -100,7 +111,7 @@ export function renderHoldChart(container, progression, options = {}) {
  * word rather than only a colour. Duplicating that would mean three places for those rules to
  * drift apart.
  */
-function renderSeriesChart(container, progression, { height = 168, series, value, title }) {
+function renderSeriesChart(container, progression, { height = 168, series, value, title, axis = String }) {
   container.innerHTML = '';
   if (!series.length) return;
 
@@ -164,8 +175,8 @@ function renderSeriesChart(container, progression, { height = 168, series, value
     out += `<text class="chart__note" x="${px(firstDeload).toFixed(1)}" y="${(y(value(firstDeload)) + 16).toFixed(1)}" text-anchor="middle">Planned deload</text>`;
   }
 
-  out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${yDomain[1]}</text>`;
-  out += `<text class="chart__axis" x="4" y="${pad.top + plotH}">${yDomain[0]}</text>`;
+  out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${esc(axis(yDomain[1]))}</text>`;
+  out += `<text class="chart__axis" x="4" y="${pad.top + plotH}">${esc(axis(yDomain[0]))}</text>`;
   out += `<text class="chart__axis" x="${pad.left}" y="${height - 8}">${esc(shortDay(series[0].date))}</text>`;
   out += `<text class="chart__axis" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${esc(shortDay(series[series.length - 1].date))}</text>`;
   out += '</svg>';
@@ -231,7 +242,8 @@ export function renderVolumeChart(container, progression, { height = 152 } = {})
   if (deload) out += `<text class="chart__note" x="${pad.left}" y="${height - 8}">Dashed bar is a planned deload</text>`;
   else out += `<text class="chart__axis" x="${pad.left}" y="${height - 8}">${esc(shortDay(all[0].day))}</text>`;
 
-  out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${Math.round(max).toLocaleString()}</text>`;
+  // Volume is sets by reps by weight, so the ceiling carries the unit and converts with it.
+  out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${kgAxis(max)}</text>`;
   out += `<text class="chart__axis" x="4" y="${pad.top + plotH}">0</text>`;
   out += '</svg>';
   container.innerHTML = out;
@@ -279,7 +291,7 @@ export function renderRepsAtLoadChart(container, progression, { height = 148 } =
       out += `<circle class="chart__mark ${cls}" cx="${x(Date.parse(p.date)).toFixed(1)}" cy="${y(p.reps).toFixed(1)}" r="${rank === 0 ? 3.5 : 2.5}" />`;
     }
     const last = line.points[line.points.length - 1];
-    out += `<text class="chart__loadlabel ${cls}" x="${(x(Date.parse(last.date)) + 6).toFixed(1)}" y="${(y(last.reps) + 4).toFixed(1)}">${line.loadKg} kg</text>`;
+    out += `<text class="chart__loadlabel ${cls}" x="${(x(Date.parse(last.date)) + 6).toFixed(1)}" y="${(y(last.reps) + 4).toFixed(1)}">${weightLabel(line.loadKg)}</text>`;
   });
 
   out += `<text class="chart__axis" x="4" y="${pad.top + 4}">${maxReps + 1}</text>`;
