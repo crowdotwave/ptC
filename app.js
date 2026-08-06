@@ -360,10 +360,13 @@ function renderDone() {
     .filter((row) => row.logMode === 'weight_reps')
     .reduce((total, row) => total + row.weightKg * row.reps, 0);
 
+  // Only a session with something in it is a success, and only a success gets the green. An
+  // empty card is an invitation to start, so it keeps the neutral edge every other card has.
+  ui.done.dataset.tone = sets ? 'done' : 'empty';
   ui.doneTitle.textContent = sets ? 'Session logged.' : 'Nothing logged yet.';
   ui.doneStat.textContent = sets
     ? `${sets} working ${sets === 1 ? 'set' : 'sets'}${extra ? `, ${extra} added` : ''}, ` +
-      `${Math.round(volume).toLocaleString()} kg moved.`
+      `${Math.round(toDisplay(volume)).toLocaleString()} ${unit()} moved.`
     : 'Open a set and log it when you are ready.';
 
   // Undo stays live for the whole session, including after the last set, which is why the

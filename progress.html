@@ -24,13 +24,13 @@
              because a client does not need their own name on their own screen. -->
         <p class="context__who" id="client-name" hidden></p>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
-        <p class="context__last num" id="headline">&nbsp;</p>
+        <div class="context__row">
+          <p class="context__last num" id="headline">&nbsp;</p>
+          <div class="unitswitch" id="unit-switch" hidden></div>
+        </div>
       </header>
 
-      <div class="pickerrow">
-        <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
-        <div class="unitswitch" id="unit-switch" hidden></div>
-      </div>
+      <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
 
       <section class="chart" id="lead-chart" aria-labelledby="lead-title">
         <div class="chart__head">

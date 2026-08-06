@@ -59,10 +59,11 @@
   --surface-raised-shade: #583875; /*  2.24 vs base. The shaded face, far end of the fall */
   --surface-raised-rim: #7a4fa0; /*    1.38 vs the face. The lit top edge, and selected fills */
 
-  /* The lit top of a control cut into a raised surface, grading down to --surface-base. Same
-   * hue. --text-primary reads 16.13 on it, so the stepper buttons keep every point of contrast
-   * they had while stopping short of reading as holes punched in the slab. */
-  --surface-base-lit: #180f21;
+  /* The lit top of a key sitting in a raised surface, grading down toward --surface-base. Same
+   * hue. Lifted from #180F21 so the plus and the minus read as keys rather than as holes cut
+   * through the slab: at 2.03 against the lit face they are still obviously darker, and
+   * --text-primary reads 14.70 on them, so the glyphs give up nothing for it. */
+  --surface-base-lit: #241634;
 
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
    *
@@ -117,10 +118,38 @@
   --pr: #1fe3ff; /* 13.49 / 5.38  the record moment. The only token that glows bright */
   --progress: #ade8f2; /* 15.60 / 6.22  a value that improved */
 
+  /* Done. The only green in the app, and it is fenced in on purpose.
+   *
+   * Emerald as normally drawn sits around 158 degrees, which is 32 from --accent-data at 190 and
+   * within a hair of it in luminance. That is the same collision the 196 degree teal ground had,
+   * so this is pulled to 147 to buy 43 degrees of separation, and it is still barred from
+   * anywhere cyan already carries meaning: not the rest timer, not a chart, not the record. It
+   * marks one thing, a session that is finished, on a card that also says so in words.
+   *
+   * If a second green ever seems necessary, the honest move is to check what it would sit next
+   * to before picking the hue, not after. */
+  --done: #3ddc84; /* 11.77 / 4.69  the session summary, and nothing else */
+
   /* State. --muted is disabled text on --surface-base only. --focus always ships with a
    * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
   --muted: #828d99; /*  6.22 / 2.48  base only */
   --focus: #9fe0ff; /* 14.58 / 5.81  ring, never text */
+
+  /* Tactile. Every raised control catches light along its top inside edge and drops a shadow
+   * from its bottom one, and these are the only two strengths in the app, so a key, a chip and a
+   * slab cannot disagree about where the light is coming from.
+   *
+   * Percentages rather than colours, mixed at the use site from --text-primary and
+   * --surface-base. That keeps the highlight off white for the same reason every other light
+   * thing here is: pure white haloes on a dark base. It also means a control never states a
+   * colour of its own, only how hard the light hits it.
+   *
+   * This replaced a 1px --muted outline on the steppers. A neutral grey line around a violet
+   * slab reads as an unfinished border rather than as an edge, which is exactly what it looked
+   * like. An edge is light, not a line. */
+  --edge-lit: 14%;
+  --edge-lit-strong: 22%;
+  --shade-drop: 55%;
 
   /* Glow. One vocabulary for the screen now and chart strokes later, where the same radii
    * drive filter: drop-shadow() instead of box-shadow.
@@ -395,22 +424,31 @@ button {
   color: var(--text-primary);
 }
 
+/* Same lighting as everything else that can be pressed, at the quietest setting it comes in.
+ * These are ordinary controls and should not compete with the log action, so they get the lit
+ * edge and a shallow shadow and no fill to speak of. --text-secondary reads 9.89 on the lifted
+ * face, which clears the 7:1 between sets floor with room. */
 .button-secondary {
   min-height: var(--tap);
   min-width: var(--tap);
   padding: 0 var(--s-3);
-  border: 1px solid var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
   border-radius: var(--radius);
   color: var(--text-secondary);
   font-size: var(--t-small);
   font-weight: 600;
-  background: var(--surface-base);
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
-/* Text moves to --text-primary with the surface, per the raised surface rule. */
+/* Text moves to --text-primary with the surface, per the raised surface rule. Pressed loses the
+ * lit edge and takes an inner shadow, the same way the stepper keys do. */
 .button-secondary:active {
   background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
 .button-secondary:disabled {
@@ -485,31 +523,41 @@ button {
     0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
-/* ---------------------------------------------------------------- picker row
+/* ---------------------------------------------------------------- header corner row
  *
- * A chooser that scrolls, with the unit switch pinned to its right hand end.
+ * The unit switch, parked at the right edge of the header.
  *
- * The switch used to be a menu button floating in the corner on position: absolute, which is why
- * it sat on top of the resume bar: an absolutely positioned element cannot see a sticky sibling
- * in flow, so it kept its 16px offset whether the orange bar was there or not. Putting the
- * control in the row makes that collision unrepresentable rather than fixed.
+ * It spent one iteration pinned to the end of the chooser row, which fixed the collision it had
+ * been moved out of but created a smaller one: on a 360px screen a five day rotation and a 90px
+ * control were splitting 328px, so the thing you pick every session and the thing you set once a
+ * year were competing for the same width.
  *
- * It also costs no height. This row already existed on all three screens that print a weight. */
-.pickerrow {
+ * It then spent one iteration beside the lift name, which is where "top right" actually points.
+ * That failed on measurement rather than on taste. The name is 32px at the mid set tier, so
+ * "Barbell Bench Press" needs about 330px and a 90px neighbour leaves it 241, which wraps it to
+ * two lines. Those 32 extra pixels pushed the logging screen to 831 against a viewport of 812,
+ * and CLAUDE.md says that screen never scrolls and the log action keeps a gap beneath it. Both
+ * broke at once, and not for an unusual lift name: almost every barbell lift is that long.
+ *
+ * So it sits on the line below, which is the set counter or the session summary depending on the
+ * screen. Those run to about 230px and share the row with room to spare. It is still the top
+ * right corner of the header, it is still nowhere near the chooser, and the name gets its full
+ * width back.
+ *
+ * In flow, never absolute. The menu button this replaced was positioned against the padded
+ * content area, which cannot see the sticky resume bar, so it painted on top of it. A flex row
+ * makes that collision unrepresentable rather than merely fixed. */
+.context__row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--s-3);
+  min-height: var(--tap);
 }
 
-/* The scroller keeps its left bleed, so a chip can still be half cut at the screen edge. It
- * gives up the right one, because the switch is now what that edge runs into, and a chip
- * disappearing under a pinned control says "there is more" just as well as the edge did. */
-.pickerrow > .daypicker,
-.pickerrow > .lifts {
+.context__row > :first-child {
   flex: 1 1 auto;
   min-width: 0;
-  margin-right: 0;
-  padding-right: 0;
 }
 
 /* Segmented, not a single button that flips. A lone pill reading KG cannot say whether it means
@@ -523,7 +571,7 @@ button {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  border: 1px solid var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -575,9 +623,12 @@ button {
  * readout. An up gradient would have to invent a lighter surface and would put the "kg" label
  * under the floor to do it.
  *
- * The rim is inset on the top edge only, so the 1px --muted outline keeps doing its glare job
- * at 6.22 against the page. A chromatic outline would have cost most of that to buy nothing:
- * the slab is told apart from the page by 300px of face, not by a hairline. */
+ * The edge is light, not a line. This carried a 1px --muted outline, and a neutral grey line
+ * drawn around a violet slab reads as an unfinished border rather than as an edge. The
+ * replacement is a translucent rim that composites over the slab's own fill, so it lands as a
+ * lighter violet on the inside and still measures 3.62 against the black page on the outside,
+ * which is more edge definition than the grey line was buying at the corners anyway. The lit
+ * top and the dropped shadow underneath are what make it sit above the page rather than on it. */
 .stepper {
   display: grid;
   grid-template-columns: var(--step-btn) 1fr var(--step-btn);
@@ -585,9 +636,11 @@ button {
   gap: var(--s-2);
   padding: var(--s-2);
   background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
-  border: 1px solid var(--muted);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
   border-radius: var(--radius);
-  box-shadow: inset 0 1px 0 0 var(--surface-raised-rim);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit-strong), transparent),
+    0 8px 20px -8px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
   --step-btn: 4.5rem;
 }
 
@@ -595,10 +648,11 @@ button {
   --step-btn: 3.75rem;
 }
 
-/* Flat black on the slab read as a hole cut through it rather than as a control sitting in it.
- * The same fall of light as the slab, one register darker: lit at the top, true --surface-base
- * at the bottom. --text-primary measures 16.13 at the lightest point, so the plus and the minus
- * give up nothing for it. */
+/* A key sitting in the slab, not a hole cut through it. The same fall of light as the slab, one
+ * register darker, plus the same lit top edge every other raised thing here gets. The shadow
+ * under it is what sells the height: without it a darker rectangle on a dark panel is just a
+ * darker rectangle. --text-primary measures 14.70 at the lightest point, so the glyphs give up
+ * nothing for the lift. */
 .stepper__btn {
   height: 100%;
   min-height: 3.5rem;
@@ -608,14 +662,18 @@ button {
   font-size: var(--t-md);
   font-weight: 700;
   line-height: 1;
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
-/* Flat on purpose. The gradient is what makes the button read as raised, so dropping it is what
- * makes the press read as depressed. The background shorthand clears the image, so this is one
- * declaration doing both. */
+/* Pressed drops the lit edge and the shadow with it, so the key reads as pushed into the slab
+ * rather than merely recoloured. The background shorthand clears the gradient in the same
+ * declaration, which is the other half of the same effect. */
 .stepper__btn:active {
   background: var(--accent-action-pressed);
   color: var(--surface-base);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
 .stepper__btn:disabled {
@@ -671,7 +729,12 @@ button {
  * Same fall of light as the steppers, in the warm half. Black ink reads 8.97 at the top of the
  * gradient and 7.41 at the bottom, so the label clears the between sets floor across the whole
  * fill while only owing 4.5 at 28px and 700. The glow still mixes from --accent-action alone:
- * it is light thrown by the button, not a second copy of the fill. */
+ * it is light thrown by the button, not a second copy of the fill.
+ *
+ * This is the one element that restates its glow rather than taking it from the shared rule near
+ * the top of the file, because it also carries the lit top edge and box-shadow is one property.
+ * The radius and the strength are still the shared primitives, so there is nothing here to drift
+ * out of step with the rest. */
 .log {
   min-height: 6.5rem;
   border-radius: var(--radius);
@@ -686,11 +749,20 @@ button {
   justify-content: center;
   gap: var(--s-1);
   --glow-tint: color-mix(in srgb, var(--accent-action) var(--glow-strength-rest), transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit-strong), transparent),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
+/* Pressed loses the lit edge and gains an inner shadow, so the biggest target on the screen is
+ * also the one whose press is most obviously physical. The glow stays, dimmer, because the
+ * button is still lit, just pushed in. */
 .log:active {
   background: var(--accent-action-pressed);
   --glow-tint: color-mix(in srgb, var(--accent-action-pressed) var(--glow-strength-rest), transparent);
+  box-shadow:
+    inset 0 2px 6px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
 .log__sub {
@@ -711,6 +783,20 @@ button {
 
 /* ---------------------------------------------------------------- done and errors */
 
+/* The one green in the app.
+ *
+ * A finished session is the only unambiguous success this product has, and it happens once per
+ * session rather than once per set, which is what earns it a hue of its own.
+ *
+ * It does share the screen with cyan, so be honest about that: renderDone hides the steppers and
+ * the log action but leaves the rest timer up, and --done and --accent-data measure identical in
+ * luminance. Hue alone is 43 degrees and would not be enough on its own. What actually separates
+ * them is everything else: the green is 28px on a bordered card with a wash behind it and the
+ * word "logged" in it, the cyan is a bare 32px countdown. That is the encoding rule being
+ * satisfied by shape, position and words rather than by colour, which is the only way a fourth
+ * hue was ever going to be affordable here.
+ *
+ * It stays fenced in for the same reason. Not the rest timer, not a chart, not the record. */
 .done {
   display: flex;
   flex-direction: column;
@@ -718,12 +804,25 @@ button {
   padding: var(--s-4);
   border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+}
+
+/* The green is on the tone, not on the card. A session that ended with nothing in it uses the
+ * same element and is not a success, so it keeps the neutral edge every other card has. */
+.done[data-tone='done'] {
+  border-color: color-mix(in srgb, var(--done) 40%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--done) 10%, transparent) 0%, transparent 100%);
+  box-shadow: inset 0 1px 0 0 color-mix(in srgb, var(--done) 35%, transparent);
 }
 
 .done__title {
   margin: 0;
   font-size: var(--t-sm);
   font-weight: 650;
+}
+
+.done[data-tone='done'] .done__title {
+  color: var(--done);
 }
 
 .done__stat {

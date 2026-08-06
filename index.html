@@ -19,15 +19,17 @@
            band is out of the thumb's reach, so it carries reading material only. -->
       <header class="context">
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
-        <p class="context__set num" id="set-position">&nbsp;</p>
-        <!-- The client picks the day. A five day rotation is not done in order, so guessing
-             from the last session and offering no way to change it is wrong.
-             The unit switch is pinned to the end of this row rather than floating in the corner,
-             so it can never land on the resume bar and costs no height of its own. -->
-        <div class="pickerrow">
-          <nav class="daypicker" id="day-picker" aria-label="Choose today's session"></nav>
+        <!-- The unit switch sits in the header corner, in flow, so it neither floats over the
+             resume bar nor competes with the day picker for the width of a phone. On this line
+             rather than beside the lift name, because a 32px name plus a 90px control wraps to
+             two lines and pushes this screen into scrolling, which it must never do. -->
+        <div class="context__row">
+          <p class="context__set num" id="set-position">&nbsp;</p>
           <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
+        <!-- The client picks the day. A five day rotation is not done in order, so guessing
+             from the last session and offering no way to change it is wrong. -->
+        <nav class="daypicker" id="day-picker" aria-label="Choose today's session"></nav>
         <p class="context__target" id="target">&nbsp;</p>
         <p class="context__last num" id="last-time">&nbsp;</p>
         <p class="pr" id="pr-chip" hidden>Personal record</p>

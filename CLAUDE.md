@@ -273,6 +273,14 @@ Constraints:
 - The raised surface's luminance is fixed. `--text-primary` clears the 7:1 floor on it by about
   a quarter point, so hue and chroma are open to change and lightness is not. This has now
   survived grey, teal, and violet without another token moving.
+- There is exactly one green, `--done`, and it marks a finished session and nothing else. Emerald
+  as normally drawn sits near 158 degrees, which is 32 off `--accent-data` and identical to it in
+  luminance, so this is pulled to 147 for 43 degrees of separation and then fenced in: never the
+  rest timer, never a chart, never the record. Even where it does share a screen with cyan, what
+  separates them is size, position, a bordered card and the word "logged", not the hue. A session
+  that ended empty is not a success and keeps the neutral card. Before adding a fifth hue, check
+  what it will sit next to and measure it, which is the step that was skipped when the ground
+  went teal.
 - Raised surfaces carry a fall of light, top lit, via `--surface-raised-shade` and
   `--surface-raised-rim`. A gradient on a surface that holds mid set text always runs downward
   from the token value, never upward, because the token value is already the contrast ceiling.
@@ -285,14 +293,26 @@ Constraints:
   deliberately: the log action stays far larger and keeps a gap beneath it, and the bar is what
   makes this read as an app rather than a page. The cost is a mis-tap risk between two targets
   of very different size, which is a thing to watch in real use
-- The top right corner holds the kg/lb switch, not a menu. There was a circular menu button there
-  carrying a name and a sign out link, which did not earn a permanent control on every screen and
-  which overlapped the resume bar, because an absolutely positioned element cannot see a sticky
-  sibling in flow. Sign out now sits in the page footer, in the quietest type on the screen, on
-  the scrolling screens only. The logging screen must never scroll and so has none.
-- Anything pinned beside a scrolling chooser goes in the row, never floated over it. Position
-  absolute against the padded content area cannot account for the resume bar, so a floating
-  control will collide with it again the moment somebody re-adds one.
+- The header's right edge holds the kg/lb switch, not a menu. There was a circular menu button
+  there carrying a name and a sign out link, which did not earn a permanent control on every
+  screen and which overlapped the resume bar, because an absolutely positioned element cannot see
+  a sticky sibling in flow. Sign out now sits in the page footer, in the quietest type on the
+  screen, on the scrolling screens only. The logging screen must never scroll and so has none.
+- The switch sits on the line below the lift name, not beside it. Beside it was tried and
+  measured: the name is 32px at the mid set tier, so a 90px neighbour wraps almost every barbell
+  lift to two lines, which pushed the logging screen to 831 against a viewport of 812 and put the
+  log action under the tab bar. Nothing goes on that row unless it is under about 40px wide.
+- Anything pinned beside a scrolling chooser goes in the row, never floated over it, and a global
+  setting does not go in that row at all. Position absolute against the padded content area
+  cannot account for the resume bar, so a floating control will collide with it again the moment
+  somebody re-adds one.
+- Raised controls are lit, not outlined. Every pressable thing catches light along its top inside
+  edge and drops a shadow from its bottom one, at one of two strengths shared by the whole app
+  (`--edge-lit`, `--edge-lit-strong`, `--shade-drop`), mixed from `--text-primary` and
+  `--surface-base` rather than from raw white and black. Pressed drops the lit edge and takes an
+  inner shadow, so a press reads as physical rather than merely recoloured. A 1px neutral outline
+  around a coloured slab reads as an unfinished border, which is what the steppers looked like
+  with a `--muted` edge on violet.
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
 - Responsive down to a 360px viewport, designed mobile first, desktop is the trainer view

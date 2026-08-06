@@ -25,12 +25,14 @@
       </section>
 
       <section id="detail-view" hidden>
-        <p class="backlink"><a href="#" id="back-to-list">Back to clients</a></p>
-
-        <div class="pickerrow">
-          <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+        <!-- Same corner as the other two screens, measured from the top of this view rather than
+             the page, because the header above it belongs to the client list as well. -->
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="back-to-list">Back to clients</a></p>
           <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
+
+        <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
 
         <p class="suggest" id="deload-suggest" hidden></p>
 
