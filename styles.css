@@ -20,51 +20,60 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces. Separation is 2.56:1 at the lit face and 2.20:1 at the shaded bottom edge, which
+  /* Surfaces. Separation is 2.51:1 at the lit face and 2.24:1 at the shaded bottom edge, which
    * survives glare. Borders back it up anyway. Names state the role, not the object the colour
    * was sampled from, so widening the palette later means adding a role rather than inventing
    * another gym object to name it after.
    *
-   * The old figure here was 2.18, which was never a measurement: it was the stale left column
+   * An older figure here was 2.18, which was never a measurement: it was the stale left column
    * entry for --text-primary divided by the sound right column one, so it mixed two different
-   * bases. See the correction note below. Real separation was 2.56 before this change and is
-   * 2.56 now, because the luminance did not move.
+   * bases. See the correction note below.
    *
-   * The raised surface used to be #46505C, a 14% saturated blue grey. It read as unpainted
-   * chrome rather than as part of this palette, which is what a near neutral does next to two
-   * committed hues. It is now the same luminance at 196 degrees and 37% saturation, so it sits
-   * in the cool half the data axis already occupies and stands opposite the action orange at
-   * roughly 174 degrees. That is the point: warm advances against cool, so a chromatic cool
-   * ground pushes the orange forward without the orange changing at all.
+   * The raised surface was #46505C, a 14% saturated blue grey that read as unpainted chrome
+   * rather than as part of this palette. It went to a 196 degree teal, which fixed that and
+   * introduced a worse problem: 196 is six degrees off --accent-data at 190. A ground that
+   * close to the data axis reads as a dim member of it, so the surface started competing for
+   * the meaning cyan is supposed to own exclusively. That is the encoding rule in CLAUDE.md
+   * failing from the surface side rather than the token side.
    *
-   * Luminance was held to within a percent on purpose. Every ratio in the right hand column
-   * below is measured against this surface, and --text-primary sits at 7.13 against it, which
-   * is a tenth of a point of headroom over the 7:1 floor. Any lift here breaks the between
-   * sets tier on the stepper. Hue and chroma were free. Lightness was not.
+   * It is now 272 degrees at 35% saturation. The palette is three legs of a near triad: action
+   * orange at 22, data cyan at 190, ground violet at 272. Violet sits 82 degrees off cyan and
+   * 110 off orange, which is the point. It is far enough from the data axis that no surface can
+   * be mistaken for a series, and it is nowhere near the action hue, so the orange still has
+   * the only warm signal on the screen. Violet is also the darkest hue at a given luminance,
+   * because blue carries 7% of the luminance sum against green's 72%, so it holds real chroma
+   * down here where a ground has to live. That is what makes it stay vibrant on OLED instead
+   * of going muddy the way a dark warm ground would.
+   *
+   * Luminance was held on purpose, across both changes. Every ratio in the right hand column
+   * below is measured against this surface, and --text-primary sits at 7.26 against it, which
+   * is a quarter point of headroom over the 7:1 floor. Any lift here breaks the between sets
+   * tier on the stepper. Hue and chroma were free. Lightness was not.
    *
    * Three tokens, one lighting model, one hue: light falls from above, so the face is lit, the
    * bottom is shaded, and the top edge catches a rim. --surface-raised is the face and stays
    * the single token for borders, tracks, and flat fills. The other two exist so a gradient
    * never has to invent a colour at the use site. */
   --surface-base: #000000;
-  --surface-raised: #2d5462; /*        2.56 vs base. The lit face */
-  --surface-raised-shade: #274a57; /*  2.20 vs base. The shaded face, far end of the fall */
-  --surface-raised-rim: #3d6675; /*    1.31 vs the face. The lit top edge, 1px only */
+  --surface-raised: #613e80; /*        2.51 vs base. The lit face */
+  --surface-raised-shade: #583875; /*  2.24 vs base. The shaded face, far end of the fall */
+  --surface-raised-rim: #7a4fa0; /*    1.38 vs the face. The lit top edge, and selected fills */
 
   /* The lit top of a control cut into a raised surface, grading down to --surface-base. Same
-   * hue. --text-primary reads 16.16 on it, so the stepper buttons keep every point of contrast
+   * hue. --text-primary reads 16.13 on it, so the stepper buttons keep every point of contrast
    * they had while stopping short of reading as holes punched in the slab. */
-  --surface-base-lit: #0b1418;
+  --surface-base-lit: #180f21;
 
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
    *
-   * That is the bill for widening the surface separation to 2.56. Raising the surface lifted
+   * That is the bill for widening the surface separation to 2.51. Raising the surface lifted
    * its luminance, and every text token except --text-primary fell under the floor on it:
-   * --text-secondary lands at 4.41, which misses both the 7:1 between sets rule and the 4.5:1
+   * --text-secondary lands at 4.49, which misses both the 7:1 between sets rule and the 4.5:1
    * large text rule. Written down here so it stops being rediscovered.
    *
-   * The right hand column moved by a hundredth or two when the surface went from #46505C to
-   * #2D5462. That is rounding on a deliberately held luminance, not a new budget.
+   * The right hand column shifts by a hundredth or two whenever this surface is retuned. It has
+   * now survived grey, teal, and violet without a token moving, which is the whole argument for
+   * holding luminance fixed and spending the freedom on hue.
    *
    * The LEFT column was wrong and is now corrected, which is unrelated to the hue change and
    * worth stating so nobody reads it as one. Every figure in it was understated by a uniform
@@ -78,8 +87,8 @@
    * argument stands untouched.
    *
    * Ratios below are against --surface-base then --surface-raised. */
-  --text-primary: #edeff1; /* 18.22 / 7.13  any size, either surface. The only one on raised */
-  --text-secondary: #b5bfc9; /* 11.26 / 4.41  base only, any size */
+  --text-primary: #edeff1; /* 18.22 / 7.26  any size, either surface. The only one on raised */
+  --text-secondary: #b5bfc9; /* 11.26 / 4.49  base only, any size */
 
   /* Fill only, never text. Both read under the floor on --surface-raised. Their ink is
    * --surface-base, at 8.97 and 5.96.
@@ -89,9 +98,9 @@
    * stays --accent-action-pressed and stays flat, because a flat fill is what a depressed slab
    * looks like. Black ink reads 7.41 on the shade, so the darkest point of that gradient still
    * clears the between sets floor even though the label only owes 4.5. */
-  --accent-action: #ff8a45; /*  8.97 / 3.51  fill only */
-  --accent-action-shade: #f2762f; /*  7.41 / 2.90  fill only */
-  --accent-action-pressed: #d9682a; /*  5.96 / 2.33  fill only */
+  --accent-action: #ff8a45; /*  8.97 / 3.58  fill only */
+  --accent-action-shade: #f2762f; /*  7.41 / 2.95  fill only */
+  --accent-action-pressed: #d9682a; /*  5.96 / 2.38  fill only */
 
   /* The data and progress axis, complementary to the action orange at 165 degrees.
    *
@@ -101,17 +110,17 @@
    * step, and the weakest pair anywhere is --accent-data against --pr at 1.14 luminance,
    * carried by 36 points of saturation plus a ringed dot. Six tokens is the ceiling here.
    * A seventh forces a real trade. */
-  --accent-data-dim: #478d9e; /*  5.57 / 2.18  strokes and 28px up, base only. History */
-  --deload: #7a95de; /*  7.18 / 2.81  base only. A planned back off week */
-  --flat: #9ea7b0; /*  8.61 / 3.37  base only. A week where nothing moved */
-  --accent-data: #6dd0e4; /* 11.79 / 4.61  the series, and informational text */
-  --pr: #1fe3ff; /* 13.49 / 5.28  the record moment. The only token that glows bright */
-  --progress: #ade8f2; /* 15.60 / 6.10  a value that improved */
+  --accent-data-dim: #478d9e; /*  5.57 / 2.22  strokes and 28px up, base only. History */
+  --deload: #7a95de; /*  7.18 / 2.86  base only. A planned back off week */
+  --flat: #9ea7b0; /*  8.61 / 3.43  base only. A week where nothing moved */
+  --accent-data: #6dd0e4; /* 11.79 / 4.70  the series, and informational text */
+  --pr: #1fe3ff; /* 13.49 / 5.38  the record moment. The only token that glows bright */
+  --progress: #ade8f2; /* 15.60 / 6.22  a value that improved */
 
   /* State. --muted is disabled text on --surface-base only. --focus always ships with a
    * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
-  --muted: #828d99; /*  6.22 / 2.43  base only */
-  --focus: #9fe0ff; /* 14.58 / 5.71  ring, never text */
+  --muted: #828d99; /*  6.22 / 2.48  base only */
+  --focus: #9fe0ff; /* 14.58 / 5.81  ring, never text */
 
   /* Glow. One vocabulary for the screen now and chart strokes later, where the same radii
    * drive filter: drop-shadow() instead of box-shadow.
@@ -409,6 +418,73 @@ button {
   cursor: not-allowed;
 }
 
+/* ---------------------------------------------------------------- chooser chips
+ *
+ * One pattern for one job: a horizontal row picking which of several things you are looking at.
+ * Two places use it, the day picker on the logging screen and the lift picker on the progress
+ * screen, and they used to disagree. The day picker had NO selected state at all: .is-on carried
+ * an aria-current and nothing a sighted person could see. A chooser where every option looks
+ * identical is worse than no chooser, because it implies a choice was already made and then
+ * hides which one. The lift picker had a selected state built from a border colour and a text
+ * colour, which is two signals that are both colour, so it failed the encoding rule from a
+ * different direction. Both now resolve here.
+ *
+ * These rules must stay below .button-secondary. The chips carry both classes and the item
+ * selectors tie it on specificity, so source order is what wins the radius and the padding.
+ *
+ * Selected carries four signals at once, because CLAUDE.md forbids encoding a state in hue
+ * alone and a segmented control is the most tempting place there is to break that rule. The
+ * chip FILLS, the label steps from 600 to 700 and from --text-secondary to --text-primary, the
+ * top edge catches the rim, and the chip throws a glow. Unselected is a hollow outline on pitch
+ * black. Filled against not filled is the one signal that survives colour blindness, glare, and
+ * a glance from arm's length, so it is the one doing the real work. The rest are reinforcement.
+ *
+ * The glow is legal here by the hard rule: it sits outside the fill and spreads away from the
+ * chip, so it never passes behind the chip's own label. */
+.daypicker {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--s-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Bleeds to the screen edge so a half visible chip says there is more, the same affordance
+   * the lift scroller on the progress screen uses. A rotation can be five days long and this
+   * band must not grow a second row: it sits in the top third, which is read, not reached. */
+  margin: var(--s-1) calc(var(--s-4) * -1) 0;
+  padding: var(--s-1) var(--s-4);
+  scroll-snap-type: x proximity;
+}
+
+.daypicker::-webkit-scrollbar {
+  display: none;
+}
+
+/* The pill is the shape, and the shape is doing real work. Nothing else on these screens is
+ * round: the things that log and adjust are square slabs with a 12px radius. So a fully rounded
+ * row reads as a chooser before a single word of it is read, which is what earns it a place in
+ * a band the thumb never reaches. */
+.daypicker__item,
+.lifts__item {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  padding: 0 var(--s-4);
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.daypicker__item.is-on,
+.lifts__item.is-on {
+  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+  border-color: var(--surface-raised-rim);
+  color: var(--text-primary);
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px 0 0 var(--surface-raised-rim),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
 /* Secondary actions. Skip and end session are ordinary controls here, deliberately styled the
  * same as type and undo. Nothing about a skipped lift gets a warning colour. */
 .secondary {
@@ -452,7 +528,7 @@ button {
 
 /* Flat black on the slab read as a hole cut through it rather than as a control sitting in it.
  * The same fall of light as the slab, one register darker: lit at the top, true --surface-base
- * at the bottom. --text-primary measures 16.16 at the lightest point, so the plus and the minus
+ * at the bottom. --text-primary measures 16.13 at the lightest point, so the plus and the minus
  * give up nothing for it. */
 .stepper__btn {
   height: 100%;
@@ -888,15 +964,8 @@ button {
   display: none;
 }
 
-.lifts__item {
-  flex: 0 0 auto;
-  scroll-snap-align: start;
-}
-
-.lifts__item.is-on {
-  border-color: var(--accent-data);
-  color: var(--text-primary);
-}
+/* .lifts__item and .lifts__item.is-on are styled with the day picker, under chooser chips, so
+ * the two rows that do the same job cannot drift apart again. Nothing belongs here. */
 
 /* ---------------------------------------------------------------- navigation
  *

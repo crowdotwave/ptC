@@ -250,13 +250,20 @@ Constraints:
   bold weight. 7:1 is the AAA threshold for normal text, not for large text, and applying it
   to 64px numerals over-constrains the palette for no legibility gain.
 - On `--surface-raised`, text is `--text-primary` only. This is the cost of widening the
-  surface separation to 2.56:1, which is what makes two surfaces tell apart under glare.
+  surface separation to 2.51:1, which is what makes two surfaces tell apart under glare.
   Lifting the raised surface lifted its luminance, and every other text token fell under the
-  floor on it: `--text-secondary` measures 4.41, missing both the 7:1 and the 4.5:1 rules.
+  floor on it: `--text-secondary` measures 4.49, missing both the 7:1 and the 4.5:1 rules.
   Anything that needs a second text colour needs a different surface, not a different token.
-- The raised surface is a chromatic deep teal at 196 degrees, not a near neutral grey. Its
-  luminance is fixed: `--text-primary` clears the 7:1 floor on it by a tenth of a point, so the
-  hue and the chroma are open to change and the lightness is not.
+- The palette is three legs of a near triad: action orange at 22 degrees, data cyan at 190,
+  ground violet at 272. The ground is a saturated colour, never a near neutral grey. It is also
+  never within about 40 degrees of the data axis: a teal ground at 196 was tried and had to be
+  abandoned because a surface that close to `--accent-data` reads as a dim member of it and
+  starts competing for the meaning cyan owns. Violet sits 82 degrees off cyan and 110 off
+  orange, and it holds chroma at low luminance because blue carries 7% of the luminance sum
+  against green's 72%, which is what keeps it vibrant on OLED instead of muddy.
+- The raised surface's luminance is fixed. `--text-primary` clears the 7:1 floor on it by about
+  a quarter point, so hue and chroma are open to change and lightness is not. This has now
+  survived grey, teal, and violet without another token moving.
 - Raised surfaces carry a fall of light, top lit, via `--surface-raised-shade` and
   `--surface-raised-rim`. A gradient on a surface that holds mid set text always runs downward
   from the token value, never upward, because the token value is already the contrast ceiling.
@@ -278,6 +285,15 @@ Constraints:
 **No hue-only encoding.** Mid-set, under exertion and glare and with sweat on the glass, fine
 hue discrimination degrades. Every state that carries meaning also carries a shape, a weight,
 a position, or a word.
+
+**Selected means filled.** Any row that chooses between things, the day picker and the lift
+picker today, is a row of pill chips: unselected is a hollow outline on pitch black, selected
+is filled with the raised surface gradient plus its rim, a 700 weight label, and a glow. Fill
+against no fill is the signal that survives colour blindness, glare, and a glance from arm's
+length, so it is the one carrying the state. Colour is reinforcement and never the whole
+signal. Both rows share one rule in `styles.css` under "chooser chips" so they cannot drift:
+they were previously styled apart, and one of them shipped with no visible selected state at
+all while the other encoded it in two colours and nothing else.
 
 **No intensity-only encoding either.** This one is measured, not assumed. The data axis is
 cyan, and cyan clusters at high luminance in sRGB, so an intensity ladder in it has very
