@@ -19,7 +19,7 @@ import { buildSnapshot, currentAssignment, pickDay, sortedDays, sortedItems } fr
 import { mountProgramView, repaintProgramView, WARMUP_KINDS, NO_PROGRAM_YET } from './js/program-view.js';
 import { topSet } from './js/history.js';
 import { weekIndexOf } from './js/progression.js';
-import { loadUnit, mountUnitSwitch, onUnitChange, viewerName } from './js/units.js';
+import { loadUnit, mountUnitSwitch, onUnitChange, viewerName, canSetUnit } from './js/units.js';
 import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
 const el = (id) => document.getElementById(id);
@@ -38,10 +38,57 @@ const state = {
   // each carrying whatever they are on right now.
   assignSnapshot: null,
   assignClients: [],
+  // Which half of the screen is on: 'mine' or 'build'. Only ever a real choice for somebody who
+  // holds both. Held here so that coming back from a program returns to the half you left.
+  section: 'mine',
 };
 
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// ------------------------------------------------------------------ the two halves
+
+const SECTIONS = [
+  ['mine', 'Your program'],
+  ['build', 'Programs you build'],
+];
+
+/** True only when this person holds both, which is the only time there is a choice to make. */
+const hasBothSections = () => state.hasMine && Boolean(state.trainer);
+
+/**
+ * Shows one half and hides the other.
+ *
+ * These were stacked, with a heading on each. That put somebody's own training, a day chooser, a
+ * whole day of exercises, and then a builder list on one scroll, which is the clutter this
+ * splits up. A chooser is the same answer the logging screen already gives for days and the
+ * progress screen gives for lifts, so it is a pattern that is already on this app rather than a
+ * new one.
+ *
+ * The unit switch follows the choice, because it labels the weights under each lift and there
+ * are no weights on the builder list. A control that changes nothing on the screen it is on is
+ * exactly the clutter being removed.
+ */
+function renderSections() {
+  const both = hasBothSections();
+  const on = both ? state.section : state.hasMine ? 'mine' : 'build';
+
+  el('mine-view').hidden = on !== 'mine';
+  el('list-view').hidden = on !== 'build';
+
+  const picker = el('section-picker');
+  picker.hidden = !both;
+  if (both) {
+    picker.innerHTML = SECTIONS.map(
+      ([key, label]) =>
+        `<button type="button" class="button-secondary sections__item${key === on ? ' is-on' : ''}" ` +
+        `data-section="${key}"${key === on ? ' aria-current="true"' : ''}>${label}</button>`,
+    ).join('');
+  }
+
+  el('unit-switch').hidden = !(on === 'mine' && canSetUnit());
+  return on;
+}
 
 // ------------------------------------------------------------------ program list
 
@@ -106,21 +153,22 @@ function archivedRow(template, assigned) {
 function hideList() {
   el('list-view').hidden = true;
   el('mine-view').hidden = true;
+  el('section-picker').hidden = true;
+  el('unit-switch').hidden = true;
 }
 
 async function showList() {
-  el('mine-view').hidden = !state.hasMine;
-  el('list-view').hidden = false;
   el('edit-view').hidden = true;
   el('import-view').hidden = true;
   el('preview-view').hidden = true;
   el('assign-view').hidden = true;
   el('view-title').textContent = 'Programs';
 
-  // A client who does not also coach has no list below, and nothing here to build.
+  const on = renderSections();
+
+  // A client who does not also coach has nothing to build, so there is no list to fill.
   if (!state.trainer) {
     el('view-note').textContent = '';
-    el('list-view').hidden = true;
     return;
   }
 
@@ -139,12 +187,10 @@ async function showList() {
   // Blank rather than "0 programs", which reads like the app failed to load rather than like
   // there is nothing here yet. The empty row below is what speaks in that case.
   //
-  // The count moves onto the section heading for somebody who is also a client, because up in the
-  // page note it would sit under the word Programs and appear to count both sections.
-  const count = live.length ? `${live.length} program${live.length === 1 ? '' : 's'}.` : '';
-  el('build-title').hidden = !state.hasMine;
-  el('build-title').textContent = live.length ? `Programs you build, ${live.length}` : 'Programs you build';
-  el('view-note').textContent = state.hasMine ? '' : count;
+  // The note belongs to whichever half is showing. On the other half it would be counting
+  // something nobody is looking at.
+  el('view-note').textContent =
+    on === 'build' && live.length ? `${live.length} program${live.length === 1 ? '' : 's'}.` : '';
 
   el('program-list').innerHTML = live.length
     ? live.map((t) => nameButton(t, assignedLine(counts.get(t.id) ?? 0))).map((b) => `<li class="clientlist__row">${b}</li>`).join('')
@@ -238,7 +284,6 @@ function assignmentNote(assignment) {
 }
 
 async function showMine(storage, clientId) {
-  el('mine-view').hidden = false;
   const assignment = await currentAssignment(storage, clientId);
 
   if (!assignment) {
@@ -891,6 +936,14 @@ function wire() {
   });
 
   el('preview').addEventListener('click', showPreview);
+
+  el('section-picker').addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-section]');
+    if (chip) {
+      state.section = chip.dataset.section;
+      showList();
+    }
+  });
 
   el('preview-back').addEventListener('click', (event) => {
     event.preventDefault();

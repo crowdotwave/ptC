@@ -17,26 +17,30 @@
     <main class="screen screen--scroll screen--table">
       <header class="context">
         <h1 class="context__exercise" id="view-title">Programs</h1>
-        <p class="context__target" id="view-note">&nbsp;</p>
+        <!-- The switch sits on the line below the title, never beside it, per CLAUDE.md: nothing
+             goes on the title row unless it is under about 40px wide. -->
+        <div class="context__row">
+          <p class="context__target" id="view-note">&nbsp;</p>
+          <div class="unitswitch" id="unit-switch" hidden></div>
+        </div>
       </header>
+
+      <!-- Which half of this screen you are reading. Only rendered for somebody who holds both a
+           clients row and a trainers row, because one option is not a chooser, it is a label for
+           the only thing you have. Same chooser chip rule as the day picker and the lift picker,
+           so the three cannot drift apart. -->
+      <nav class="sections" id="section-picker" aria-label="Choose a section" hidden></nav>
 
       <!-- The program this person is on, for anybody who holds a clients row. Read only, from
            their own assignment snapshot: 0002_rls.sql gives a client no reach into
            program_templates at all, so the snapshot is not a shortcut here, it is the only thing
            their session can see. -->
       <section id="mine-view" hidden>
-        <div class="context__row">
-          <h2 class="section__title" id="mine-title">Your program</h2>
-          <div class="unitswitch" id="unit-switch" hidden></div>
-        </div>
         <p class="context__target" id="mine-note"></p>
         <div id="mine-body"></div>
       </section>
 
       <section id="list-view">
-        <!-- Only when this person also has a program of their own above. On its own, this list
-             is what the page title already says. -->
-        <h2 class="section__title" id="build-title" hidden></h2>
         <div class="secondary">
           <button type="button" class="button-secondary" id="new-program">New program</button>
           <!-- The label is the control. A bare file input cannot be styled and reads as a

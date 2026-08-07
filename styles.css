@@ -428,7 +428,17 @@ button {
  * These are ordinary controls and should not compete with the log action, so they get the lit
  * edge and a shallow shadow and no fill to speak of. --text-secondary reads 9.89 on the lifted
  * face, which clears the 7:1 between sets floor with room. */
+/* Centred by the rule, not by the element.
+ *
+ * A <button> centres its own label because the user agent says so. A <label> does not, and the
+ * Import control is a label wrapping a hidden file input, because a bare file input cannot be
+ * styled and reads as a browser artefact beside a real button. So "Import a spreadsheet" sat
+ * left in a box whose neighbour was centred. Anything wearing this class now centres both ways
+ * whatever tag it is. */
 .button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--tap);
   min-width: var(--tap);
   padding: 0 var(--s-3);
@@ -502,7 +512,8 @@ button {
  * row reads as a chooser before a single word of it is read, which is what earns it a place in
  * a band the thumb never reaches. */
 .daypicker__item,
-.lifts__item {
+.lifts__item,
+.sections__item {
   flex: 0 0 auto;
   scroll-snap-align: start;
   padding: 0 var(--s-4);
@@ -512,7 +523,8 @@ button {
 }
 
 .daypicker__item.is-on,
-.lifts__item.is-on {
+.lifts__item.is-on,
+.sections__item.is-on {
   --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
   background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
   border-color: var(--surface-raised-rim);
@@ -1135,6 +1147,24 @@ button {
 /* .lifts__item and .lifts__item.is-on are styled with the day picker, under chooser chips, so
  * the two rows that do the same job cannot drift apart again. Nothing belongs here. */
 
+/* The third row that does that job: which half of the Programs screen you are reading. Same
+ * scroller, same chips, and it sits under the page header rather than beside it, because the
+ * unit switch is 90px and a chooser is not allowed to share its row with a global setting. */
+.sections {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--s-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(var(--s-4) * -1);
+  padding: var(--s-1) var(--s-4);
+  scroll-snap-type: x proximity;
+}
+
+.sections::-webkit-scrollbar {
+  display: none;
+}
+
 /* ---------------------------------------------------------------- navigation
  *
  * Superseded. Navigation now lives in .shell and .tabbar at the bottom of this file. These
@@ -1499,14 +1529,6 @@ button.navlink:disabled {
   border-radius: var(--radius);
   color: var(--text-secondary);
   font-size: var(--t-body);
-}
-
-/* Names one half of a screen that has two. Appears only when both halves are there: on its own,
- * a section heading repeating the page title is furniture. */
-.section__title {
-  margin: 0;
-  font-size: var(--t-body);
-  font-weight: 650;
 }
 
 /* A client and the one thing you came here to do to them.
