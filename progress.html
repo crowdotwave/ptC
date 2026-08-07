@@ -19,11 +19,27 @@
            while a session is actually open. -->
       <a class="resume" id="resume" href="index.html" hidden></a>
 
+      <!-- Whose data this is. Shown only when a trainer is reading somebody else's progress,
+           because a client does not need their own name on their own screen.
+           It sits above the consistency card rather than inside the header below it: a trainer
+           three clients deep needs to know whose numbers these are without scrolling, and the
+           card is most of a phone screen tall. -->
+      <p class="context__who" id="client-name" hidden></p>
+
+      <!-- The centrepiece, and the only client wide thing on this screen. Everything below it is
+           scoped to one lift, which is why it holds the h1 and the lift name below is an h2.
+           Rendered once, outside render(), because this screen redraws on every unit toggle and
+           on every resize and neither should throw away which month you had scrolled to. -->
+      <section class="consistency" id="consistency" aria-labelledby="consistency-title">
+        <div class="consistency__head">
+          <h1 class="consistency__title" id="consistency-title">Consistency</h1>
+          <span class="consistency__total num" id="consistency-total"></span>
+        </div>
+        <div id="consistency-body"></div>
+      </section>
+
       <header class="context">
-        <!-- Whose data this is. Shown only when a trainer is reading somebody else's progress,
-             because a client does not need their own name on their own screen. -->
-        <p class="context__who" id="client-name" hidden></p>
-        <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
+        <h2 class="context__exercise" id="exercise-name">&nbsp;</h2>
         <div class="context__row">
           <p class="context__last num" id="headline">&nbsp;</p>
           <div class="unitswitch" id="unit-switch" hidden></div>
@@ -34,7 +50,7 @@
 
       <section class="chart" id="lead-chart" aria-labelledby="lead-title">
         <div class="chart__head">
-          <h2 class="chart__title" id="lead-title">Estimated 1RM</h2>
+          <h3 class="chart__title" id="lead-title">Estimated 1RM</h3>
           <span class="chart__value num" id="lead-value"></span>
         </div>
         <div id="lead-plot"></div>
@@ -43,7 +59,7 @@
 
       <section class="chart" id="reps-chart" aria-labelledby="reps-title">
         <div class="chart__head">
-          <h2 class="chart__title" id="reps-title">Reps at each load</h2>
+          <h3 class="chart__title" id="reps-title">Reps at each load</h3>
           <span class="chart__value num" id="reps-value"></span>
         </div>
         <div id="reps-plot"></div>
@@ -55,7 +71,7 @@
            first meant a client opened their progress on the line least likely to have moved. -->
       <section class="chart" id="second-chart" aria-labelledby="second-title">
         <div class="chart__head">
-          <h2 class="chart__title" id="second-title">Estimated 1RM</h2>
+          <h3 class="chart__title" id="second-title">Estimated 1RM</h3>
           <span class="chart__value num" id="second-value"></span>
         </div>
         <div id="second-plot"></div>

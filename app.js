@@ -18,7 +18,7 @@ import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { targetLine } from './js/program.js';
-import { pickDay, sortedDays, sortedItems, currentAssignment } from './js/snapshot.js';
+import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import {
   unit,
@@ -762,7 +762,7 @@ function renderDayPicker(snapshot, sessions) {
       // The split only. The day type above it said STRENGTH on almost every chip, which is a
       // word that distinguishes nothing when it is on all of them, and it doubled the height of
       // the one control on this screen that has to be scanned rather than read.
-      const label = day.split || day.name;
+      const label = dayTitle(day);
       return (
         `<button type="button" class="button-secondary daypicker__item${on ? ' is-on' : ''}" ` +
         `data-day="${day.day_index}"${on ? ' aria-current="true"' : ''}>${escapeText(label)}</button>`

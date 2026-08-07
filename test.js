@@ -15,13 +15,15 @@ import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
   isBodyweightLoad,
 } from './js/program.js';
-import { buildSnapshot, pickDay, sortedDays, sortedItems } from './js/snapshot.js';
+import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
 import { tokenFromLink } from './js/auth.js';
 import { validate } from './js/schema.js';
+import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
+import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 
 const results = [];
 
@@ -1136,6 +1138,30 @@ test('nothing a trainer typed can close a tag', () => {
   ok(!html.includes('<script>'), 'so is the variation');
 });
 
+// ------------------------------------------------------------------ naming a day
+//
+// One expression used to live in four places with three different endings, and two of them had no
+// ending at all: both day pickers would render a chip with nothing written on it for a day the
+// builder created and nobody named. A chooser with a blank option is worse than no chooser.
+
+test('a day is called what the trainer called it, split first', () => {
+  eq(dayTitle({ split: 'UPPER A', name: 'Day 1', day_index: 0 }), 'UPPER A');
+});
+
+test('a day with no split falls back to its name before its position', () => {
+  eq(dayTitle({ split: null, name: 'Push', day_index: 2 }), 'Push');
+});
+
+test('a day the builder created and nobody named still has something to call it', () => {
+  eq(dayTitle({ split: null, name: null, day_index: 2 }), 'Day 3', 'counted the way a person counts');
+  eq(dayTitle({ split: '', name: '', day_index: 0 }), 'Day 1', 'an empty string is not a name');
+});
+
+test('naming a day that is not there does not throw', () => {
+  eq(dayTitle(undefined), 'Day 1');
+  eq(dayTitle(null), 'Day 1');
+});
+
 // ------------------------------------------------------------------ dates that are not times
 //
 // assignments.starts_on is a date column, so it arrives as 'YYYY-MM-DD'. Date parses that as UTC
@@ -1156,6 +1182,333 @@ test('week one is the week the block starts, counting the way anybody says it', 
 
 test('a session before the block starts is a negative week, never week one', () => {
   ok(weekIndexOf('2026-07-30T18:00:00.000Z', '2026-08-03') < 0);
+});
+
+// The other half of the same problem, from the timestamp side. These assertions are written to
+// hold in EVERY zone on purpose: test.html runs in whatever browser happens to be open, so
+// "a 23:00 session stays in its own month" would pass in Toronto and fail in Berlin and tell us
+// nothing either way. What is true everywhere is that localDayOf agrees with the platform's own
+// idea of the local day, and that it disagrees with a naive slice exactly when the offset says so.
+
+test('the day a session happened is the day where the person was standing', () => {
+  const iso = '2026-08-06T23:30:00.000Z';
+  eq(localDayOf(iso), isoDate(new Date(iso)), 'same answer the platform gives, in any zone');
+});
+
+test('an evening session belongs to the evening it happened, not to tomorrow', () => {
+  // Built from local parts, which is what makes this hold everywhere: whatever instant half past
+  // ten on the 6th is where this runs, the day it belongs to is the 6th. In Toronto the ISO string
+  // this produces starts '2026-08-07', so a slice would file a Thursday session under Friday.
+  const evening = new Date(2026, 7, 6, 22, 30, 0);
+  eq(localDayOf(evening.toISOString()), '2026-08-06');
+});
+
+test('a month is read off a day string, never off a fresh Date', () => {
+  eq(monthKey('2026-08-06'), '2026-08');
+  eq(monthKey('2026-12-31'), '2026-12');
+  eq(monthKey(null), null, 'nothing in, nothing out');
+});
+
+test('a date column becomes local midnight, so the calendar cannot start a day early', () => {
+  const at = localMidnight('2026-08-06');
+  eq(at.getDate(), 6);
+  eq(at.getMonth(), 7);
+  eq(at.getHours(), 0);
+});
+
+test('a date that is not a date returns null instead of an Invalid Date', () => {
+  eq(localMidnight('not a date'), null);
+  eq(localDayOf('not a date'), null);
+});
+
+// ------------------------------------------------------------------ showing up
+//
+// js/consistency.js. The grid answers a different question from the charts: not whether a lift is
+// moving, but whether the person is training and at what. Everything below is either a rule
+// CLAUDE.md states outright (an empty session is not a success, no streak and no missed count) or
+// a case where the obvious implementation is quietly wrong (glyph collisions, the frozen program,
+// local days).
+
+const csession = (id, startedAt, over = {}) => ({
+  id, client_id: 'c1', assignment_id: 'a1', day_index: 0, started_at: startedAt,
+  completed_at: null, client_note: null, ...over,
+});
+
+const cassign = (id, startsOn, days, over = {}) => ({
+  id, client_id: 'c1', template_id: 't1', starts_on: startsOn, ends_on: null, deload_weeks: [],
+  snapshot: { template: { id: 't1', name: 'P', notes: '' }, days }, ...over,
+});
+
+const cday = (dayIndex, split) => ({ id: `d${dayIndex}`, day_index: dayIndex, name: null, split, items: [] });
+
+// A local instant, so these hold in any zone. new Date(y, m, d, h) is local by definition.
+const at = (y, m, d, h = 18) => new Date(y, m - 1, d, h, 0, 0).toISOString();
+
+const cellFor = (built, day) =>
+  built.months.flatMap((m) => m.weeks).flatMap((w) => w.days).find((c) => c.day === day && c.inMonth);
+
+test('a day carries the split the client actually did, read off the frozen program', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3), { day_index: 1 })],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1']),
+    today: '2026-08-07',
+  });
+  const cell = cellFor(built, '2026-08-03');
+  eq(cell.label, 'LOWER A');
+  eq(cell.slot, 2, 'second day of the rotation takes the second colour');
+});
+
+test('the split comes from that session\'s own assignment, not from the current one', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 6, 2), { assignment_id: 'old' }), csession('s2', at(2026, 8, 3))],
+    assignments: [
+      cassign('old', '2026-06-01', [cday(0, 'FULL BODY')]),
+      cassign('a1', '2026-08-03', [cday(0, 'UPPER A')]),
+    ],
+    sessionIdsWithWork: new Set(['s1', 's2']),
+    today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-06-02').label, 'FULL BODY', 'June is still June');
+  eq(cellFor(built, '2026-08-03').label, 'UPPER A');
+});
+
+test('a colour keys on the position in the rotation, so renaming a day does not repaint history', () => {
+  const before = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  const after = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'CHEST AND BACK'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(cellFor(before, '2026-08-03').slot, cellFor(after, '2026-08-03').slot, 'same slot, new words');
+});
+
+test('a new assignment does not reshuffle the colours on months already on screen', () => {
+  const sessions = [csession('s1', at(2026, 8, 3))];
+  const one = buildConsistency({
+    sessions, assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-09-07',
+  });
+  const two = buildConsistency({
+    sessions: [...sessions, csession('s2', at(2026, 9, 1), { assignment_id: 'a2' })],
+    assignments: [
+      cassign('a1', '2026-08-03', [cday(0, 'UPPER A')]),
+      cassign('a2', '2026-09-01', [cday(0, 'PUSH'), cday(1, 'PULL')]),
+    ],
+    sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-09-07',
+  });
+  eq(cellFor(one, '2026-08-03').slot, cellFor(two, '2026-08-03').slot, 'August did not move');
+});
+
+test('a session nobody logged a set in is not a trained day', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3)), csession('s2', at(2026, 8, 4))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']),
+    today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').sessionIds, ['s1'], 'the one with work in it');
+  eq(cellFor(built, '2026-08-04').sessionIds, [], 'tapping start and walking out is not a session');
+  eq(built.totalSessions, 1);
+});
+
+test('an untrained day carries nothing a caller could render as a failure', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  const empty = cellFor(built, '2026-08-05');
+  eq(empty.sessionIds, []);
+  eq(empty.label, null);
+  eq(empty.glyph, null);
+  eq(empty.slot, null);
+  eq(empty.isDeload, false, 'no state at all, not even a quiet one');
+  ok(!('expected' in empty) && !('missed' in empty), 'and nothing that says a session was due');
+});
+
+test('nothing anywhere counts a missed day or a streak', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  const keys = Object.keys(built).concat(Object.keys(built.months[0]));
+  ok(!keys.some((k) => /streak|missed|adherence|rate|target/i.test(k)), keys.join());
+});
+
+test('an evening session lands on the evening it happened', () => {
+  // 22:30 local. In Toronto the ISO string this produces starts with the next day, so a slice
+  // would file a Monday session under Tuesday and the grid would be wrong every evening.
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3, 22.5 | 0))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').sessionIds, ['s1']);
+});
+
+test('two sessions on one day are one cell holding both', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3, 9)), csession('s2', at(2026, 8, 3, 18), { day_index: 1 })],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-08-07',
+  });
+  const cell = cellFor(built, '2026-08-03');
+  eq(cell.sessionIds, ['s1', 's2']);
+  eq(cell.label, 'UPPER A', 'the cell takes the first one, the detail line names both');
+  eq(built.totalSessions, 2);
+});
+
+test('a record is whatever progression.js says it is, and is not decided twice', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3)), csession('s2', at(2026, 8, 5))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1', 's2']),
+    recordSessionIds: new Set(['s2']),
+    today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').isRecord, false);
+  eq(cellFor(built, '2026-08-05').isRecord, true);
+  eq(built.months[0].hasRecord, true, 'so the month can say so in words');
+});
+
+test('no records handed in means no ring anywhere', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').isRecord, false);
+  eq(built.months[0].hasRecord, false);
+});
+
+test('a deload week is read from the assignment that prescribed it', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3)), csession('s2', at(2026, 9, 14))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')], { deload_weeks: [6] })],
+    sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-09-20',
+  });
+  eq(cellFor(built, '2026-08-03').isDeload, false, 'week zero is not week six');
+  eq(cellFor(built, '2026-09-14').isDeload, true);
+});
+
+test('a session pointing at an assignment that is not there is still a session', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3), { assignment_id: 'gone' })],
+    assignments: [], sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  const cell = cellFor(built, '2026-08-03');
+  eq(cell.sessionIds, ['s1'], 'not dropped for failing to fit the model');
+  eq(cell.label, 'Unprogrammed');
+  eq(cell.slot, 4, 'the colourless slot');
+});
+
+test('a day_index the snapshot does not contain does not blank the cell', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3), { day_index: 9 })],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').label, 'Unprogrammed');
+});
+
+test('a client with no history at all still gets this month', () => {
+  const built = buildConsistency({ sessions: [], assignments: [], today: '2026-08-07' });
+  eq(built.totalSessions, 0);
+  eq(built.months.length, 1);
+  eq(built.months[0].key, '2026-08');
+  eq(built.firstDay, null);
+});
+
+test('the grid runs to today even when the last session was months ago', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 5, 12))],
+    assignments: [cassign('a1', '2026-05-11', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(built.months.map((m) => m.key), ['2026-05', '2026-06', '2026-07', '2026-08']);
+});
+
+test('the grid opens on this month when there is anything in it', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 7, 30)), csession('s2', at(2026, 8, 4))],
+    assignments: [cassign('a1', '2026-07-01', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-08-07',
+  });
+  eq(built.months[built.openAt].key, '2026-08');
+});
+
+test('and on the last month that has anything, rather than on a blank one', () => {
+  // The third of the month, or a fortnight away, would otherwise land the largest thing on the
+  // screen on an empty grid. It scrolls to work that was done, not to space where work was not.
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 7, 30))],
+    assignments: [cassign('a1', '2026-07-01', [cday(0, 'UPPER A')])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(built.months[built.openAt].key, '2026-07');
+});
+
+test('a client with nothing logged opens on this month rather than nowhere', () => {
+  const built = buildConsistency({ sessions: [], assignments: [], today: '2026-08-07' });
+  eq(built.months[built.openAt].key, '2026-08');
+});
+
+test('every month is whole weeks starting on a Monday', () => {
+  const built = buildConsistency({ sessions: [], assignments: [], today: '2026-02-10' });
+  const month = built.months[0];
+  ok(month.weeks.every((w) => w.days.length === 7), 'no ragged rows');
+  eq(new Date(`${month.weeks[0].days[0].day}T00:00:00`).getDay(), 1, 'Monday');
+  // February 2026 starts on a Sunday, so the first row is almost all January.
+  eq(month.weeks[0].days.filter((d) => d.inMonth).length, 1);
+  eq(month.weeks.flatMap((w) => w.days).filter((d) => d.inMonth).length, 28);
+});
+
+test('a leap February is 29 days and still whole weeks', () => {
+  const built = buildConsistency({ sessions: [], assignments: [], today: '2028-02-10' });
+  eq(built.months[0].weeks.flatMap((w) => w.days).filter((d) => d.inMonth).length, 29);
+});
+
+test('the legend lists the rotation in its own order, not in the order it was trained', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3), { day_index: 1 }), csession('s2', at(2026, 8, 5))],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-08-07',
+  });
+  eq(built.months[0].legend.map((l) => l.label), ['UPPER A', 'LOWER A']);
+  eq(built.months[0].sessions, 2);
+});
+
+// The glyph is what carries identity once hue runs out, so a collision is not a cosmetic problem.
+test('upper and lower A and B do not collapse to U, L, U, L', () => {
+  eq(splitGlyphs(['UPPER A', 'LOWER A', 'UPPER B', 'LOWER B']), ['UA', 'LA', 'UB', 'LB']);
+});
+
+test('days that already differ on their first letter keep the single letter', () => {
+  eq(splitGlyphs(['PUSH', 'LEGS']), ['P', 'L']);
+});
+
+test('two days named the same thing still get told apart', () => {
+  eq(splitGlyphs(['PUSH', 'PUSH']), ['P1', 'P2'], 'two identical badges is the one thing that must not ship');
+});
+
+test('a glyph ignores punctuation and spacing when looking for the difference', () => {
+  eq(splitGlyphs(['Push (heavy)', 'Push (light)']), ['PH', 'PL']);
+});
+
+test('a day with no name at all still gets a glyph', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3))],
+    assignments: [cassign('a1', '2026-08-03', [{ id: 'd0', day_index: 0, name: null, split: null, items: [] }])],
+    sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
+  });
+  eq(cellFor(built, '2026-08-03').label, 'Day 1');
+  eq(cellFor(built, '2026-08-03').glyph, 'D');
 });
 
 // ------------------------------------------------------------------ what goes over the wire

@@ -130,6 +130,79 @@
    * to before picking the hue, not after. */
   --done: #3ddc84; /* 11.77 / 4.69  the session summary, and nothing else */
 
+  /* ---------------------------------------------------------------- split identity
+   *
+   * Which program day a session was, on the consistency grid. Fenced to that grid and its legend,
+   * the way --done is fenced to the session summary. Never a chart, never a control, never text.
+   *
+   * These are SURFACE FACES, not data tokens, and that distinction is the whole design. The cyan
+   * ladder above is capped at six by the note there, and a seventh forces a real trade. This does
+   * not spend that budget, because a calendar cell is a slab in the ground role: it says which
+   * kind of day this was, not how much of anything there was. So it can never compete for the
+   * meaning cyan owns, and it inherits the lit slab treatment unchanged, face grading to shade
+   * with the rim catching the top edge.
+   *
+   * LUMINANCE IS A CEILING HERE, NOT A FIXED POINT, and this is the one place these differ from
+   * --surface-raised. That token pins luminance for two reasons: --text-primary must clear 7:1 on
+   * it, and two surfaces must separate 2.51 from base so they tell apart under glare on the
+   * stepper. Only the first reason applies to a calendar cell, which is told apart from black by
+   * its own rim and fill rather than from a neighbouring surface. So the rule is Y <= 0.0801,
+   * which is the exact 7:1 boundary (0.910937 / 7 - 0.05), with a soft floor near Y = 0.030 below
+   * which a face stops reading as lit at all.
+   *
+   * Holding Y FIXED across these hues was tried on paper and is wrong, which is worth writing
+   * down because the arithmetic looks so clean. sRGB blue's primary is Y 0.0722 and green's is
+   * 0.7152, so an isoluminant set at the --surface-raised value of 0.0755 gives a screaming
+   * near-primary blue beside a near-black olive, and Helmholtz-Kohlrausch widens the gap the eye
+   * sees beyond the gap the numbers show. Matching them means capping every face at the chroma
+   * the green can reach, which lands straight back on the desaturated #46505C that read as
+   * unpainted chrome. The ceiling buys a 1.27x luminance range to spend instead, which is what
+   * makes these look like one family.
+   *
+   * Hue placement, after excluding what is already owned: cyan 190 +/- 40, action orange 22 +/-
+   * 40, --done at 147, --deload at 224 (measured, not the 240 it looks like), and the ground at
+   * 272. What survives is roughly 62-122 and 297-342, plus a narrow 230-262 between the deload
+   * and the ground. Three hues is what that affords. It is not four.
+   *
+   * Order matters, because a two day upper/lower split is the common case and gets slots 1 and 2:
+   * those are 126 degrees apart, the widest pair available. Slot 3 sits 24 degrees off the ground
+   * violet, which is close, and is acceptable only at slot 3, where two strongly separated colours
+   * are already on screen. The ground never appears as a cell inside the grid, so they do not
+   * touch.
+   *
+   * Slot 4 is deliberately colourless and is the last slot: a fifth day reuses it. A near neutral
+   * is the thing this file rejected for the GROUND, on the grounds that a surface carrying the
+   * whole app must not be grey. A single cell meaning "no colour left for this one" is a different
+   * job, and the measurement backs it: slot 4 sits 17 degrees from slot 3 in hue but 6% against
+   * 46% in saturation, so it is separated by chroma rather than by hue and cannot be confused with
+   * it. Reusing the ground violet here instead would have put two saturated faces 24 degrees apart.
+   *
+   * HUE IS NEVER THE ONLY SIGNAL, per the encoding rules. Every trained cell also carries a glyph
+   * made unique inside its own program (Upper A and Upper B become UA and UB, never U and U), a
+   * fill where an untrained day has none, and a slot indexed bar on its top edge. Colour is the
+   * fourth of four.
+   *
+   * Ratios are against --surface-base then against --surface-raised, same as every column above.
+   * Faces and shades clear the 7:1 between sets floor for --text-primary. Rims do not and are not
+   * asked to: a rim is a lit edge, exactly like --surface-raised-rim at 5.28, and never carries
+   * text. Weakest face pair anywhere is slot 1 against slot 4 at 1.02 luminance, carried by 57
+   * degrees of hue and by the glyph. */
+  --split-1-face: #782f5d; /*  2.36 / 1.06   rose, 322deg. Text on it 7.72 */
+  --split-1-shade: #6a2952; /* 2.06 / 1.22   text 8.84 */
+  --split-1-rim: #a9357f; /*   3.52 / 1.40   lit edge, never text */
+
+  --split-2-face: #365513; /*  2.47 / 1.02   moss, 88deg. Text on it 7.38 */
+  --split-2-shade: #304b11; /* 2.15 / 1.17   text 8.49 */
+  --split-2-rim: #467313; /*   3.72 / 1.48   lit edge, never text */
+
+  --split-3-face: #423691; /*  2.16 / 1.16   indigo, 248deg. Text on it 8.43 */
+  --split-3-shade: #3a2f80; /* 1.90 / 1.32   text 9.56 */
+  --split-3-rim: #5847c8; /*   3.15 / 1.25   lit edge, never text */
+
+  --split-4-face: #4b4750; /*  2.32 / 1.08   no hue left, 6% saturation. Text on it 7.85 */
+  --split-4-shade: #423f47; /* 2.03 / 1.24   text 8.98 */
+  --split-4-rim: #695d7b; /*   3.44 / 1.37   lit edge, never text */
+
   /* State. --muted is disabled text on --surface-base only. --focus always ships with a
    * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
   --muted: #828d99; /*  6.22 / 2.48  base only */
@@ -1142,6 +1215,372 @@ button {
 
 .lifts::-webkit-scrollbar {
   display: none;
+}
+
+/* ---------------------------------------------------------------- consistency grid
+ *
+ * The centrepiece of this screen, and the only thing on it that is not scoped to one lift.
+ *
+ * What it is for: the charts answer whether a lift is moving, which needs two sessions of that
+ * lift before it can say anything. This answers whether the person is training, which it can say
+ * after one. For a new client it is the only thing on the page with anything on it at all.
+ *
+ * What it deliberately is not: there is no rule below for a day nobody trained beyond a number on
+ * black. No red, no cross, no dot marking a session that was due. CLAUDE.md, and it is not an
+ * omission to be helpfully filled in: "no streak pressure, no guilt messaging for missed days".
+ * The satisfaction here is meant to come from filled cells accumulating, which is a thing you
+ * cannot break by having a bad week.
+ *
+ * Four signals carry which program day a cell was, because the encoding rules forbid leaning on
+ * hue and the palette only affords three hues anyway (see the --split-N-* block for the
+ * arithmetic). In order of how well each survives glare:
+ *
+ *   fill      a trained day is a lit slab, an untrained one is a bare numeral. Filled against not
+ *             filled is the chooser chip rule, and it is the signal doing the real work.
+ *   glyph     two letters, made unique inside the program, so Upper A and Upper B read UA and UB.
+ *   bar       a lit segment on the top edge, at a position set by the slot. Colour blind safe and
+ *             readable at a glance down a column.
+ *   colour    the face itself. Reinforcement, fourth of four.
+ */
+
+.consistency {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.consistency__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.consistency__title {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.consistency__total {
+  color: var(--text-secondary);
+  font-size: var(--t-body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An invitation, not an apology. This is the first view a brand new client gets of this screen. */
+.cal__empty-state {
+  margin: 0;
+  padding: var(--s-5) var(--s-4);
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  text-align: center;
+}
+
+.cal__nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.cal__step {
+  width: var(--tap);
+  padding: 0;
+  font-size: var(--t-sm);
+  line-height: 1;
+}
+
+/* Bleeds to the screen edge, same affordance as the lift scroller, and padded for the same reason
+ * that one is: overflow-x clips a focus ring, and the ring is 6px. */
+.cal__scroller {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(var(--s-4) * -1);
+  padding: var(--s-1) var(--s-4);
+  /* mandatory, not the proximity the chip rows use. Those snap partially visible pills; a month
+   * is a full panel and half of two months is not a thing anybody wants to be looking at. */
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: var(--s-4);
+}
+
+.cal__scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.cal__month {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  /* A year of history is twelve panels of 42 cells. This lets the browser skip layout for the
+   * eleven nobody is looking at. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.cal__grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: var(--s-1);
+  table-layout: fixed;
+}
+
+/* Seven columns and eight gutters have to fit 328px of content and still clear the 44px tap floor,
+ * which leaves 16px for the gutters. The gap is the thing that gives, because a cell under 44 is a
+ * cell somebody misses with a thumb.
+ *
+ * This lives here rather than in the narrow viewport block further up the file, because that block
+ * comes before these rules and the two selectors tie on specificity, so source order decides and
+ * the one up there quietly lost. */
+@media (max-width: 22.5rem) {
+  .cal__grid {
+    border-spacing: 2px;
+  }
+}
+
+.cal__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 0 var(--s-1) var(--s-2);
+  text-align: left;
+  caption-side: top;
+}
+
+.cal__monthname {
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 650;
+}
+
+.cal__count {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal__weekday {
+  padding-bottom: var(--s-1);
+  color: var(--muted);
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cal__weekday abbr {
+  text-decoration: none;
+}
+
+.cal__cell {
+  padding: 0;
+}
+
+/* A day nobody trained. The whole of it.
+ *
+ * The square comes from aspect-ratio on the contents rather than on the cell, because a table cell
+ * ignores it: a td's height is decided by its row. Seven of these fit a 360px viewport at roughly
+ * the 44px tap floor, which is why the grid is a month and not two. */
+.cal__empty,
+.cal__day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+}
+
+.cal__empty {
+  border: 1px solid color-mix(in srgb, var(--surface-raised) 55%, transparent);
+  color: var(--muted);
+}
+
+.cal__cell--outside {
+  /* A day belonging to the neighbouring month. Not a missed day, not this month's business. */
+  visibility: hidden;
+}
+
+.cal__date {
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* A trained day. The lit slab treatment from the chooser chips, in this day's own face.
+ *
+ * The gradient runs downward from the face, never upward, because the face is already this
+ * surface's contrast ceiling and --text-primary is measured against it. */
+.cal__day {
+  position: relative;
+  border: 1px solid var(--cal-rim);
+  background: linear-gradient(180deg, var(--cal-face) 0%, var(--cal-shade) 100%);
+  color: var(--text-primary);
+  font-family: var(--font);
+  cursor: pointer;
+  --glow-tint: color-mix(in srgb, var(--cal-rim) var(--glow-strength-rest), transparent);
+  box-shadow:
+    inset 0 1px 0 0 var(--cal-rim),
+    0 2px 6px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+  transition: transform 140ms ease;
+}
+
+.cal__day .cal__date {
+  color: var(--text-primary);
+  opacity: 0.72;
+}
+
+.cal__glyph {
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* Signal three: a lit segment on the top edge, positioned by slot. This is the channel that
+ * survives when the hues do not, which is the case for slot 3 against slot 4 and for anybody
+ * reading this with a colour vision deficiency. */
+.cal__day::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--cal-rim);
+  box-shadow: 0 0 8px 0 var(--glow-tint);
+}
+
+.is-slot-1 { --cal-face: var(--split-1-face); --cal-shade: var(--split-1-shade); --cal-rim: var(--split-1-rim); }
+.is-slot-2 { --cal-face: var(--split-2-face); --cal-shade: var(--split-2-shade); --cal-rim: var(--split-2-rim); }
+.is-slot-3 { --cal-face: var(--split-3-face); --cal-shade: var(--split-3-shade); --cal-rim: var(--split-3-rim); }
+.is-slot-4 { --cal-face: var(--split-4-face); --cal-shade: var(--split-4-shade); --cal-rim: var(--split-4-rim); }
+
+.cal__day.is-slot-1::before { left: 12%; right: 62%; }
+.cal__day.is-slot-2::before { left: 37%; right: 37%; }
+.cal__day.is-slot-3::before { left: 62%; right: 12%; }
+.cal__day.is-slot-4::before { left: 12%; right: 12%; }
+
+/* Pressed drops the gradient and goes flat with an inner shadow, so a press reads as physical
+ * rather than merely recoloured. Same rule as every other slab in the app. */
+.cal__day:active,
+.cal__day[aria-pressed='true'] {
+  background: var(--cal-shade);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  transform: translateY(1px);
+}
+
+/* Today. The numeral carries it, not a ring: a second ring beside the record ring, differing only
+ * in colour, is the hue-only encoding the rules forbid. */
+.cal__cell.is-today .cal__date {
+  color: var(--text-primary);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.cal__cell.is-today .cal__empty {
+  border-color: var(--surface-raised-rim);
+}
+
+/* A record. The one thing on this grid that is a claim rather than a record of attendance, and
+ * the only place --pr is allowed outside a chart.
+ *
+ * A ring and the celebrate glow, matching .chart__mark.is-record-ring exactly, because the same
+ * day is ringed on the line two screens down and the two must not look like different events. It
+ * is drawn OUTSIDE the cell rather than on its fill, so it does not fight the slot colour for the
+ * cell and so it never passes behind the glyph: the hard rule is that glow does not sit behind
+ * text, and the glyph is text. The word "record" is in the cell's label and under the month, so
+ * this is never colour on its own. */
+.cal__day.is-record {
+  --glow-tint: color-mix(in srgb, var(--pr) var(--glow-strength-celebrate), transparent);
+  box-shadow:
+    inset 0 1px 0 0 var(--cal-rim),
+    0 0 0 2px var(--pr),
+    0 0 var(--glow-radius-celebrate) 0 var(--glow-tint);
+}
+
+/* A record cannot fall on a deload, since progression.js will not let a back off week set one, so
+ * these two never have to be resolved against each other. */
+
+/* Two sessions in one day. A second mark rather than a second cell, because the day is the day. */
+.cal__twice {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  opacity: 0.7;
+}
+
+/* A planned back off week. Bracketed down the left, and the words are under the month, because a
+ * 40px cell has no room for them and the encoding rules make neither optional. */
+.cal__week.is-deload > .cal__cell:first-child {
+  box-shadow: inset 2px 0 0 -1px var(--deload);
+}
+
+.cal__week.is-deload .cal__day {
+  border-style: dashed;
+  filter: none;
+}
+
+.cal__note,
+.cal__detail {
+  margin: var(--s-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* Reserved, so tapping a day does not shift the grid out from under the finger that tapped it. */
+.cal__detail {
+  min-height: 2.5em;
+}
+
+.cal__detailday {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.cal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cal__key {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* The same slab, shrunk. A legend swatch that is not built the way the thing it explains is built
+ * is a legend that stops matching the first time either one is retuned. */
+.cal__keymark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border: 1px solid var(--cal-rim);
+  border-radius: 7px;
+  background: linear-gradient(180deg, var(--cal-face) 0%, var(--cal-shade) 100%);
+  box-shadow: inset 0 1px 0 0 var(--cal-rim);
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 700;
 }
 
 /* .lifts__item and .lifts__item.is-on are styled with the day picker, under chooser chips, so

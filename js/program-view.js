@@ -13,7 +13,7 @@
 // this file composes is the target line, and it is composed by targetLine() in js/program.js,
 // which is already the single source of that sentence for the logging screen and the builder.
 
-import { sortedDays, sortedItems, pickDay } from './snapshot.js';
+import { sortedDays, sortedItems, pickDay, dayTitle } from './snapshot.js';
 import { parseGroup, targetLine } from './program.js';
 import { weightLabel } from './units.js';
 
@@ -177,7 +177,7 @@ function renderRun(run, history) {
 
 function renderDay(day, history) {
   const runs = groupItems(day);
-  const heading = day.split || day.name || 'Untitled day';
+  const heading = dayTitle(day);
 
   return (
     `<article class="plan__day">` +
@@ -209,7 +209,7 @@ function renderChooser(snapshot, dayIndex) {
         return (
           `<button type="button" class="button-secondary daypicker__item${on ? ' is-on' : ''}" ` +
           `data-plan-day="${day.day_index}"${on ? ' aria-current="true"' : ''}>` +
-          `${esc(day.split || day.name)}</button>`
+          `${esc(dayTitle(day))}</button>`
         );
       })
       .join('') +

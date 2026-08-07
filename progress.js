@@ -9,6 +9,10 @@
 import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
+import { buildConsistency } from './js/consistency.js';
+import { renderConsistency, renderDetail, sessionLabel } from './js/consistency-view.js';
+import { activeSetLogs } from './js/history.js';
+import { isoDate, localDayOf } from './js/dates.js';
 import {
   unit,
   toDisplay,
@@ -27,7 +31,20 @@ import {
 } from './js/charts.js';
 
 const el = (id) => document.getElementById(id);
-const state = { storage: null, client: null, data: null, exerciseId: null, exercises: new Map() };
+const state = {
+  storage: null,
+  client: null,
+  data: null,
+  exerciseId: null,
+  exercises: new Map(),
+  // The consistency grid's own state. Held apart from the lift scoped fields above because it is
+  // built once and never rebuilt by render(), which runs on every unit toggle and every resize.
+  // Which month is showing is deliberately NOT here: the scroll position is that answer.
+  consistency: null,
+  assignments: new Map(),
+  sessionsByDay: new Map(),
+  logsBySession: new Map(),
+};
 
 function setCopy(id, text) {
   el(id).textContent = text;
@@ -184,6 +201,192 @@ function render() {
   );
 }
 
+// ------------------------------------------------------------------ consistency
+//
+// Mounted once and never redrawn by render(). Everything below the grid is scoped to one lift and
+// changes when you pick another one or flip the unit; the grid is client wide and changes when you
+// train. Rebuilding it on a unit toggle would throw away which month you had scrolled back to.
+
+/**
+ * How far one month panel is from the next, in scroll units.
+ *
+ * A panel is `flex: 0 0 100%` with no gap between panels, so one step is exactly the scroller's
+ * own content width. Nothing about a panel is measured here, and that is the point.
+ *
+ * Two earlier versions of this got it wrong in the same way, so it is worth naming the trap.
+ * Panels carry `content-visibility: auto`, so the ones off screen have not laid out when the grid
+ * first mounts: `getBoundingClientRect` on one returns a box that has not settled, and
+ * `scrollWidth` across all of them has not settled either. Either reading leaves the remembered
+ * month one panel ahead of the visible one, so the first tap of an arrow scrolls back to where it
+ * already was and the carousel looks broken. The scroller's own box is laid out immediately and
+ * cannot drift.
+ */
+function panelStep(scroller) {
+  const style = getComputedStyle(scroller);
+  const pad = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  return Math.max(1, scroller.clientWidth - pad);
+}
+
+/**
+ * Which month is in view right now, read off the scroller rather than remembered.
+ *
+ * There is deliberately no state field for this. Holding one meant two answers to the same
+ * question, and they came apart the first time the remembered one was written before layout had
+ * settled: the arrows then stepped from a month nobody was looking at, so the first tap scrolled
+ * to where the view already was and did nothing visible. A swipe does not tell us anything either,
+ * so there is nothing to keep in sync. The scroll position is the answer.
+ */
+function monthInView(scroller) {
+  const count = scroller.querySelectorAll('.cal__month').length;
+  const seen = Math.round(scroller.scrollLeft / panelStep(scroller));
+  return Math.max(0, Math.min(count - 1, seen));
+}
+
+function showMonth(scroller, index) {
+  const count = scroller.querySelectorAll('.cal__month').length;
+  const clamped = Math.max(0, Math.min(count - 1, index));
+
+  // scrollTo rather than scrollIntoView, which also scrolls the page vertically and would drag the
+  // charts up under the grid.
+  //
+  // The jump is instant, and that is a decision rather than a shortcut. A smooth behavior here is
+  // silently a no-op wherever the platform has smooth scrolling turned off, and the arrow then
+  // does nothing at all, which is a far worse failure than arriving without a glide. It also means
+  // there is no motion to suppress under prefers-reduced-motion. The tactile part of this control
+  // is the swipe, which keeps native momentum and snapping either way.
+  scroller.scrollTo({ left: clamped * panelStep(scroller), behavior: 'auto' });
+}
+
+/**
+ * Every session in which some lift beat everything before it.
+ *
+ * Runs buildProgression once per lift rather than deciding here what a record is, because
+ * js/progression.js already decides that for the charts, and a day ringed on the grid that is not
+ * ringed on the line two screens down is the app disagreeing with itself about the one moment this
+ * product exists to deliver.
+ *
+ * The rows are partitioned by exercise first and each lift is handed only its own. Passing the
+ * whole array to every call would be quadratic in a quiet way: activeSetLogs builds a Set over
+ * everything it is given, so ten lifts would mean ten passes over every set the client has logged.
+ */
+function recordSessions(sessions, logs) {
+  const byExercise = new Map();
+  for (const row of logs) {
+    if (!byExercise.has(row.exercise_id)) byExercise.set(row.exercise_id, []);
+    byExercise.get(row.exercise_id).push(row);
+  }
+
+  const assignments = [...state.assignments.values()];
+  const records = new Set();
+  for (const [exerciseId, rows] of byExercise) {
+    const progression = buildProgression({ setLogs: rows, sessions, assignments, exerciseId });
+    for (const point of progression.points) {
+      if (point.isRecord) records.add(point.sessionId);
+    }
+  }
+  return records;
+}
+
+/**
+ * Put the grid on its opening month, without animating there.
+ *
+ * Retries across frames rather than setting scrollLeft once, because the panels carry
+ * content-visibility and the scroller is not yet scrollable in the task that filled it: assigning
+ * scrollLeft before scrollWidth exceeds clientWidth silently clamps to zero, and the client opens
+ * on the wrong month with no error anywhere. Bounded, and it stops the moment the assignment
+ * sticks, so a client with one month never spins.
+ */
+function openOn(scroller, index) {
+  let tries = 0;
+  const place = () => {
+    scroller.scrollLeft = index * panelStep(scroller);
+    if (monthInView(scroller) !== index && tries < 10) {
+      tries += 1;
+      requestAnimationFrame(place);
+    }
+  };
+  place();
+}
+
+/** What one day held, composed when it is tapped rather than for all 42 cells up front. */
+function detailFor(day) {
+  const sessions = (state.sessionsByDay.get(day) ?? []).map((session) => {
+    const rows = state.logsBySession.get(session.id) ?? [];
+    const names = [];
+    for (const row of rows) {
+      const name = state.exercises.get(row.exercise_id)?.name;
+      if (name && !names.includes(name)) names.push(name);
+    }
+    return {
+      label: sessionLabel(state.assignments.get(session.assignment_id), session.day_index),
+      lifts: names,
+      setCount: rows.length,
+    };
+  });
+  return renderDetail({ day, sessions });
+}
+
+function mountConsistency(sessions, logs) {
+  // Warmups count here, unlike everywhere in progression.js. The question this grid answers is
+  // whether somebody trained, and a session that was all warmup and one working set is still a
+  // session they drove to. What does not count is a session holding no live rows at all.
+  const live = activeSetLogs(logs);
+  const sessionIds = new Set(sessions.map((s) => s.id));
+  const withWork = new Set();
+  state.logsBySession = new Map();
+  for (const row of live) {
+    if (!sessionIds.has(row.session_id)) continue;
+    withWork.add(row.session_id);
+    if (!state.logsBySession.has(row.session_id)) state.logsBySession.set(row.session_id, []);
+    state.logsBySession.get(row.session_id).push(row);
+  }
+
+  for (const session of sessions) {
+    if (!withWork.has(session.id)) continue;
+    const day = localDayOf(session.started_at);
+    if (!state.sessionsByDay.has(day)) state.sessionsByDay.set(day, []);
+    state.sessionsByDay.get(day).push(session);
+  }
+
+  state.consistency = buildConsistency({
+    sessions,
+    assignments: [...state.assignments.values()],
+    sessionIdsWithWork: withWork,
+    recordSessionIds: recordSessions(sessions, logs),
+    today: isoDate(new Date()),
+  });
+
+  const total = state.consistency.totalSessions;
+  el('consistency-total').textContent = total ? `${total} session${total === 1 ? '' : 's'}` : '';
+  el('consistency-body').innerHTML = renderConsistency(state.consistency);
+
+  const scroller = el('cal-scroller');
+  if (!scroller) return;
+
+  openOn(scroller, state.consistency.openAt);
+
+  el('consistency-body').addEventListener('click', (event) => {
+    const step = event.target.closest('[data-step]');
+    if (step) {
+      showMonth(scroller, monthInView(scroller) + Number(step.dataset.step));
+      return;
+    }
+    const cell = event.target.closest('[data-day]');
+    if (cell) {
+      const chosen = cell.getAttribute('aria-pressed') === 'true';
+      for (const other of scroller.querySelectorAll('[aria-pressed]')) other.removeAttribute('aria-pressed');
+      // Tapping the open day closes it, so the line is never stuck open on a day you left.
+      if (chosen) {
+        el('cal-detail').innerHTML = '';
+        return;
+      }
+      cell.setAttribute('aria-pressed', 'true');
+      el('cal-detail').innerHTML = detailFor(cell.dataset.day);
+    }
+  });
+
+}
+
 async function selectExercise(exerciseId) {
   state.exerciseId = exerciseId;
   const sessions = await state.storage.query('sessions', { client_id: state.client.id }, { orderBy: 'started_at' });
@@ -256,6 +459,14 @@ async function main() {
     if (!sessionIds.has(row.session_id) || row.is_warmup) continue;
     done.set(row.exercise_id, (done.get(row.exercise_id) ?? 0) + 1);
   }
+
+  // Before the lift picker's early return, deliberately. A brand new client and a client whose
+  // only rows are warmups both fall out below, and they are exactly who this grid is for: it is
+  // the only thing on this screen that can say anything at all before there are two sessions of
+  // one lift to compare.
+  const assignments = await storage.query('assignments', { client_id: state.client.id });
+  state.assignments = new Map(assignments.map((a) => [a.id, a]));
+  mountConsistency(sessions, logs);
 
   state.liftList = [...done.keys()]
     .map((id) => state.exercises.get(id))

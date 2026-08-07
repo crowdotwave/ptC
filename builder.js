@@ -19,6 +19,7 @@ import { buildSnapshot, currentAssignment, pickDay, sortedDays, sortedItems } fr
 import { mountProgramView, repaintProgramView, WARMUP_KINDS, NO_PROGRAM_YET } from './js/program-view.js';
 import { topSet } from './js/history.js';
 import { weekIndexOf } from './js/progression.js';
+import { isoDate } from './js/dates.js';
 import { loadUnit, mountUnitSwitch, onUnitChange, viewerName, canSetUnit } from './js/units.js';
 import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
@@ -364,11 +365,6 @@ function showPreview() {
 }
 
 // ------------------------------------------------------------------ assigning
-
-const isoDate = (date) => {
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
 
 /** What this client is on right now, said the way a trainer would say it out loud. */
 function standingLine(assignment, templateId) {

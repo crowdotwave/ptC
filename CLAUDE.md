@@ -351,9 +351,65 @@ So in charts colour only tints. Weight and shape carry the meaning:
 | a value that improved | `--progress` | 3px, solid |
 | a record | `--pr` | filled dot with a 2px ring, plus the celebration glow |
 
+`--pr` has one home outside a chart: a day on the consistency grid where some lift beat everything
+before it. It is drawn as the same ring with the same glow, sitting outside the cell rather than on
+its fill, and the word "record" is in the cell's label and under the month. What a record is stays
+decided in one place, `js/progression.js`, and the grid is handed the answer rather than working it
+out again. A day ringed on the grid and not on the line two screens down would be the app
+disagreeing with itself about the one moment this product exists to deliver.
+
 No hue means "planned". `--deload` can only keep a back off week quiet and clearly not an
 alarm. The dashed stroke and the words are what make it read as intentional, so neither is
 optional.
+
+### Split identity, on the consistency grid
+
+The grid says which program day each session was. That needs a categorical palette, which is a
+thing this token set did not have, and the note above caps the cyan ladder at six with a warning
+that a seventh forces a real trade. This does not spend that budget, and the reason is worth
+stating because it is the whole design: **these are surface faces, not data tokens.** A calendar
+cell is a slab in the ground role saying which kind of day this was, never how much of anything
+there was, so it cannot compete for the meaning cyan owns. `--split-N-face`, `-shade` and `-rim`
+inherit the lit slab treatment unchanged.
+
+They are fenced the way `--done` is fenced: the grid and its legend, and nowhere else. Never a
+chart, never a control, never text.
+
+**Luminance is a ceiling here, not a fixed point, and that is the one rule these break with
+`--surface-raised`.** That token pins luminance for two reasons: `--text-primary` must clear 7:1 on
+it, and two surfaces must separate 2.51 from base so they tell apart under glare on the stepper.
+Only the first applies to a cell, which is told apart from black by its own rim rather than from a
+neighbouring surface. So the rule is `Y <= 0.0801`, the exact 7:1 boundary, with a soft floor near
+`Y = 0.030`.
+
+Holding `Y` fixed across these hues was worked out on paper and is wrong, which is worth recording
+because the arithmetic looks so clean. sRGB blue's primary is `Y 0.0722` and green's is `0.7152`,
+so an isoluminant set at the `--surface-raised` value of `0.0755` gives a near primary blue beside
+a near black olive, and Helmholtz-Kohlrausch widens the gap the eye sees beyond the gap the numbers
+show. Matching them means capping every face at the chroma the green can reach, which lands back on
+the desaturated `#46505C` that read as unpainted chrome. The ceiling buys a 1.27x range instead.
+
+**The palette affords three hues, not six.** After excluding cyan 190 +/- 40, orange 22 +/- 40,
+`--done` at 147, `--deload` at 224 (measured, not the 240 it looks like) and the ground at 272,
+what survives is roughly 62 to 122, 297 to 342, and a narrow 230 to 262. Slots 1 and 2 take the two
+widest apart, because a two day upper/lower split is the common case. Slot 4 is deliberately
+colourless and is also the overflow, so a six day program puts days four through six in it. A near
+neutral is what this file rejected for the ground; a single cell meaning "no colour left for this
+one" is a different job, and it measures better than the alternative, which was two saturated faces
+24 degrees apart.
+
+**Four channels, and hue is the fourth.** A trained day fills where an untrained one does not,
+carries a two letter glyph made unique inside its own program (Upper A and Upper B become UA and
+UB, never U and U), carries a lit bar on its top edge at a slot determined position, and only then
+carries a colour. Fill against no fill is the signal doing the real work, same as the chooser chips.
+
+**The no-streak rule survives this and is not softened by it.** A consistency grid is not
+permission to add a streak. There is no streak count, no adherence ratio, no missed day count, and
+no marker for a session that was due and did not happen. A day nobody trained is a numeral on
+black, and `buildConsistency` returns no field a caller could render as a failure. The grid opens on
+the last month with work in it rather than on an empty current month, which scrolls to work that
+was done rather than to space where work was not. The satisfaction is meant to come from cells
+accumulating, which is a thing a bad week cannot break.
 
 ### Glow
 
@@ -413,7 +469,9 @@ a real client has a few blocks logged and the progress screens can be developed 
 3. Supabase project, schema, RLS policies, isolation test.
 4. Swap adapter to Supabase. Auth via magic link.
 5. Trainer view: client list, program builder, per-client progression.
-6. Consistency grid and charts.
+6. Consistency grid and charts. Done. `js/consistency.js` builds it, `js/consistency-view.js`
+   draws it, and it leads the progress screen. It is the first client wide thing on that screen,
+   which is why it holds the h1 and the lift name below it is an h2.
 7. Payment log and CSV export.
 8. Export cards.
 

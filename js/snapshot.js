@@ -76,7 +76,7 @@ export function buildSnapshot({ template, days, items, exercises }) {
               // Named by where it is on the sheet, not by the id it holds. The person reading
               // this has the table open and needs to find one row in it, and a uuid is the one
               // piece of this they cannot search for.
-              const where = day.split || day.name || `Day ${day.day_index + 1}`;
+              const where = dayTitle(day);
               const which = item.group_label || `row ${item.order_index + 1}`;
               throw new Error(
                 `${where}, ${which} names an exercise that is no longer in the library. ` +
@@ -123,6 +123,23 @@ export function sortedDays(snapshot) {
 /** The exercises of one day, in the order the trainer put them in. */
 export function sortedItems(day) {
   return [...(day?.items ?? [])].sort((a, b) => a.order_index - b.order_index);
+}
+
+/**
+ * What to call a day, in the trainer's own words where they gave any.
+ *
+ * The split first, because that is what the trainer scans for and what the day picker on the
+ * logging screen shows. The name second, since the builder writes 'Day 3' into it by default and
+ * an importer writes it for a table with no header above it. The position last, because
+ * `template_days.name` is nullable and every other fallback can be empty.
+ *
+ * Pulled into one place because this expression existed four times with three different endings:
+ * the snapshot error path stopped at `Day N`, the program view said 'Untitled day', and the two
+ * day pickers had no fallback at all and would render a chip with nothing written on it. A chooser
+ * where one option is blank is the same failure the chooser chips were unified to prevent.
+ */
+export function dayTitle(day) {
+  return day?.split || day?.name || `Day ${(day?.day_index ?? 0) + 1}`;
 }
 
 /**
