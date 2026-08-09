@@ -260,6 +260,11 @@ async function main() {
       `sync: remote=${result.remote} pushed=${result.pushed} pulled=${result.pulled} pending=${result.pending}`,
       'dim',
     );
+    // A blocked push returns before pull runs, so an outbox entry the server keeps refusing
+    // stops every incoming row from arriving and does it silently: boot.js swallows this same
+    // result on any device that already has data. Printing it is the difference between a
+    // diagnosable stall and an app that has quietly stopped receiving anything.
+    if (result.error) line(`sync error: ${result.error}`, 'fail');
     await renderCounts(storage);
   });
 }
