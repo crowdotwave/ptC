@@ -5,6 +5,7 @@ import { openStorage, makeRecord, newId, getDeviceId } from './js/storage.js';
 import { TABLE_NAMES } from './js/schema.js';
 import { seed, isSeeded, getDefaultClientId } from './js/seed.js';
 import { activeSetLogs, epley1rm } from './js/history.js';
+import { loadSessions } from './js/session.js';
 
 const logEl = document.getElementById('log');
 const statusEl = document.getElementById('adapter-status');
@@ -184,7 +185,7 @@ async function runAdapterCheck(storage) {
 /** Proves the seeded history is chart shaped, not just row shaped. */
 async function reportHistory(storage) {
   const client = await storage.get('clients', await getDefaultClientId(storage));
-  const sessions = await storage.query('sessions', { client_id: client.id }, { orderBy: 'started_at' });
+  const sessions = await loadSessions(storage, client.id);
   if (!sessions.length) return;
 
   const sessionIds = new Set(sessions.map((s) => s.id));

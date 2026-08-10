@@ -195,6 +195,10 @@ export const TABLES = {
       started_at: { type: TS },
       completed_at: { type: TS, nullable: true },
       client_note: { type: TEXT, nullable: true },
+      // Thrown away by the client. set_logs cannot be deleted, so a discard retracts every set in
+      // the session and marks the session here. Null means live, and every read outside the
+      // session history filters on it: see js/session.js and 0011.
+      discarded_at: { type: TS, nullable: true },
     },
   },
 

@@ -25,7 +25,16 @@ import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { planForItem, setCountOf, countOf } from './js/plan.js';
-import { openSession, replaySession, RESUME_WINDOW_MS } from './js/session.js';
+import {
+  openSession,
+  replaySession,
+  RESUME_WINDOW_MS,
+  live,
+  // js/import-program.js already exports a summarise, for a workbook rather than a session.
+  summarise as summariseSessions,
+  retractionOf,
+} from './js/session.js';
+import { renderHistory, summaryLine, discardedMessage } from './js/session-view.js';
 
 const results = [];
 
@@ -2274,6 +2283,170 @@ test('replay leaves the plan it was handed alone', () => {
   const plan = planOf();
   replaySession(plan, [done({ id: 'd', set_index: 3, is_extra: true })]);
   eq(plan.length, 5, 'the caller still holds what it passed in');
+});
+
+// ------------------------------------------------------------------ throwing a session away
+//
+// js/session.js and js/session-view.js. set_logs cannot be deleted: no delete grant, no delete
+// policy, an on delete restrict foreign key, and an adapter that refuses. So a discard retracts
+// every set and marks the session, and the marker is the part that carries weight, because two
+// things in this app read session rows rather than set rows and would otherwise go on counting a
+// workout nobody did.
+
+const hist = (over = {}) => ({
+  id: 'h1',
+  client_id: 'c1',
+  assignment_id: 'a1',
+  day_index: 0,
+  started_at: '2026-08-09T18:00:00.000Z',
+  completed_at: '2026-08-09T19:00:00.000Z',
+  discarded_at: null,
+  ...over,
+});
+
+test('a discarded session is not one of the sessions that happened', () => {
+  const rows = [hist({ id: 'a' }), hist({ id: 'b', discarded_at: '2026-08-09T20:00:00.000Z' })];
+  eq(live(rows).map((r) => r.id), ['a']);
+});
+
+test('live tolerates nothing at all', () => {
+  eq(live([]), []);
+  eq(live(undefined), []);
+  eq(live(null), []);
+});
+
+test('a discarded session cannot be resumed, however recent', () => {
+  const open = hist({ completed_at: null, discarded_at: '2026-08-09T18:30:00.000Z' });
+  eq(openSession([open], { now: AT }), null, 'or discarding one would strand the day picker on it');
+});
+
+// retractionOf writes a real row through makeRecord, which validates, so these need actual uuids
+// where the readable ids the rest of this file uses would do. That is the point of it: a
+// retraction is a row this database has to accept, not a marker in memory.
+const uu = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const realRow = (n, over = {}) =>
+  row({ id: uu(n), session_id: uu(900), exercise_id: uu(901), ...over });
+
+test('a retraction mirrors the row it takes back rather than zeroing it', () => {
+  const original = realRow(1, { weight_kg: 90, reps: 7, is_warmup: true, is_extra: true });
+  const back = retractionOf(original);
+  eq(back.supersedes_id, uu(1));
+  eq(back.is_void, true);
+  eq(back.weight_kg, 90, 'the audit trail is the reason this table is append only');
+  eq(back.reps, 7);
+  eq(back.is_warmup, true);
+  eq(back.is_extra, true);
+  ok(back.id !== uu(1), 'and it is a new row, never an edit of the old one');
+});
+
+test('a retraction carries whichever of the three count columns the original had', () => {
+  const held = retractionOf(realRow(2, { reps: null, hold_seconds: 40 }));
+  eq(held.reps, null);
+  eq(held.hold_seconds, 40);
+  const circuit = retractionOf(realRow(3, { reps: null, rounds: 5 }));
+  eq(circuit.rounds, 5);
+  eq(circuit.hold_seconds, null);
+});
+
+test('retracting every set of a session leaves nothing that counts and loses no rows', () => {
+  const sets = [realRow(4), realRow(5, { set_index: 1 }), realRow(6, { set_index: 2 })];
+  const after = [...sets, ...sets.map(retractionOf)];
+  eq(activeSetLogs(after).length, 0, 'no chart, record or prefill can see it');
+  eq(after.length, 6, 'and every original is still on disk');
+});
+
+// ---- the list itself
+
+const summarised = (sessions, logs) => summariseSessions(sessions, logs, (s) => `Day ${s.day_index + 1}`);
+
+test('the history list is newest first', () => {
+  const rows = [
+    hist({ id: 'old', started_at: '2026-08-01T18:00:00.000Z' }),
+    hist({ id: 'new', started_at: '2026-08-09T18:00:00.000Z' }),
+  ];
+  eq(summarised(rows, []).map((e) => e.id), ['new', 'old']);
+});
+
+test('a discarded session is not in the history list either', () => {
+  const rows = [hist({ id: 'a' }), hist({ id: 'b', discarded_at: '2026-08-09T20:00:00.000Z' })];
+  eq(summarised(rows, []).map((e) => e.id), ['a']);
+});
+
+test('working sets and warmups are counted apart, never folded together', () => {
+  const logs = [
+    row({ id: 'w', session_id: 'h1', is_warmup: true }),
+    row({ id: 'a', session_id: 'h1', set_index: 1 }),
+    row({ id: 'b', session_id: 'h1', set_index: 2 }),
+  ];
+  const entry = summarised([hist()], logs)[0];
+  eq(entry.sets, 2);
+  eq(entry.warmups, 1);
+  eq(summaryLine(entry), '2 sets, 1 warmup', 'folding them in is the one way this could overstate');
+});
+
+test('a retracted set is not counted in the summary', () => {
+  const logged = realRow(7, { session_id: 'h1' });
+  const entry = summarised([hist()], [logged, retractionOf({ ...logged, session_id: uu(900) })])[0];
+  eq(entry.sets, 0);
+  eq(summaryLine(entry), 'Nothing logged');
+});
+
+test('a session still being logged says so rather than looking half written', () => {
+  const entry = summarised([hist({ completed_at: null })], [])[0];
+  eq(entry.isOpen, true);
+  ok(renderHistory([entry]).includes('still open'), 'in words, never in a colour');
+});
+
+test('the day is named from the assignment the session was logged against', () => {
+  const labelled = summariseSessions([hist({ day_index: 2 })], [], (s) => `named ${s.day_index}`);
+  eq(labelled[0].label, 'named 2', 'so an old session keeps the name it had at the time');
+});
+
+test('an empty history invites rather than apologises', () => {
+  const html = renderHistory([]);
+  ok(html.includes('Sessions appear here'), html);
+  ok(!/sorry|no sessions|nothing yet/i.test(html), 'and does not apologise');
+});
+
+test('discard takes two taps, and the second one is not there until the first', () => {
+  const entry = summarised([hist()], [])[0];
+  const resting = renderHistory([entry]);
+  eq((resting.match(/data-act="discard"/g) || []).length, 0, 'nothing commits on one tap');
+  ok(resting.includes('data-act="arm"'));
+
+  const armed = renderHistory([entry], { armedId: entry.id });
+  ok(armed.includes('data-act="discard"'), 'the second tap exists only once armed');
+  ok(armed.includes('data-act="keep"'), 'and so does the way out of it');
+});
+
+test('only the armed row offers to commit', () => {
+  const entries = summarised([hist({ id: 'a' }), hist({ id: 'b', started_at: '2026-08-08T18:00:00.000Z' })], []);
+  const html = renderHistory(entries, { armedId: 'a' });
+  eq((html.match(/data-act="discard"/g) || []).length, 1, 'two armed rows is two ways to tap wrong');
+});
+
+test('a trainer typed label cannot inject markup into the list', () => {
+  const nasty = summariseSessions([hist()], [], () => '<img src=x onerror=alert(1)>')[0];
+  const html = renderHistory([nasty], { armedId: nasty.id });
+  ok(!html.includes('<img'), html.slice(0, 160));
+  ok(html.includes('&lt;img'), 'escaped, not stripped');
+});
+
+test('the list says how much further back it goes rather than paging', () => {
+  const many = summarised(
+    Array.from({ length: 34 }, (_, i) => hist({ id: `s${i}`, started_at: `2026-07-${String(i + 1).padStart(2, '0')}T18:00:00.000Z` })),
+    [],
+  );
+  const html = renderHistory(many, { limit: 30 });
+  eq((html.match(/data-session=/g) || []).length, 30);
+  ok(html.includes('4 older sessions not shown'), html.slice(-120));
+});
+
+test('the acknowledgement names what was given up, not only that something was', () => {
+  const entry = summarised([hist()], [])[0];
+  ok(discardedMessage(entry, 12).includes('12 sets taken back'));
+  ok(discardedMessage(entry, 1).includes('1 set taken back'));
+  ok(discardedMessage(entry, 0).includes('nothing was logged in it'));
 });
 
 // ------------------------------------------------------------------ report

@@ -18,6 +18,7 @@ import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } 
 import { buildSnapshot, currentAssignment, pickDay, sortedDays, sortedItems } from './js/snapshot.js';
 import { mountProgramView, repaintProgramView, WARMUP_KINDS, NO_PROGRAM_YET } from './js/program-view.js';
 import { topSet } from './js/history.js';
+import { loadSessions } from './js/session.js';
 import { weekIndexOf } from './js/progression.js';
 import { isoDate } from './js/dates.js';
 import { loadUnit, mountUnitSwitch, onUnitChange, viewerName, canSetUnit } from './js/units.js';
@@ -293,8 +294,10 @@ async function showMine(storage, clientId) {
     return;
   }
 
-  // Ordered oldest first, the way pickDay expects and the way the logging screen asks for them.
-  const sessions = await storage.query('sessions', { client_id: clientId }, { orderBy: 'started_at' });
+  // Oldest first and discarded ones left out, the way pickDay expects and the way the logging
+  // screen asks for them. Through js/session.js so this preview cannot disagree with the screen
+  // it is previewing.
+  const sessions = await loadSessions(storage, clientId);
 
   el('mine-note').textContent = assignmentNote(assignment);
   const history = await loadHistory(storage, sessions, assignment.snapshot);

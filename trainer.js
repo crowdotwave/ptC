@@ -10,6 +10,7 @@ import { mountShell } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
 import { activeSetLogs } from './js/history.js';
+import { loadSessions } from './js/session.js';
 import { unit, toDisplay, weightLabel, loadUnit, mountUnitSwitch, onUnitChange } from './js/units.js';
 
 const el = (id) => document.getElementById(id);
@@ -140,7 +141,7 @@ function renderDeloadSuggestion() {
 
 async function selectExercise(exerciseId) {
   state.exerciseId = exerciseId;
-  const sessions = await state.storage.query('sessions', { client_id: state.client.id }, { orderBy: 'started_at' });
+  const sessions = await loadSessions(state.storage, state.client.id);
   const assignments = await state.storage.query('assignments', { client_id: state.client.id });
   const setLogs = await state.storage.query('set_logs', { exercise_id: exerciseId });
   state.data = buildProgression({ setLogs, sessions, assignments, exerciseId });
@@ -166,7 +167,7 @@ async function openClient(clientId) {
   el('list-view').hidden = true;
   el('detail-view').hidden = false;
 
-  const sessions = await state.storage.query('sessions', { client_id: clientId });
+  const sessions = await loadSessions(state.storage, clientId);
   const sessionIds = new Set(sessions.map((s) => s.id));
   const logs = await state.storage.query('set_logs', {});
   const done = new Set();
@@ -245,7 +246,7 @@ async function main() {
 
   state.clients = await Promise.all(
     clients.map(async (client) => {
-      const sessions = await storage.query('sessions', { client_id: client.id }, { orderBy: 'started_at' });
+      const sessions = await loadSessions(storage, client.id);
       const assignments = await storage.query('assignments', { client_id: client.id });
       const last = sessions.length ? sessions[sessions.length - 1].started_at : null;
       return {

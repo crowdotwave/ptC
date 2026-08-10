@@ -538,6 +538,7 @@ export async function seed(storage, { force = false } = {}) {
               started_at: iso(startedAt),
               completed_at: iso(completedAt),
               client_note: rand() < 0.2 ? pickNote() : null,
+              discarded_at: null,
             },
             { id: sessionId, created_at: iso(new Date(startedAt.getTime() + writeDelayMs)) },
           ),

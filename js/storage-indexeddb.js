@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 9;
+export const DB_VERSION = 10;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -216,6 +216,19 @@ const MIGRATIONS = [
         Number.isFinite(row.reps) && !Number.isInteger(row.reps)
           ? { ...row, reps: Math.max(1, Math.floor(row.reps)) }
           : row,
+      );
+    },
+  },
+  {
+    version: 10,
+    describe: 'add sessions.discarded_at so a session can be thrown away without a delete',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Null means live, and everything already on disk is live. The backfill is still required
+      // rather than cosmetic: the validator throws on a missing column, so the next write of an
+      // old session row, which is what completing or reopening one is, would fail without it.
+      rewriteRows(tx, 'sessions', (row) =>
+        row.discarded_at === undefined ? { ...row, discarded_at: null } : row,
       );
     },
   },

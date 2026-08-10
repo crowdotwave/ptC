@@ -2433,6 +2433,112 @@ button.navlink:disabled {
 /* Signing out is something you do once, when a bug happens. It gets the last line on the page
  * and the quietest type on it, and only the screens that already scroll carry one. The logging
  * screen must never scroll, so it has none: anyone who can reach it can reach Progress. */
+/* The session history list.
+ *
+ * The plainest block on this screen, on purpose. The consistency grid above it is what this
+ * screen is for, and it spends the entire categorical palette saying so: filled slabs, lit rims,
+ * slot hues, a ring on a record. This is the maintenance view underneath it, reached by scrolling
+ * past the work, and it uses no colour at all. A row is text and a button. If it ever wants a
+ * slot face or a glyph, that is a sign it is trying to be the calendar, which already exists two
+ * sections up and is better at it.
+ *
+ * Nothing here is red. Discard is the most destructive thing a client can do in this app, and it
+ * still does not get an alarm colour: the palette has one green for a finished session and no red
+ * at all, and the confirmation is carried by the second tap and by the word "Discard" sitting
+ * where "Keep" was not a moment ago. That is shape and position and words, which is what the
+ * encoding rules ask for. */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+}
+
+.history__title {
+  margin: 0;
+  font-size: var(--t-body);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--tap);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--surface-raised);
+}
+
+.history__what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Takes the slack so the control keeps its own width and the rows line up down the right
+     edge, which is what makes a column of buttons scannable rather than ragged. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.history__day {
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 650;
+  /* A split label is free text a trainer typed, so it can be long. Truncating beats wrapping a
+     three line row on a 360px phone. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history__when,
+.history__sets {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.history__arm,
+.history__keep,
+.history__go {
+  flex: 0 0 auto;
+  min-height: var(--tap);
+}
+
+/* Both choices are the same size and the same colour. Making Discard smaller or quieter than
+   Keep would be the layout nudging somebody toward one answer, and this app does not know which
+   answer is right: only the person who did or did not do the workout does. */
+.history__confirm {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--s-2);
+}
+
+/* The armed row is the one being decided about, so it is the one that is legible. The others
+   stay put rather than dimming, because dimming a list to highlight one row is a modal wearing
+   different clothes. */
+.history__row.is-armed .history__day {
+  color: var(--text-primary);
+}
+
+.history__empty,
+.history__more,
+.history__said {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-small);
+}
+
+.history__said:empty {
+  display: none;
+}
+
 .account {
   display: flex;
   align-items: center;

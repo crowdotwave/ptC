@@ -78,6 +78,17 @@
         <p class="chart__caption" id="second-caption"></p>
       </section>
 
+      <!-- Below the charts, because it is the maintenance view rather than the point of this
+           screen. Somebody comes here to fix a mis-tap, and that is worth reaching by scrolling
+           past the work rather than by scrolling past it to reach the work. -->
+      <section class="history" id="history" aria-labelledby="history-title" hidden>
+        <div class="history__head">
+          <h3 class="history__title" id="history-title">Session history</h3>
+        </div>
+        <div id="history-body"></div>
+        <p class="history__said" id="history-said" role="status" aria-live="polite"></p>
+      </section>
+
       <!-- Who you are signed in as, and the way out. Last thing on the page, in the quietest
            type on it, because signing out is something you do once when a bug happens. -->
       <footer class="account">

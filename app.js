@@ -20,7 +20,7 @@ import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
-import { openSession, replaySession } from './js/session.js';
+import { openSession, replaySession, loadSessions } from './js/session.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import {
   unit,
@@ -137,7 +137,7 @@ async function loadClientData(storage, clientId) {
   // Shared with the Programs tab, so the two screens cannot disagree about which program this
   // person is on.
   const assignment = await currentAssignment(storage, clientId);
-  const sessions = await storage.query('sessions', { client_id: clientId }, { orderBy: 'started_at' });
+  const sessions = await loadSessions(storage, clientId);
   return { client, assignment, sessions };
 }
 
@@ -394,6 +394,7 @@ function ensureSessionRecord() {
     started_at: new Date().toISOString(),
     completed_at: null,
     client_note: null,
+    discarded_at: null,
   });
   return state.sessionRecord;
 }
@@ -779,11 +780,7 @@ async function chooseDay(dayIndex) {
     if (state.sessionWritten) write(() => state.storage.put('sessions', moved));
   }
 
-  const sessions = await state.storage.query(
-    'sessions',
-    { client_id: state.client.id },
-    { orderBy: 'started_at' },
-  );
+  const sessions = await loadSessions(state.storage, state.client.id);
   // Only reachable with nothing logged, so there is nothing to replay. The session row can still
   // exist, if every set in it was undone, and it stays excluded for the same reason as on load.
   state.plan = await buildPlan(state.storage, picked, sessions, {

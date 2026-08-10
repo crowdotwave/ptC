@@ -15,6 +15,35 @@
 // went out.
 
 import { activeSetLogs, epley1rm } from './history.js';
+import { makeRecord, getDeviceId } from './storage.js';
+
+/**
+ * The sessions that still happened.
+ *
+ * A discarded session is not a session with nothing in it, and the difference is the reason
+ * `discarded_at` exists rather than the app inferring emptiness from the set rows. Two places
+ * cannot tell them apart from the rows alone: `pickDay` advances the rotation from the last
+ * session, and the consistency grid draws a filled cell for one. Both would go on treating a
+ * thrown away workout as a workout that happened.
+ *
+ * Every read of `sessions` outside the history list goes through here or through `loadSessions`.
+ * A new call site that does neither is a bug, and it will present as a discarded session quietly
+ * counting again somewhere.
+ */
+export function live(sessions) {
+  return (sessions ?? []).filter((session) => !session.discarded_at);
+}
+
+/**
+ * Every session that still happened, for one client, oldest first.
+ *
+ * Oldest first because `pickDay` reads the last one, and ordering that in the caller is exactly
+ * the kind of thing that gets it right on three screens and wrong on the fourth.
+ */
+export async function loadSessions(storage, clientId) {
+  const rows = await storage.query('sessions', { client_id: clientId }, { orderBy: 'started_at' });
+  return live(rows);
+}
 
 /**
  * How long an unfinished session stays resumable.
@@ -38,7 +67,7 @@ export const RESUME_WINDOW_MS = 6 * 60 * 60 * 1000;
  */
 export function openSession(sessions, { now = Date.now(), within = RESUME_WINDOW_MS } = {}) {
   let best = null;
-  for (const session of sessions ?? []) {
+  for (const session of live(sessions)) {
     if (session.completed_at) continue;
     const started = Date.parse(session.started_at);
     // An unparseable timestamp is not a session anybody is in. Treating it as open would pin the
@@ -152,4 +181,105 @@ export function replaySession(plan, rows, best = new Map()) {
 /** The second number on a row, whichever of the three columns is carrying it. */
 function countOf(row) {
   return row.reps ?? row.rounds ?? row.hold_seconds ?? 0;
+}
+
+/**
+ * The row that takes a set back.
+ *
+ * A new row pointing at the one it cancels, marked void. Not an edit and not a delete: set_logs
+ * has no update or delete path anywhere, from the adapter down to the grant.
+ *
+ * It mirrors the values it is retracting rather than zeroing them. Neither row counts once
+ * `is_void` is set, so those numbers change nothing anywhere, and a retraction that had forgotten
+ * what it was retracting would be a worse record than no retraction at all. Keeping them is the
+ * reason this table is append only in the first place.
+ */
+export function retractionOf(row) {
+  return makeRecord('set_logs', {
+    session_id: row.session_id,
+    exercise_id: row.exercise_id,
+    set_index: row.set_index,
+    weight_kg: row.weight_kg,
+    reps: row.reps ?? null,
+    rounds: row.rounds ?? null,
+    hold_seconds: row.hold_seconds ?? null,
+    rpe: row.rpe ?? null,
+    is_warmup: row.is_warmup === true,
+    logged_at: new Date().toISOString(),
+    supersedes_id: row.id,
+    is_void: true,
+    is_extra: row.is_extra === true,
+    device_id: getDeviceId(),
+  });
+}
+
+/**
+ * Throws a session away.
+ *
+ * Undo, applied to a whole session. Every set that still counts gets a retraction, and then the
+ * session is marked so that the two things which read session rows rather than set rows, the day
+ * rotation and the consistency grid, stop counting it too.
+ *
+ * The order is retractions first and the marker last, and it matters for the same reason the
+ * outbox is causally ordered: a device that dies halfway leaves a live session with some sets
+ * retracted, which is a state the app already handles, rather than a discarded session still
+ * holding sets that count, which is a workout that has vanished from every screen while still
+ * feeding every chart.
+ *
+ * Returns the number of sets taken back, because the acknowledgement should say what was actually
+ * given up rather than only that something was.
+ */
+export async function discardSession(storage, session) {
+  const rows = await storage.query('set_logs', { session_id: session.id });
+  const stillCount = activeSetLogs(rows);
+
+  for (const row of stillCount) {
+    await storage.put('set_logs', retractionOf(row));
+  }
+
+  await storage.put('sessions', {
+    ...session,
+    discarded_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  return stillCount.length;
+}
+
+/**
+ * One line per session, newest first, for the history list.
+ *
+ * Counts working sets and warmups separately, because they are separate everywhere else in this
+ * app and a session summary that reported nine sets where three were warmups would be the only
+ * screen that disagreed.
+ *
+ * `label` is the trainer's own name for that day, resolved from the assignment the session was
+ * logged against rather than from the current one. A client who changed programs last month still
+ * reads last month's sessions under the names they had at the time, which is the same rule the
+ * consistency grid follows and the same reason `assignments.snapshot` is frozen.
+ */
+export function summarise(sessions, setLogs, labelFor) {
+  const bySession = new Map();
+  for (const row of activeSetLogs(setLogs)) {
+    if (!bySession.has(row.session_id)) bySession.set(row.session_id, []);
+    bySession.get(row.session_id).push(row);
+  }
+
+  return live(sessions)
+    .slice()
+    .sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))
+    .map((session) => {
+      const rows = bySession.get(session.id) ?? [];
+      const working = rows.filter((row) => !row.is_warmup);
+      return {
+        id: session.id,
+        startedAt: session.started_at,
+        label: labelFor ? labelFor(session) : `Day ${session.day_index + 1}`,
+        sets: working.length,
+        warmups: rows.length - working.length,
+        // An open session is not an unfinished one to apologise for, it is one somebody may still
+        // be in. The list says so rather than leaving a session that looks half written.
+        isOpen: !session.completed_at,
+      };
+    });
 }

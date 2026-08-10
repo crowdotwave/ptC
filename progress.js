@@ -12,7 +12,8 @@ import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';
 import { renderConsistency, renderDetail, sessionLabel } from './js/consistency-view.js';
 import { activeSetLogs } from './js/history.js';
-import { openSession } from './js/session.js';
+import { openSession, loadSessions, summarise, discardSession } from './js/session.js';
+import { renderHistory, discardedMessage } from './js/session-view.js';
 import { isoDate, localDayOf } from './js/dates.js';
 import {
   unit,
@@ -45,6 +46,10 @@ const state = {
   assignments: new Map(),
   sessionsByDay: new Map(),
   logsBySession: new Map(),
+  // The session history list. `armed` is the session whose Discard has been tapped once, held
+  // here rather than in the markup so a redraw cannot lose or invent it.
+  history: [],
+  armed: null,
 };
 
 function setCopy(id, text) {
@@ -388,9 +393,108 @@ function mountConsistency(sessions, logs) {
 
 }
 
+// ------------------------------------------------------------------ session history
+//
+// Shown to the person whose training it is, and to nobody else. A trainer reading a client with
+// ?client= sees their charts and their calendar and gets no control over what is in them: 0011
+// gives the update policy to the client alone, so a Discard button on a trainer's screen would be
+// a button that could only ever fail. The one person who can throw away the record of a workout
+// is the person who did it.
+
+const SAID_KEY = 'ptc.history.said';
+
+function drawHistory() {
+  el('history-body').innerHTML = renderHistory(state.history, { armedId: state.armed });
+}
+
+/**
+ * Throws a session away, then reloads the screen.
+ *
+ * A reload rather than a redraw, deliberately, and it is the one place in this app that reaches
+ * for one. Discarding a session can empty a lift out of the picker entirely, change which month
+ * the calendar should open on, move a personal record, and change every chart on the page. This
+ * screen derives all of that once on load, into four maps that render() does not rebuild, so a
+ * partial redraw here would be a second, quieter copy of main() that has to be kept in step with
+ * it forever. The action is rare and deliberate and the person has already tapped twice.
+ *
+ * The acknowledgement has to outlive the reload, so it goes through sessionStorage. Saying
+ * nothing would be worse than the reload itself: a page that blinks and comes back with one row
+ * missing does not tell somebody their sets were retracted rather than deleted.
+ */
+async function discard(entry) {
+  const session = state.sessionsById.get(entry.id);
+  if (!session) return;
+
+  let setsTaken;
+  try {
+    setsTaken = await discardSession(state.storage, session);
+  } catch (error) {
+    // Said, and the row put back the way it was. A button left reading "Discarding" forever is
+    // the worst outcome available here: the session is still there, so the person will try again,
+    // and they have no way to know whether the first attempt half happened. Retractions are
+    // written one at a time and each is idempotent by id, so trying again is safe.
+    state.armed = null;
+    drawHistory();
+    el('history-said').textContent = `That session is still here. ${error.message}`;
+    return;
+  }
+
+  try {
+    sessionStorage.setItem(SAID_KEY, discardedMessage(entry, setsTaken));
+  } catch {
+    // Private mode with storage denied. The discard still happened, which is the part that
+    // matters, and the row being gone is its own acknowledgement.
+  }
+  location.reload();
+}
+
+function mountHistory(sessions, logs) {
+  state.sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  state.history = summarise(sessions, logs, (session) =>
+    sessionLabel(state.assignments.get(session.assignment_id), session.day_index),
+  );
+
+  el('history').hidden = false;
+  drawHistory();
+
+  try {
+    const said = sessionStorage.getItem(SAID_KEY);
+    if (said) {
+      el('history-said').textContent = said;
+      sessionStorage.removeItem(SAID_KEY);
+    }
+  } catch {
+    // Nothing to say, which is the same as having nothing to say.
+  }
+
+  el('history-body').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-act]');
+    if (!button) return;
+    const row = button.closest('[data-session]');
+    if (!row) return;
+    const entry = state.history.find((item) => item.id === row.dataset.session);
+    if (!entry) return;
+
+    if (button.dataset.act === 'arm') {
+      // One at a time. Two armed rows is two ways to tap the wrong one.
+      state.armed = entry.id;
+      drawHistory();
+      return;
+    }
+    if (button.dataset.act === 'keep') {
+      state.armed = null;
+      drawHistory();
+      return;
+    }
+    button.disabled = true;
+    button.textContent = 'Discarding';
+    discard(entry);
+  });
+}
+
 async function selectExercise(exerciseId) {
   state.exerciseId = exerciseId;
-  const sessions = await state.storage.query('sessions', { client_id: state.client.id }, { orderBy: 'started_at' });
+  const sessions = await loadSessions(state.storage, state.client.id);
   const assignments = await state.storage.query('assignments', { client_id: state.client.id });
   const setLogs = await state.storage.query('set_logs', { exercise_id: exerciseId });
   state.data = buildProgression({ setLogs, sessions, assignments, exerciseId });
@@ -437,7 +541,7 @@ async function main() {
   // screen, so it would be an invitation to walk into somebody else's set.
   const open =
     state.client.id === actor?.clientId
-      ? openSession(await storage.query('sessions', { client_id: state.client.id }))
+      ? openSession(await loadSessions(storage, state.client.id))
       : null;
   if (open) {
     const resume = el('resume');
@@ -461,7 +565,7 @@ async function main() {
   for (const ex of exercises) state.exercises.set(ex.id, ex);
 
   // Only lifts this client has actually done. An empty picker entry is a dead end.
-  const sessions = await storage.query('sessions', { client_id: state.client.id });
+  const sessions = await loadSessions(storage, state.client.id);
   const sessionIds = new Set(sessions.map((s) => s.id));
   const logs = await storage.query('set_logs', {});
   const done = new Map();
@@ -477,6 +581,11 @@ async function main() {
   const assignments = await storage.query('assignments', { client_id: state.client.id });
   state.assignments = new Map(assignments.map((a) => [a.id, a]));
   mountConsistency(sessions, logs);
+
+  // After the assignments map, which the labels are resolved from, and before the lift picker's
+  // early return: a client whose only rows are warmups still has sessions worth listing, and is
+  // exactly the person most likely to want to throw one away.
+  if (state.client.id === actor?.clientId) mountHistory(sessions, logs);
 
   state.liftList = [...done.keys()]
     .map((id) => state.exercises.get(id))

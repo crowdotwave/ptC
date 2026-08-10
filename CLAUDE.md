@@ -68,6 +68,32 @@ storage.sync()                    // flush local queue to remote, pull remote ch
   gives a free audit trail.
 - Conflict resolution elsewhere is last-write-wins on `updated_at`.
 
+### Throwing a session away
+
+Append-only is not negotiable, and it is enforced in three independent places: 0002 grants only
+`select, insert` on `set_logs` and writes no update or delete policy, 0001 declares
+`set_logs.session_id references sessions on delete restrict`, and the adapter refuses `delete()`
+against any table marked `appendOnly`. A change that relaxes one of these to make deletion simpler
+is a proposal to make a client's logged history editable by whoever holds the session row. Read it
+that way before agreeing to it.
+
+So a client throwing away a session is not a delete. It is undo applied to a whole session: a
+retraction row per set that still counts, then `sessions.discarded_at`. `js/session.js`
+`discardSession` does it, retractions first and the marker last, so a device that dies halfway
+leaves a live session with some sets retracted rather than a vanished session still feeding every
+chart.
+
+**`discarded_at` exists because two things read session rows rather than set rows.** Everything
+that reads `set_logs` through `activeSetLogs` already ignores a retracted session for free. The
+day rotation in `pickDay` and the consistency grid do not: one would keep advancing the day picker
+past a workout nobody did, the other would keep drawing a filled cell for it. So every read of
+`sessions` goes through `js/session.js`, `live()` or `loadSessions()`, and a call site that queries
+the table directly is a bug. It will present as a discarded session quietly counting again on one
+screen and not on the others.
+
+Discard is offered to the client and to nobody else, including the trainer reading with `?client=`.
+That is not a UI decision, it is what the policies allow.
+
 ## Schema
 
 All tables have `id uuid primary key` and `created_at timestamptz not null default now()`.
@@ -136,6 +162,8 @@ sessions
   started_at timestamptz
   completed_at timestamptz null
   client_note text null
+  discarded_at timestamptz null  -- thrown away by the client. set_logs cannot be deleted, so a
+                                 -- discard retracts every set and marks the session here
 
 set_logs                      -- APPEND ONLY
   session_id uuid -> sessions.id
@@ -201,6 +229,8 @@ cannot name the policy that permits it, that is the finding rather than a formal
 | --- | --- | --- | --- |
 | `sessions` | logging screen | the client | `sessions_client_all` |
 | `set_logs` | logging screen | the client | `set_logs_client_insert`, insert only |
+| `sessions` | progress screen, on discard | the client | `sessions_client_all` |
+| `set_logs` | progress screen, on discard | the client | `set_logs_client_insert`, insert only |
 | `program_templates` | builder, importer | the trainer | `program_templates_trainer_all` |
 | `template_days` | builder, importer | the trainer | `template_days_trainer_all` |
 | `template_items` | builder, importer | the trainer | `template_items_trainer_all` |
@@ -210,9 +240,16 @@ cannot name the policy that permits it, that is the finding rather than a formal
 | `clients` | unit switch | **the client, their own row** | `clients_self_update`, update only |
 | `trainers` | unit switch | **the trainer, their own row** | `trainers_update`, update only |
 
-The last two rows are why this table exists. Everything else has one writer and one policy. Those
-two are written by a second person under a second policy, and both of those policies permit an
-update and nothing else.
+The two `clients`/`trainers` unit switch rows are why this table exists. Everything else has one
+writer and one policy. Those two are written by a second person under a second policy, and both of
+those policies permit an update and nothing else.
+
+The two discard rows are the second reason to keep reading it. They add no policy and no grant:
+discarding a session is an update to a row the client already owns and an insert of set rows the
+client is already allowed to insert. A trainer holds `sessions_trainer_select`, which is select
+only, so a trainer cannot discard a client's session. The one person who can throw away the record
+of a workout is the person who did it, and that is enforced by the absence of a policy rather than
+by the absence of a button.
 
 **So `clients` and `trainers` may never be written with an upsert.** PostgREST sends an upsert as
 `INSERT ... ON CONFLICT DO UPDATE`, and Postgres validates the insert policy's `with check` before
