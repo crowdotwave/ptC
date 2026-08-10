@@ -24,7 +24,7 @@ import { tokenFromLink } from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
-import { planForItem, setCountOf, countOf } from './js/plan.js';
+import { planForItem, setCountOf, countOf, nextSteppers } from './js/plan.js';
 import {
   openSession,
   replaySession,
@@ -2143,6 +2143,87 @@ test('the carried numbers are the ones the screen would have to type otherwise',
   ok(entries.every((e) => e.weightKg === 60 && e.reps === 12), 'every set is one tap');
 });
 
+// ------------------------------------------------------------------ what the steppers keep
+//
+// js/plan.js nextSteppers. The plan prefills every set from last session, which is right for the
+// first set of a lift and wrong for every set after it once somebody has changed something.
+//
+// Taking the next entry's number unconditionally meant an adjustment survived exactly one tap.
+// Measured on a real workout, on a first ever lift where every set opens at the deliberately too
+// light fallback: Horizontal Row logged 40 lb, then 5.5, then 5.5, then 5.5. The client corrected
+// set one and the app threw the correction away three times.
+
+const stepEntry = (over = {}) => ({
+  item: { exercise_id: 'squat' },
+  isWarmup: false,
+  weightKg: 60,
+  reps: 10,
+  ...over,
+});
+
+test('a weight the client moved carries to the next set of the same lift', () => {
+  const from = stepEntry({ weightKg: 2.5 });
+  const next = stepEntry({ weightKg: 2.5 });
+  eq(nextSteppers({ weightKg: 18.144, reps: 8 }, from, next).weightKg, 18.144);
+});
+
+test('the real workout that produced this rule now reads the same weight four times', () => {
+  // Four sets of a lift with no history, so every planned entry is the opening fallback.
+  const plan = planForItem(
+    planItem({ exercise_id: 'row', target_sets: 4, target_reps_low: 8 }),
+    null,
+    { kg: 2.5, source: 'lightest' },
+  );
+  let carried = { weightKg: 18.144, reps: 8 };
+  const logged = [carried.weightKg];
+  for (let i = 0; i + 1 < plan.length; i += 1) {
+    carried = nextSteppers(carried, plan[i], plan[i + 1]);
+    logged.push(carried.weightKg);
+  }
+  eq(logged, [18.144, 18.144, 18.144, 18.144], 'and not 40, 5.5, 5.5, 5.5 in pounds');
+});
+
+test('a number left alone still steps to what the plan asked for next', () => {
+  // A ramp from last session has to survive, or repeating a session stops being one tap a set.
+  const from = stepEntry({ weightKg: 60 });
+  const next = stepEntry({ weightKg: 65 });
+  eq(nextSteppers({ weightKg: 60, reps: 10 }, from, next).weightKg, 65);
+});
+
+test('changing a number and changing it back counts as leaving it alone', () => {
+  const from = stepEntry({ weightKg: 60 });
+  const next = stepEntry({ weightKg: 65 });
+  eq(nextSteppers({ weightKg: 60, reps: 10 }, from, next).weightKg, 65, 'because that is what it looks like');
+});
+
+test('weight and reps are decided apart', () => {
+  const from = stepEntry({ weightKg: 60, reps: 12 });
+  const next = stepEntry({ weightKg: 65, reps: 12 });
+  const out = nextSteppers({ weightKg: 60, reps: 9 }, from, next);
+  eq(out.weightKg, 65, 'the load was not touched, so the plan still decides it');
+  eq(out.reps, 9, 'the reps were, so they carry');
+});
+
+test('nothing carries into a different lift', () => {
+  const from = stepEntry({ item: { exercise_id: 'bench' }, weightKg: 100 });
+  const next = stepEntry({ item: { exercise_id: 'lateral-raise' }, weightKg: 7.5 });
+  eq(nextSteppers({ weightKg: 120, reps: 5 }, from, next).weightKg, 7.5);
+});
+
+test('a warmup never sets the load for the working sets', () => {
+  const from = stepEntry({ isWarmup: true, weightKg: 40 });
+  const next = stepEntry({ isWarmup: false, weightKg: 100 });
+  eq(
+    nextSteppers({ weightKg: 45, reps: 5 }, from, next).weightKg,
+    100,
+    'or the app talks somebody down off their working weight',
+  );
+});
+
+test('the last set of the day moves no steppers at all', () => {
+  eq(nextSteppers({ weightKg: 60, reps: 10 }, stepEntry(), null), null);
+});
+
 // ------------------------------------------------------------------ picking a session back up
 //
 // js/session.js. A phone locks, a tab is discarded, somebody checks Progress between sets. The
@@ -2444,9 +2525,12 @@ test('the list says how much further back it goes rather than paging', () => {
 
 test('the acknowledgement names what was given up, not only that something was', () => {
   const entry = summarised([hist()], [])[0];
-  ok(discardedMessage(entry, 12).includes('12 sets taken back'));
-  ok(discardedMessage(entry, 1).includes('1 set taken back'));
-  ok(discardedMessage(entry, 0).includes('nothing was logged in it'));
+  ok(discardedMessage(entry, 12).includes('12 sets taken back.'));
+  ok(discardedMessage(entry, 1).includes('1 set taken back.'));
+  ok(discardedMessage(entry, 0).includes('Nothing was logged in it.'));
+  // Both halves are sentences, so the second one starts like one. This shipped reading
+  // "Aug 5, 2026. nothing was logged in it." on a real discard.
+  ok(!/\. [a-z]/.test(discardedMessage(entry, 0)), discardedMessage(entry, 0));
 });
 
 // ------------------------------------------------------------------ report

@@ -276,6 +276,16 @@ Requirements:
   Logging an identical set is a single tap.
 - Adjusting weight or reps is a tap on a stepper, not a keyboard. Keyboard is the fallback,
   never the default.
+- **An adjustment survives the next tap.** A number the client moved this session carries to the
+  rest of that lift; a number they left alone steps to whatever the plan asked for next, so a ramp
+  from last session still repeats in one tap a set. Taking the next entry's number unconditionally
+  meant a correction lasted exactly one set: measured on a real workout, a first ever lift logged
+  40 lb, then 5.5, 5.5, 5.5, because with no history every set opens at the deliberately light
+  fallback and only the first one got fixed. The carry stops at the lift, and at the boundary
+  between warmups and working sets, since carrying a warmup's load into the first working set is
+  the app talking somebody down off their working weight. `nextSteppers` in `js/plan.js` owns it,
+  and the resume path goes through the same function so a locked phone does not undo the
+  adjustment the way logging a set used to.
 - Rest timer starts automatically on set completion and is visible without scrolling. It does not
   survive the end of the session: the summary card replaces it rather than sharing a screen with
   it, because a countdown next to "Session logged" is telling somebody to get ready for a set that

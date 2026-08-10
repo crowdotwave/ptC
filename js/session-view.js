@@ -105,10 +105,16 @@ export function renderHistory(entries, { armedId = null, limit = 30 } = {}) {
   );
 }
 
-/** What to say after a discard. Names what was given up, because that is what was at stake. */
+/**
+ * What to say after a discard. Names what was given up, because that is what was at stake.
+ *
+ * Both halves are sentences and the second one starts a new one, so it is capitalised. This read
+ * "Aug 5, 2026. nothing was logged in it." on a real discard, which is the kind of seam that makes
+ * a sentence look assembled rather than written.
+ */
 export function discardedMessage(entry, setsTaken) {
   const what = setsTaken
-    ? `${setsTaken} ${setsTaken === 1 ? 'set' : 'sets'} taken back`
-    : 'nothing was logged in it';
-  return `Discarded ${entry.label}, ${stamp(entry.startedAt)}. ${what}.`;
+    ? `${setsTaken} ${setsTaken === 1 ? 'set' : 'sets'} taken back.`
+    : 'Nothing was logged in it.';
+  return `Discarded ${entry.label}, ${stamp(entry.startedAt)}. ${what}`;
 }

@@ -23,6 +23,43 @@ export function countOf(row) {
 }
 
 /**
+ * What the steppers read after a set is logged.
+ *
+ * The plan prefills each set from last session, which is right for the first set of a lift and
+ * wrong for every set after it once the client has changed something. Taking the next entry's
+ * number unconditionally meant a deliberate adjustment survived exactly one tap: set one logged at
+ * 40 lb, set two back at the opening weight, and the client re-doing the same correction three
+ * more times. Measured on a real workout, a first ever lift logged 40, 5.5, 5.5, 5.5 pounds,
+ * because with no history every set opens at the deliberately too light fallback and only the
+ * first one got fixed.
+ *
+ * So a number the client moved this session beats a number from last session, and a number they
+ * left alone does not. That second half is what keeps a ramp intact: last session's 60, 65, 70
+ * still steps 60, 65, 70 when it is being repeated, because nothing was moved. Comparing against
+ * what the plan asked for, rather than tracking whether the stepper was touched, means changing a
+ * number and changing it back is the same as never touching it, which is what it looks like.
+ *
+ * Weight and reps are decided separately. Dropping the reps on a set says nothing about the load.
+ *
+ * The carry stops at the lift, and at the boundary between warmups and working sets. Carrying a
+ * warmup's load into the first working set would be the app talking somebody down off their
+ * working weight, which is the one direction the prefill rules are careful never to err in.
+ */
+export function nextSteppers(logged, from, next) {
+  if (!next) return null;
+
+  const continues =
+    Boolean(from) &&
+    next.item.exercise_id === from.item.exercise_id &&
+    next.isWarmup === from.isWarmup;
+
+  return {
+    weightKg: continues && logged.weightKg !== from.weightKg ? logged.weightKg : next.weightKg,
+    reps: continues && logged.reps !== from.reps ? logged.reps : next.reps,
+  };
+}
+
+/**
  * How many sets this item prescribes.
  *
  * `target_sets` is nullable: an importer writes null for a workbook cell reading NA, and the

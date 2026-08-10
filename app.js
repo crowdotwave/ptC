@@ -17,7 +17,7 @@ import { mountShell } from './js/nav.js';
 import { lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
-import { planForItem } from './js/plan.js';
+import { planForItem, nextSteppers } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
@@ -451,11 +451,15 @@ function logSet() {
   const isPr = !entry.isWarmup && previousBest !== null && achieved > previousBest;
   if (isPr) state.best.set(entry.item.exercise_id, achieved);
 
+  // What was actually on the bar, before the cursor moves off the set it belongs to.
+  const justLogged = { weightKg: state.weightKg, reps: state.reps };
+
   state.cursor += 1;
   const next = currentEntry();
-  if (next) {
-    state.weightKg = next.weightKg;
-    state.reps = next.reps;
+  const steppers = nextSteppers(justLogged, entry, next);
+  if (steppers) {
+    state.weightKg = steppers.weightKg;
+    state.reps = steppers.reps;
   }
 
   // Only when there is something to rest for. The last set of the day is followed by the summary,
@@ -939,8 +943,16 @@ async function main() {
 
   const first = state.plan[state.cursor];
   if (first) {
-    state.weightKg = first.weightKg;
-    state.reps = first.reps;
+    // Through the same rule a tap on Log set goes through, so a locked phone does not undo an
+    // adjustment the way logging a set used to. The last row of a resumed session is the set that
+    // would have moved the steppers, and the entry it was logged against is what says whether it
+    // moved them.
+    const last = state.logged[state.logged.length - 1];
+    const steppers = last
+      ? nextSteppers(last, state.plan[last.planIndex], first)
+      : { weightKg: first.weightKg, reps: first.reps };
+    state.weightKg = steppers.weightKg;
+    state.reps = steppers.reps;
   }
 
   renderDayPicker(snapshot, sessions);
