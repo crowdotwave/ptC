@@ -315,6 +315,21 @@ Requirements:
 - `pickDay` advances the rotation from the last session, and a session exists the moment the first
   set is logged. So anything that reloads mid workout has to check for an open session first, or
   back and chest becomes shoulders.
+- **The order of the lifts is the trainer's intent, not a queue.** A rack is taken or somebody is
+  sitting on the machine, so the lift that comes next is routinely not the lift that can be done
+  next. The whole day is one tap from the logging screen, from a chip top left carrying the day's
+  name and the position in it, and any lift with sets owed is one tap from there. The panel is a
+  state of the screen rather than a layer over it: no focus trap, no z-index, no outside click
+  handler, and the rest timer stays where it is, because a countdown you have to dismiss something
+  to read has stopped doing its job. `js/workout-view.js` builds the list and `app.js` owns the
+  moving.
+- **So a cursor walking forward is not the model any more.** Every planned set carries a status,
+  a session ends when nothing is pending rather than when the cursor runs off the end of the plan,
+  and the undo stack holds the entries themselves rather than their positions, because adding a set
+  to a lift somebody came back to shifts every position after it. `js/session.js` `replaySession`
+  matches each row to its own seat wherever that sits: it used to search forward from the cursor,
+  which meant bench before squat and then a locked phone came back with two copies of every squat
+  set and the real ones reading as never done.
 - Undo the last logged set is always available for the duration of the session, including after a
   reload, and including for sets logged before it.
 - Adding a set is one tap and appends to the lift the client is on, prefilled from wherever the
@@ -331,10 +346,20 @@ Requirements:
   writes no set rows, because nothing was performed and absence is the truthful record.
   It is not a failure state: no warning colour, no badge, no running count of what was
   missed, no prompt asking why, and no offer to reschedule it. The acknowledgement names the
-  lift the client is now on, not the one they left.
+  lift the client is now on, not the one they left. **Skip means move me on now, not never.** It
+  was permanent for the length of a session only because a cursor could not turn round, and a lift
+  that was skipped reads on the list exactly like one nobody has reached, because that is the only
+  difference between them a client would ever need told. Tapping it puts those sets back.
+- **A lift stepped away from carries its own way back**, named and counted, for as long as it still
+  owes sets. It shares the notice band and outranks anything neutral being said there, because two
+  stacked rows is what pushes this screen into scrolling on a short phone, and the header is
+  already saying what a neutral message would confirm. A refused write outranks both: that one is
+  the only place the app says a set is on this device alone.
 - Ending a session early is always available and closes the session with whatever was logged.
   The summary reports what was done and never what was not. A session with two lifts in it is
-  a session, not a partial one.
+  a session, not a partial one. It sits in the workout panel rather than in the row of secondary
+  actions: it is used once, it was a thumb's width from Undo, and that row has no confirmation
+  anywhere in it by design.
 - No confirmation dialogs anywhere in the logging flow. That includes skip and end session:
   both are reachable by undo or by simply training again, so neither is worth a dialog.
 
@@ -438,7 +463,11 @@ picker today, is a row of pill chips: unselected is a hollow outline on pitch bl
 is filled with the raised surface gradient plus its rim, a 700 weight label, and a glow. Fill
 against no fill is the signal that survives colour blindness, glare, and a glance from arm's
 length, so it is the one carrying the state. Colour is reinforcement and never the whole
-signal. Both rows share one rule in `styles.css` under "chooser chips" so they cannot drift:
+signal. The workout panel is the same rule at a different size: the lift being done fills with
+the same gradient and rim while the rest are hollow, and the word "Now" carries it a second time.
+Filling is also what separates pressable from not there, since a lift with every set logged has
+nowhere to go and so gets no fall of light at all. Both chip rows share one rule in `styles.css`
+under "chooser chips" so they cannot drift:
 they were previously styled apart, and one of them shipped with no visible selected state at
 all while the other encoded it in two colours and nothing else.
 

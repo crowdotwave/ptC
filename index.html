@@ -15,9 +15,26 @@
   </head>
   <body>
     <main class="screen">
-      <!-- Top third. Nothing here is interactive: on a 6.7 inch phone held in one hand this
-           band is out of the thumb's reach, so it carries reading material only. -->
+      <!-- Top third. Reading material, with one control in it: the way into the whole workout.
+           On a 6.7 inch phone this band is out of the reach of the thumb of the hand holding it,
+           which is why nothing here logs a set, and why the one control that is here is a between
+           sets decision made with the other hand. -->
       <header class="context">
+        <!-- Top left, and the entry to everything about today: which day it is, which lift is
+             which, and the way to any of them. It replaces the day picker that used to sit lower
+             in this header, which was a full row of chips that went inert the moment the first set
+             was logged, since a day cannot be changed underneath sets already filed against it.
+             Those chips now live inside the panel this opens, where they are still one tap from
+             the start of a session and no longer spend a band of the screen for the rest of it. -->
+        <button class="dayjump" type="button" id="day-jump" hidden aria-expanded="false" aria-controls="overview">
+          <span class="dayjump__day" id="day-jump-label">&nbsp;</span>
+          <span class="dayjump__dot" aria-hidden="true">&middot;</span>
+          <span class="dayjump__pos num" id="day-jump-pos"></span>
+          <svg class="dayjump__glyph" viewBox="0 0 20 20" aria-hidden="true" fill="none"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 8l5 5 5-5" />
+          </svg>
+        </button>
         <h1 class="context__exercise" id="exercise-name">&nbsp;</h1>
         <!-- The unit switch sits in the header corner, in flow, so it neither floats over the
              resume bar nor competes with the day picker for the width of a phone. On this line
@@ -27,9 +44,6 @@
           <p class="context__set num" id="set-position">&nbsp;</p>
           <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
-        <!-- The client picks the day. A five day rotation is not done in order, so guessing
-             from the last session and offering no way to change it is wrong. -->
-        <nav class="daypicker" id="day-picker" aria-label="Choose today's session"></nav>
         <p class="context__target" id="target">&nbsp;</p>
         <p class="context__last num" id="last-time">&nbsp;</p>
         <p class="pr" id="pr-chip" hidden>Personal record</p>
@@ -46,26 +60,58 @@
 
       <p class="notice" id="notice" hidden role="status"></p>
 
+      <!-- The lift left behind, while it still has sets owed. The machine being busy is the
+           reason to move on and the reason to come back, so the way back is a control rather than
+           a memory. It says the lift by name and how much of it is left, because that is what the
+           decision to go back is made on. -->
+      <div class="returnbar" id="return-bar" hidden>
+        <button type="button" class="button-secondary" id="return-to"></button>
+      </div>
+
       <section class="done" id="done" hidden>
         <h2 class="done__title" id="done-title">Session logged.</h2>
         <p class="done__stat num" id="done-stat"></p>
       </section>
 
+      <!-- The whole workout, and the way to any lift in it. A state of this screen rather than a
+           layer over it: the app has no modal anywhere, and the two it did have were both removed
+           for costing a focus trap, an outside click handler, an escape handler and a z-index to
+           hold what a mode holds for free. The rest timer stays below it and keeps running, since
+           the countdown is about the client's body and not about which lift they are looking at. -->
+      <section class="worknav" id="overview" hidden aria-label="This workout">
+        <header class="worknav__head">
+          <h2 class="worknav__day" id="overview-title"></h2>
+          <p class="worknav__pos num" id="overview-pos"></p>
+        </header>
+        <!-- The client picks the day. A five day rotation is not done in order, so guessing from
+             the last session and offering no way to change it is wrong. Only before the first set:
+             after that the session row is already filed under a day. -->
+        <nav class="daypicker" id="day-picker" aria-label="Choose today's session"></nav>
+        <div class="worknav__scroll" id="overview-body"></div>
+        <div class="worknav__foot">
+          <!-- Ending a session is once per session and irreversible only in the sense that undo
+               reopens it. It sat in the thumb arc between Add set and Undo, which is the busiest
+               row on the screen and has no confirmation anywhere in it by design. Here it costs
+               one deliberate tap to reach and cannot be caught by a thumb aiming at Undo. -->
+          <button type="button" class="button-secondary" id="end">End session</button>
+        </div>
+      </section>
+
+      <!-- The remaining rest is a track along the bottom edge, never a fill behind the
+           numerals. See the comment on .rest in styles.css for why. Outside .controls so that
+           the overview can take the screen without taking the countdown with it. -->
+      <div class="rest" id="rest" data-state="idle">
+        <span class="rest__label" id="rest-label">Rest</span>
+        <span class="rest__time num" id="rest-time" role="timer" aria-live="off">0:00</span>
+        <span class="rest__track" aria-hidden="true"><span class="rest__fill" id="rest-fill"></span></span>
+      </div>
+
       <!-- Bottom third, inside the thumb arc. The biggest number on the screen and the place
            the thumb goes are not the same place, so the log action sits lowest. -->
       <div class="controls" id="controls">
-        <!-- The remaining rest is a track along the bottom edge, never a fill behind the
-             numerals. See the comment on .rest in styles.css for why. -->
-        <div class="rest" id="rest" data-state="idle">
-          <span class="rest__label" id="rest-label">Rest</span>
-          <span class="rest__time num" id="rest-time" role="timer" aria-live="off">0:00</span>
-          <span class="rest__track" aria-hidden="true"><span class="rest__fill" id="rest-fill"></span></span>
-        </div>
-
         <div class="secondary">
           <button type="button" class="button-secondary" id="add-set">Add set</button>
           <button type="button" class="button-secondary" id="skip">Skip lift</button>
-          <button type="button" class="button-secondary" id="end">End session</button>
           <button type="button" class="button-secondary" id="type-toggle">Type</button>
           <button type="button" class="button-secondary" id="undo" disabled>Undo</button>
         </div>

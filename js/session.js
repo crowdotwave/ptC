@@ -97,42 +97,50 @@ export function openSession(sessions, { now = Date.now(), within = RESUME_WINDOW
  *
  * Returns a plan rather than mutating the one passed in, because extra sets logged before the
  * interruption have to be put back into it.
+ *
+ * THE WALK IS NOT FORWARD ONLY, and it used to be. Each row was matched against the plan from the
+ * cursor onward, which quietly encoded an assumption the logging screen no longer makes: that the
+ * lifts get done in the order they are written. Now that a client can move to any lift and back,
+ * bench before squat and then a locked phone would have found no seat for the squat rows ahead of
+ * the cursor, filed them as sets added by hand, and handed back a plan carrying two copies of
+ * every squat set with the real ones still showing as never done. Rows claim their own seat
+ * wherever it sits, and a seat is claimed once.
  */
 export function replaySession(plan, rows, best = new Map()) {
   const next = [...plan];
   const logged = [];
-  let cursor = 0;
+  const claimed = new Set();
+  let last = null;
 
   // logged_at rather than created_at: it records when the set actually happened, which is the
-  // order the client did them in and therefore the order the cursor walked the plan.
+  // order the client did them in and therefore where they were when the lights went out.
   const ordered = [...activeSetLogs(rows)].sort((a, b) =>
     String(a.logged_at).localeCompare(String(b.logged_at)),
   );
 
   for (const row of ordered) {
-    let at = next.findIndex(
-      (entry, index) =>
-        index >= cursor &&
-        entry.item.exercise_id === row.exercise_id &&
-        entry.setIndex === row.set_index,
+    let entry = next.find(
+      (candidate) =>
+        !claimed.has(candidate) &&
+        candidate.item.exercise_id === row.exercise_id &&
+        candidate.setIndex === row.set_index,
     );
 
-    if (at === -1) {
+    if (!entry) {
       // Not in the plan, so it was added with Add set. Put it back where addSet would have put
       // it, after the last set of its own lift, so the plan reads the way it did at the time.
-      const template = next.find((entry) => entry.item.exercise_id === row.exercise_id);
+      const template = next.find((candidate) => candidate.item.exercise_id === row.exercise_id);
       // A lift that is not in this day at all. Only reachable if the program changed underneath
       // an open session, and there is nowhere honest to put the row, so it is left out of the
       // walk rather than guessed at. The row itself is untouched and still counts everywhere.
       if (!template) continue;
 
-      let insertAt = next.reduce(
-        (last, entry, index) => (entry.item.exercise_id === row.exercise_id ? index + 1 : last),
-        cursor,
+      const insertAt = next.reduce(
+        (at, candidate, index) => (candidate.item.exercise_id === row.exercise_id ? index + 1 : at),
+        0,
       );
-      if (insertAt < cursor) insertAt = cursor;
 
-      next.splice(insertAt, 0, {
+      entry = {
         item: template.item,
         setIndex: row.set_index,
         isWarmup: row.is_warmup === true,
@@ -144,21 +152,24 @@ export function replaySession(plan, rows, best = new Map()) {
         lastReps: null,
         lastOn: null,
         openingSource: null,
-      });
-      at = insertAt;
+      };
+      next.splice(insertAt, 0, entry);
     }
 
-    const entry = next[at];
-    const reps = countOf(row);
+    claimed.add(entry);
+    last = entry;
     const previousBest = best.get(row.exercise_id) ?? null;
 
     logged.push({
       id: row.id,
-      planIndex: at,
+      // The entry itself rather than its index. Indexes move: an extra set added to a lift the
+      // client came back to shifts every entry after it, and an undo stack holding stale numbers
+      // would take back the wrong set. Identity cannot go stale.
+      entry,
       exerciseId: row.exercise_id,
       setIndex: row.set_index,
       weightKg: row.weight_kg,
-      reps,
+      reps: countOf(row),
       logMode: entry.logMode,
       isWarmup: row.is_warmup === true,
       isExtra: row.is_extra === true,
@@ -171,11 +182,27 @@ export function replaySession(plan, rows, best = new Map()) {
       const achieved = epley1rm(row.weight_kg, row.reps);
       if (previousBest !== null && achieved > previousBest) best.set(row.exercise_id, achieved);
     }
-
-    cursor = at + 1;
   }
 
-  return { plan: next, logged, cursor, best };
+  return { plan: next, logged, cursor: resumeAt(next, claimed, last), best };
+}
+
+/**
+ * The set to open on after a reload: the one after whatever was logged last.
+ *
+ * Not the first unlogged set in the day. A lift the client stepped past is unlogged and stays
+ * unlogged, and dropping them back on it would undo the decision they made before the phone
+ * locked. Where they were is what they were doing.
+ *
+ * Wrapping to the top is the last resort, for a client who was working through the day backwards.
+ * Nothing left anywhere means the day is done, and the plan length is what the screen reads as
+ * that.
+ */
+function resumeAt(plan, claimed, last) {
+  const from = last ? plan.indexOf(last) + 1 : 0;
+  for (let i = from; i < plan.length; i += 1) if (!claimed.has(plan[i])) return i;
+  for (let i = 0; i < from; i += 1) if (!claimed.has(plan[i])) return i;
+  return plan.length;
 }
 
 /** The second number on a row, whichever of the three columns is carrying it. */

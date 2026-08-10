@@ -687,8 +687,308 @@ button {
     0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
-/* Secondary actions. Skip and end session are ordinary controls here, deliberately styled the
- * same as type and undo. Nothing about a skipped lift gets a warning colour. */
+/* ---------------------------------------------------------------- the day, top left
+ *
+ * The one control in the read band, and the way into the whole workout.
+ *
+ * It is a pill for the same reason the chooser chips are: nothing else in the top third is round,
+ * so the shape says "this opens something" before a word of it is read. It is lit rather than
+ * outlined, per the rule that every pressable thing in this app catches light along its top edge,
+ * which is what separates it from the flat text stacked underneath it.
+ *
+ * It sits above the lift name rather than beside it. The name is 32px at the mid set tier and the
+ * measurement that put the unit switch on the line below applies here unchanged: anything sharing
+ * that row has to be under about 40px wide, and this is a sentence.
+ *
+ * It costs 44px and gives back the 52px the day picker used to hold, so the header is shorter
+ * than it was and gained a control and the name of the day. */
+.dayjump {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  max-width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--s-3) 0 var(--s-4);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+.dayjump:active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+/* Every text token here has to survive the pressed state, which swaps --surface-base-lit for
+ * --surface-raised. --text-secondary measures 4.49 there, under the floor, so the pressed rule
+ * lifts the whole label rather than leaving the quiet half of it unreadable for the length of a
+ * press. */
+.dayjump:active .dayjump__pos,
+.dayjump:active .dayjump__dot {
+  color: var(--text-primary);
+}
+
+.dayjump__day {
+  font-size: var(--t-body);
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dayjump__dot,
+.dayjump__pos {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dayjump__glyph {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+  transition: transform 160ms ease;
+}
+
+/* The glyph turns because the panel opened, which makes the chip its own close control rather
+ * than needing a second one inside the panel. */
+.dayjump[aria-expanded='true'] .dayjump__glyph {
+  transform: rotate(180deg);
+}
+
+/* ---------------------------------------------------------------- the workout, mid session
+ *
+ * Every lift in the day, what has been logged against each, and a tap to any of them.
+ *
+ * A mode of the logging screen, not a layer over it. It takes the space the controls were in,
+ * scrolls on its own while the page does not, and leaves the rest timer where it was. That last
+ * part is the whole reason it is not a sheet: a countdown you have to dismiss a panel to read is
+ * a countdown that has stopped doing its job.
+ *
+ * Only this block scrolls. The screen itself still never does. */
+.worknav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.worknav__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.worknav__day {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+/* Cyan, because it is the prescription talking: this is the day, and this is where in it you
+ * are. Same token and same job as the load line on the program view. */
+.worknav__pos {
+  margin: 0;
+  color: var(--accent-data);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+.worknav__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Bleeds to the screen edge, so a half visible row says there is more below, the same
+   * affordance the chooser rows use sideways. */
+  margin: 0 calc(var(--s-4) * -1);
+  padding: var(--s-1) var(--s-4);
+}
+
+.worknav__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The trainer's own numbering keeps a column of its own, so every name starts on one line
+ * however long or short the numbering is. Same grid as the program view, because it is the same
+ * information read in a different place. */
+.worknav__row {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  gap: var(--s-2);
+  align-items: start;
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+/* Lit means pressable. A lift with sets still owed catches light on its top edge and drops a
+ * shadow, exactly like every other control in this app. */
+button.worknav__row {
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+button.worknav__row:active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+/* Flat means not pressable. A lift with every set logged is a slab with a border and no fall of
+ * light on it, so the signal that it is finished and the signal that it is not a control are the
+ * same signal. It is not dimmed: finishing a lift is not a reason to fade it. */
+.worknav__row.is-full {
+  background: none;
+  box-shadow: none;
+}
+
+/* The lift the client is on, filled, exactly as a selected chooser chip is filled. Fill against
+ * no fill is the signal that survives glare and a glance from arm's length, and the word "Now"
+ * in the state line carries it a second time.
+ *
+ * Everything inside goes to --text-primary, without exception. This is the raised surface, where
+ * --text-secondary measures 4.49 and --accent-data 4.70, both under the 7:1 floor these sizes
+ * owe. The row is legible because one row on this list gets the fill, not because the tokens got
+ * an exemption. */
+.worknav__row.is-now {
+  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+  border-color: var(--surface-raised-rim);
+  box-shadow:
+    inset 0 1px 0 0 var(--surface-raised-rim),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
+.worknav__row.is-now .worknav__num,
+.worknav__row.is-now .worknav__variation,
+.worknav__row.is-now .worknav__target,
+.worknav__row.is-now .worknav__state,
+.worknav__row.is-now .worknav__note {
+  color: var(--text-primary);
+}
+
+.worknav__num {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.worknav__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.worknav__name {
+  font-size: var(--t-body);
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.worknav__variation,
+.worknav__target,
+.worknav__state,
+.worknav__note {
+  font-size: var(--t-small);
+  line-height: 1.4;
+}
+
+.worknav__variation {
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* What was asked for, in the colour every other prescription in this app is written in. */
+.worknav__target {
+  color: var(--accent-data);
+}
+
+/* What has happened to it so far. Separated from the prescription above it by tabular figures
+ * and a heavier weight rather than by a hue, the same way the program view separates them. */
+.worknav__state {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.worknav__note {
+  color: var(--text-secondary);
+}
+
+.worknav__empty {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.worknav__foot {
+  display: flex;
+}
+
+.worknav__foot .button-secondary {
+  flex: 1 1 auto;
+}
+
+/* The spacer exists to push the controls into the thumb arc. With the panel open the panel is
+ * what fills that space, and two things claiming it would split the screen between them. */
+.screen.is-overview .spacer {
+  display: none;
+}
+
+/* A definite height, which min-height alone is not.
+ *
+ * This is the whole trick that keeps the page still while the list inside it moves. A flex column
+ * whose own height is decided by its contents never has to shrink anything, so min-height: 100dvh
+ * with a long day in it simply grew to 968px against an 812px viewport and the screen scrolled,
+ * which is the one thing this screen must never do. Fixing the height is what makes overflow land
+ * on .worknav__scroll instead. It applies only while the panel is open, so every other state of
+ * this screen keeps growing to whatever it needs. */
+.screen.is-overview {
+  height: 100dvh;
+}
+
+/* ---------------------------------------------------------------- the way back
+ *
+ * One button, full width, present only while a lift the client stepped away from still has sets
+ * owed. It is a control rather than a notice because it outlives the message that would have
+ * carried it: the reason to go back to a lift is that the machine has freed up, which happens
+ * some minutes after the app had anything to say about it. */
+.returnbar {
+  display: flex;
+}
+
+.returnbar .button-secondary {
+  flex: 1 1 auto;
+}
+
+.returnbar[hidden] {
+  display: none;
+}
+
+/* Secondary actions. Skip is an ordinary control here, deliberately styled the same as type and
+ * undo. Nothing about a skipped lift gets a warning colour. */
 .secondary {
   display: flex;
   flex-wrap: wrap;
@@ -960,9 +1260,10 @@ button {
     min-height: 3rem;
   }
 
-  /* Five secondary actions wrap to two rows on a narrow phone, which is fine, but the whole
-   * screen still has to fit without scrolling: the rest timer is useless if you have to scroll
-   * to it. Tighten the gaps rather than the tap targets, which stay at 44px. */
+  /* Four secondary actions fit one row on most phones and wrap to two on a narrow one, which is
+   * fine, but the whole screen still has to fit without scrolling: the rest timer is useless if
+   * you have to scroll to it. Tighten the gaps rather than the tap targets, which stay at 44px.
+   * End session left this row for the overview panel, which is what bought the fourth back. */
   .screen {
     gap: var(--s-2);
     padding-top: var(--s-3);

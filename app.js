@@ -22,6 +22,7 @@ import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
+import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
 import {
   unit,
   toDisplay,
@@ -35,6 +36,16 @@ import {
 
 const el = (id) => document.getElementById(id);
 const ui = {
+  screen: document.querySelector('.screen'),
+  dayJump: el('day-jump'),
+  dayJumpLabel: el('day-jump-label'),
+  dayJumpPos: el('day-jump-pos'),
+  overview: el('overview'),
+  overviewTitle: el('overview-title'),
+  overviewPos: el('overview-pos'),
+  overviewBody: el('overview-body'),
+  returnBar: el('return-bar'),
+  returnTo: el('return-to'),
   exerciseName: el('exercise-name'),
   setPosition: el('set-position'),
   target: el('target'),
@@ -83,6 +94,15 @@ const state = {
   sessionWritten: false,
   sessionClosed: false,
   logged: [],
+  // The overview panel, open or not. A state of this screen, not a layer over it.
+  overview: false,
+  // What the notice band is saying, or null. Held here rather than written straight to the DOM
+  // because the way back shares that band and one of them has to yield.
+  notice: null,
+  // A lift stepped away from that still owes sets, or null. Held as the entry rather than an
+  // index for the same reason the undo stack is: adding a set moves indexes and moves nothing
+  // else.
+  returnTo: null,
   best: new Map(),
   increments: new Map(),
   equipment: new Map(),
@@ -121,13 +141,46 @@ function write(task) {
 }
 
 function showNotice(text, tone = 'neutral') {
-  ui.notice.textContent = text;
-  ui.notice.dataset.tone = tone;
-  ui.notice.hidden = false;
+  state.notice = { text, tone };
+  paintNotice();
 }
 
 function clearNotice() {
-  ui.notice.hidden = true;
+  state.notice = null;
+  paintNotice();
+}
+
+/**
+ * The notice band, which the way back also sits in.
+ *
+ * Two rows there is one row too many. This screen fits a 640px tall phone with about five pixels
+ * to spare, so a message stacked on top of the return control is what finally pushes it into
+ * scrolling, and it must never scroll. They do not both need to be there: the header already names
+ * the lift and the set, which is what a neutral message is confirming, while the return control is
+ * the only thing on screen that knows a lift was left behind.
+ *
+ * An attention notice is a refused write and outranks both. That one is not confirmation of
+ * something the client just did, it is the only place the app says a set is on this device alone.
+ */
+function paintNotice() {
+  // The panel is a full answer to where the client is and what is left, so nothing sits above it.
+  const crowded = state.overview || !ui.returnBar.hidden;
+
+  // A neutral message that cannot be shown is dropped rather than queued. It is a momentary
+  // acknowledgement of a tap that has already happened, so holding it would mean "Extra set added"
+  // surfacing minutes later when a lift finishes and frees the band. A refused write is kept,
+  // because that one is still true whenever it gets to be said.
+  if (state.notice && crowded && state.notice.tone !== 'attention') state.notice = null;
+
+  // What survives is either a neutral message with room for it or a refused write, and the second
+  // waits for the panel to close rather than being dropped, because it is still true then.
+  const notice = state.notice;
+  const shown = Boolean(notice) && !state.overview;
+
+  ui.notice.hidden = !shown;
+  if (!shown) return;
+  ui.notice.textContent = notice.text;
+  ui.notice.dataset.tone = notice.tone;
 }
 
 // ------------------------------------------------------------------ loading
@@ -196,12 +249,50 @@ function currentEntry() {
   return state.plan[state.cursor] ?? null;
 }
 
-function setsForExercise(exerciseId) {
-  return state.plan.filter((entry) => entry.item.exercise_id === exerciseId);
+/**
+ * The planned sets of one lift: the run of entries around this one that share its item.
+ *
+ * By item identity rather than by exercise id, which is what a day that programs the same carry
+ * at the top and the bottom needs. Filtering the whole plan by exercise id made those two into
+ * one lift of eight sets, so the counter read "set 1 of 8" on the first of four.
+ */
+function runOf(entry) {
+  const at = state.plan.indexOf(entry);
+  if (at < 0) return [];
+  let from = at;
+  let to = at;
+  while (from > 0 && state.plan[from - 1].item === entry.item) from -= 1;
+  while (to < state.plan.length - 1 && state.plan[to + 1].item === entry.item) to += 1;
+  return state.plan.slice(from, to + 1);
+}
+
+/**
+ * The next set to open, walking from `index` and wrapping once.
+ *
+ * The wrap is what makes moving around safe. Logging the last set in the plan used to mean the
+ * session was over, which was true only while the lifts could only be done in order: now the last
+ * set on the list can be the first one somebody does, and closing the session on it would file a
+ * workout that had barely started. Returns -1 when nothing is left anywhere, which is the only
+ * thing that ends a session besides the client saying so.
+ */
+function nextPending(index) {
+  for (let i = index; i < state.plan.length; i += 1) if (isPending(state.plan[i])) return i;
+  for (let i = 0; i < index; i += 1) if (isPending(state.plan[i])) return i;
+  return -1;
 }
 
 function render() {
   const entry = currentEntry();
+  renderHeader();
+  renderReturn();
+  // After the return control, never before: which of the two gets the band depends on whether the
+  // other one is in it.
+  paintNotice();
+
+  if (state.overview) {
+    renderOverviewPanel();
+    return;
+  }
 
   if (!entry) {
     renderDone();
@@ -209,6 +300,9 @@ function render() {
   }
 
   ui.done.hidden = true;
+  ui.overview.hidden = true;
+  ui.screen.classList.remove('is-overview');
+  ui.controls.hidden = false;
   ui.rest.hidden = false;
   ui.stepperWeight.hidden = false;
   ui.stepperReps.hidden = false;
@@ -219,7 +313,7 @@ function render() {
   ui.addSet.disabled = false;
 
   const exercise = entry.item.exercise;
-  const siblings = setsForExercise(exercise.id);
+  const siblings = runOf(entry);
   const position = siblings.indexOf(entry) + 1;
 
   ui.exerciseName.textContent = exercise.name;
@@ -248,8 +342,83 @@ function render() {
         ? `Carried from your last set, ${formatWeight(entry.carriedFrom.weightKg)} ${unit()} for ${entry.carriedFrom.reps}.`
         : openingCopy(entry.openingSource);
 
+  ui.target.hidden = false;
+  ui.lastTime.hidden = false;
+
   renderValues();
   renderUndo();
+}
+
+/** The chip top left: which day this is, and where in it the client is standing. */
+function renderHeader() {
+  if (!state.day) return;
+  const position = positionLine(overviewRows(state.plan, state.cursor));
+  ui.dayJump.hidden = false;
+  ui.dayJumpLabel.textContent = dayTitle(state.day);
+  ui.dayJumpPos.textContent = position;
+  ui.dayJump.setAttribute('aria-expanded', String(state.overview));
+  // The words say where you are and the label says what happens if you press it, because "Lower A,
+  // lift 1 of 4" is a statement and this is a control. Open and closed is carried by aria-expanded
+  // rather than by rewriting the name, so it does not change out from under anybody mid press.
+  ui.dayJump.setAttribute('aria-label', `${dayTitle(state.day)}, ${position}. Show the whole workout.`);
+}
+
+/**
+ * The whole day, as a list, in the space the controls were in.
+ *
+ * The header keeps the chip and the lift name and loses the target and the last time, which
+ * describe one set and are the two lines this panel is a longer answer to.
+ */
+function renderOverviewPanel() {
+  ui.done.hidden = true;
+  ui.controls.hidden = true;
+  ui.rest.hidden = state.restTotal === 0;
+  ui.overview.hidden = false;
+  ui.screen.classList.add('is-overview');
+  ui.target.hidden = true;
+  ui.lastTime.hidden = true;
+  ui.prChip.hidden = true;
+
+  const rows = overviewRows(state.plan, state.cursor);
+  ui.overviewTitle.textContent = dayTitle(state.day);
+  ui.overviewPos.textContent = positionLine(rows);
+  ui.overviewBody.innerHTML = renderOverview(rows);
+
+  // Switching days is only offered before the first set, because a session row is filed under a
+  // day the moment one is logged. Offering a control that answers with a refusal is worse than
+  // not offering it, so the chips leave rather than argue.
+  ui.dayPicker.hidden = state.logged.length > 0;
+}
+
+/**
+ * The way back to a lift the client stepped away from.
+ *
+ * Set when they jump, cleared when they arrive or when that lift runs out of sets to owe. It
+ * outlives any one message, which is why it is a control and not a notice: the machine frees up
+ * several minutes after the app had anything to say.
+ */
+function renderReturn() {
+  const back = state.returnTo;
+  const here = currentEntry();
+  // The lift, not the set. Undo can leave the cursor on a different set of the same lift the offer
+  // points at, and "Back to Leg Press" while standing at the leg press is the app talking to
+  // itself.
+  const usable =
+    back &&
+    isPending(back) &&
+    here &&
+    back.item !== here.item &&
+    !state.overview;
+
+  if (!usable) {
+    ui.returnBar.hidden = true;
+    return;
+  }
+
+  const left = runOf(back).filter(isPending).length;
+  ui.returnBar.hidden = false;
+  ui.returnTo.textContent =
+    `Back to ${back.item.exercise.name}, ${left} ${left === 1 ? 'set' : 'sets'} left`;
 }
 
 function renderValues() {
@@ -298,6 +467,9 @@ function renderUndo() {
 
 function renderDone() {
   ui.done.hidden = false;
+  ui.overview.hidden = true;
+  ui.screen.classList.remove('is-overview');
+  ui.controls.hidden = false;
   // The session is over, so there is nothing left to rest for. A countdown next to the words
   // "Session logged" is the screen telling somebody to get ready for a set that does not exist,
   // and it was also the only place the one green shared a screen with the data cyan. Undo brings
@@ -308,12 +480,17 @@ function renderDone() {
   ui.stepperReps.hidden = true;
   ui.log.hidden = true;
   ui.skip.disabled = true;
+  // The session is already closed, so there is nothing left for this to end. It stays on screen
+  // rather than vanishing, because the panel it sits in is still readable and a control that
+  // moves between visits is harder to find than one that is plainly spent.
   ui.end.disabled = true;
   ui.typeToggle.disabled = true;
   ui.addSet.disabled = true;
 
   ui.exerciseName.textContent = state.day.name;
   ui.setPosition.textContent = '';
+  ui.target.hidden = false;
+  ui.lastTime.hidden = false;
   ui.target.textContent = '';
   ui.lastTime.textContent = '';
 
@@ -434,7 +611,9 @@ function logSet() {
 
   state.logged.push({
     id: record.id,
-    planIndex: state.cursor,
+    // The entry, not its index. A set added to a lift the client came back to shifts every index
+    // after it, and an undo stack holding numbers would then take back somebody else's set.
+    entry,
     exerciseId: entry.item.exercise_id,
     setIndex: entry.setIndex,
     weightKg: state.weightKg,
@@ -454,7 +633,12 @@ function logSet() {
   // What was actually on the bar, before the cursor moves off the set it belongs to.
   const justLogged = { weightKg: state.weightKg, reps: state.reps };
 
-  state.cursor += 1;
+  entry.status = 'logged';
+  const from = state.cursor;
+  const at = nextPending(from + 1);
+  const wrapped = at !== -1 && at < from;
+  state.cursor = at === -1 ? state.plan.length : at;
+
   const next = currentEntry();
   const steppers = nextSteppers(justLogged, entry, next);
   if (steppers) {
@@ -468,10 +652,20 @@ function logSet() {
   else stopRest();
   exitTypingMode();
   clearNotice();
+  // Logging on the lift the offer points at means the client took it. It is spent.
+  if (state.returnTo && state.returnTo.item === entry.item) state.returnTo = null;
   render();
   showPr(isPr, entry.item.exercise.name);
 
-  const shouldComplete = state.cursor >= state.plan.length;
+  // Finishing here can hand the client to a lift that sits earlier in the day, because everything
+  // after this one is already done. The header says where they are and this says how they got
+  // there, since a lift changing on its own is otherwise indistinguishable from a mis-tap.
+  if (wrapped) showNotice(`Back to ${next.item.exercise.name}, which still has sets.`);
+
+  // A session ends when nothing is left, rather than when the cursor runs off the end of the
+  // plan. Those were the same thing while the lifts could only be done in order. They stopped
+  // being the same thing the moment somebody could log the last set on the list first.
+  const shouldComplete = !state.plan.some(isPending);
   write(async () => {
     if (!state.sessionWritten) {
       await state.storage.put('sessions', session);
@@ -520,13 +714,18 @@ function undoLast() {
   });
 
   state.best.set(last.exerciseId, last.previousBest);
-  state.cursor = last.planIndex;
+  last.entry.status = 'pending';
+  state.cursor = state.plan.indexOf(last.entry);
   state.weightKg = last.weightKg;
   state.reps = last.reps;
   stopRest();
   ui.prChip.hidden = true;
   exitTypingMode();
   clearNotice();
+  // Taking a set back is the client saying they are on this lift after all, so an offer to go
+  // back to it is answering a question nobody is asking any more.
+  if (state.returnTo && state.returnTo.item === last.entry.item) state.returnTo = null;
+  closeOverview({ render: false });
   render();
 
   const session = state.sessionRecord;
@@ -549,15 +748,22 @@ function undoLast() {
  * Moves past every remaining set of the current lift. Nothing is written, because nothing was
  * performed and absence is the truthful record. No warning colour, no badge, no count of what
  * was missed: the acknowledgement names the lift the client is now on.
+ *
+ * A skipped set is marked rather than merely walked past, which is what a cursor could imply back
+ * when the cursor could only move one way. It is still not a failure state and the overview does
+ * not label it as one: a skipped lift and a lift nobody has reached read identically there, and
+ * both are one tap away for the rest of the session.
  */
 function skipExercise() {
   const entry = currentEntry();
   if (!entry) return;
 
-  const exerciseId = entry.item.exercise_id;
-  while (state.cursor < state.plan.length && state.plan[state.cursor].item.exercise_id === exerciseId) {
-    state.cursor += 1;
+  for (const sibling of runOf(entry)) {
+    if (isPending(sibling)) sibling.status = 'skipped';
   }
+
+  const at = nextPending(state.cursor);
+  state.cursor = at === -1 ? state.plan.length : at;
 
   const next = currentEntry();
   if (next) {
@@ -565,31 +771,97 @@ function skipExercise() {
     state.reps = next.reps;
   }
 
+  // The lift being left was chosen against rather than postponed, so the offer to go back to it
+  // goes with it.
+  if (state.returnTo && state.returnTo.item === entry.item) state.returnTo = null;
+
   stopRest();
   exitTypingMode();
   ui.prChip.hidden = true;
+  closeOverview({ render: false });
   render();
   showNotice(next ? `On to ${next.item.exercise.name}.` : 'That was the last lift.');
+}
+
+// ------------------------------------------------------------------ moving around the day
+//
+// A rack is taken, or a machine has somebody sitting on it, and the lift that comes next is not
+// the lift that can be done next. The order in a program is the trainer's intent rather than a
+// queue, so this screen lets the client take it in whatever order the room allows, and remembers
+// what they stepped away from.
+
+function openOverview() {
+  state.overview = true;
+  exitTypingMode();
+  render();
+  // Keyboard and screen reader users land inside what they just opened. There is no focus trap,
+  // because this is a state of the screen and not a layer over it: tabbing past the end reaches
+  // the tab bar, which is exactly where tabbing should go.
+  const first = ui.overviewBody.querySelector('[data-jump]') ?? ui.overview.querySelector('button');
+  if (first) first.focus();
+}
+
+function closeOverview({ render: repaint = true, focus = false } = {}) {
+  if (!state.overview) return;
+  state.overview = false;
+  if (repaint) render();
+  if (focus) ui.dayJump.focus();
+}
+
+/**
+ * Opens the set at `index` and remembers the lift being left, while it still owes sets.
+ *
+ * The rest timer keeps running. It is counting the client's recovery, not the app's position in a
+ * list, and a jump between lifts is the one moment where somebody is most likely to be watching it
+ * to decide whether to wait for the rack or move on.
+ */
+function jumpTo(index) {
+  const entry = state.plan[index];
+  if (!entry) return;
+
+  const leaving = currentEntry();
+  state.returnTo =
+    leaving && leaving.item !== entry.item && runOf(leaving).some(isPending) ? leaving : null;
+
+  // Going to a lift that was skipped is a change of mind, so the sets come back. Skip means "move
+  // me on now" rather than "never", and it only meant never while the cursor could not turn round.
+  for (const sibling of runOf(entry)) {
+    if (sibling.status === 'skipped') sibling.status = 'pending';
+  }
+
+  state.cursor = index;
+
+  // Through the same rule a tap on Log set goes through, and for the same reason the resume path
+  // does: an adjustment the client made on this lift has to survive leaving it and coming back.
+  // Reading the entry's own prefill would put them back on the number the plan opened with, which
+  // is the deliberately light fallback on a lift with no history, and they would correct it twice.
+  const previous = [...state.logged].reverse().find((row) => row.entry.item === entry.item);
+  const steppers = previous
+    ? nextSteppers(previous, previous.entry, entry)
+    : { weightKg: entry.weightKg, reps: entry.reps };
+  state.weightKg = steppers.weightKg;
+  state.reps = steppers.reps;
+  exitTypingMode();
+  ui.prChip.hidden = true;
+  clearNotice();
+  closeOverview({ render: false });
+  render();
 }
 
 /**
  * Appends one more set to the lift the client is on, prefilled from where the steppers already
  * sit, and marks it extra.
  *
- * The insert lands at or after the cursor, never before it, which is what keeps the planIndex
- * stored on every already logged set pointing at the same entry. Undo depends on that.
+ * The insert lands at the end of that lift's own run, which can now be behind sets already logged
+ * on a later lift. That used to matter: the undo stack held plan indexes, and everything after the
+ * insert shifted by one. It holds the entries themselves now, so an insert anywhere is free.
  */
 function addSet() {
   const entry = currentEntry();
   if (!entry) return;
 
-  const exerciseId = entry.item.exercise_id;
-  let insertAt = state.cursor;
-  while (insertAt < state.plan.length && state.plan[insertAt].item.exercise_id === exerciseId) {
-    insertAt += 1;
-  }
-
-  const siblings = setsForExercise(exerciseId);
+  const siblings = runOf(entry);
+  const insertAt = state.plan.indexOf(siblings[siblings.length - 1]) + 1;
   const highestIndex = siblings.reduce((max, s) => Math.max(max, s.setIndex), -1);
 
   state.plan.splice(insertAt, 0, {
@@ -597,11 +869,13 @@ function addSet() {
     setIndex: highestIndex + 1,
     isWarmup: false,
     isExtra: true,
+    logMode: entry.logMode,
     weightKg: state.weightKg,
     reps: state.reps,
     lastWeightKg: null,
     lastReps: null,
     lastOn: null,
+    carriedFrom: null,
     openingSource: null,
   });
 
@@ -612,9 +886,11 @@ function addSet() {
 /** Closes the session with whatever is in it. A session with two lifts in it is a session. */
 function endSession() {
   state.cursor = state.plan.length;
+  state.returnTo = null;
   stopRest();
   exitTypingMode();
   clearNotice();
+  closeOverview({ render: false });
   render();
 
   const session = state.sessionRecord;
@@ -791,6 +1067,7 @@ async function chooseDay(dayIndex) {
     exclude: state.sessionRecord ? state.sessionRecord.id : null,
   });
   state.cursor = 0;
+  state.returnTo = null;
   const first = state.plan[0];
   if (first) {
     state.weightKg = first.weightKg;
@@ -812,6 +1089,30 @@ function wire() {
   ui.skip.addEventListener('click', skipExercise);
   ui.end.addEventListener('click', endSession);
   ui.addSet.addEventListener('click', addSet);
+
+  // The chip is its own close control, which is why the panel carries no second one. The day
+  // stays named and the glyph turns over, so the thing that opened it is where the eye already is.
+  ui.dayJump.addEventListener('click', () => {
+    if (state.overview) closeOverview();
+    else openOverview();
+  });
+
+  ui.overviewBody.addEventListener('click', (event) => {
+    const row = event.target.closest('[data-jump]');
+    if (row) jumpTo(Number(row.dataset.jump));
+  });
+
+  ui.returnTo.addEventListener('click', () => {
+    const back = state.returnTo;
+    if (back) jumpTo(state.plan.indexOf(back));
+  });
+
+  // Escape closes the panel, because a mode that can be entered by mistake has to be leavable
+  // without hunting. Nothing else on this screen listens for a key, so there is nothing to fight.
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.overview) closeOverview({ focus: true });
+  });
+
   ui.dayPicker.addEventListener('click', (event) => {
     const button = event.target.closest('[data-day]');
     if (button) chooseDay(button.dataset.day);
@@ -837,12 +1138,26 @@ function wire() {
   }
 }
 
+/**
+ * The dead ends: signed in but bound to nobody, no client, no program, no days in it.
+ *
+ * Everything that could log a set goes, including the rest timer and the way into the day. A
+ * countdown on a screen with no session behind it is the app pretending, and the chip would open
+ * a panel listing nothing.
+ */
+function nothingToLog(name) {
+  ui.exerciseName.textContent = name;
+  ui.controls.hidden = true;
+  ui.rest.hidden = true;
+  ui.dayJump.hidden = true;
+}
+
 async function main() {
   let booted;
   try {
     booted = await boot({ role: 'client' });
   } catch (error) {
-    ui.exerciseName.textContent = 'Cannot open storage';
+    nothingToLog('Cannot open storage');
     showNotice(`${error.message} Serve this folder over http, not file://`);
     return;
   }
@@ -857,8 +1172,7 @@ async function main() {
   await loadUnit(storage, actor);
 
   if (mode === 'unbound') {
-    ui.exerciseName.textContent = 'Nothing assigned';
-    ui.controls.hidden = true;
+    nothingToLog('Nothing assigned');
     // The only screen this person can reach, so it has to carry the way off it.
     el('account').hidden = false;
     showNotice('You are signed in, but no trainer has added this email as a client yet.');
@@ -867,8 +1181,7 @@ async function main() {
   if (booted.error) showNotice(booted.error);
 
   if (!actor || !actor.clientId) {
-    ui.exerciseName.textContent = 'No client selected';
-    ui.controls.hidden = true;
+    nothingToLog('No client selected');
     el('account').hidden = false;
     showNotice('Switch to a client with the dev role control.');
     return;
@@ -885,10 +1198,9 @@ async function main() {
   // for them to do here: only their trainer can assign a program. Naming who it is waiting on
   // is the honest version.
   if (!assignment) {
-    ui.exerciseName.textContent = 'No program yet';
     // The steppers and Log set have to go with it. Leaving a live primary action on a screen
     // with no plan behind it invites a tap that writes a set against nothing.
-    ui.controls.hidden = true;
+    nothingToLog('No program yet');
     showNotice(NO_PROGRAM_YET);
     return;
   }
@@ -921,8 +1233,7 @@ async function main() {
   // in the builder is allowed. From this side of the app it is the same situation as no program
   // at all, so it gets the same screen rather than a blank one, and it names the same person.
   if (!state.day) {
-    ui.exerciseName.textContent = 'No program yet';
-    ui.controls.hidden = true;
+    nothingToLog('No program yet');
     showNotice(NO_PROGRAM_YET);
     return;
   }
@@ -935,6 +1246,10 @@ async function main() {
     state.plan = replayed.plan;
     state.logged = replayed.logged;
     state.cursor = replayed.cursor;
+    // A set on disk is a set that was done, wherever in the day it sits. Nothing marks a lift as
+    // skipped, because a skip writes no row and inventing one from the gaps would turn "not yet"
+    // into "not happening" on the client's behalf.
+    for (const done of replayed.logged) done.entry.status = 'logged';
     state.sessionRecord = open;
     // Already on disk, so the next write must not try to insert it again.
     state.sessionWritten = true;
@@ -949,7 +1264,7 @@ async function main() {
     // moved them.
     const last = state.logged[state.logged.length - 1];
     const steppers = last
-      ? nextSteppers(last, state.plan[last.planIndex], first)
+      ? nextSteppers(last, last.entry, first)
       : { weightKg: first.weightKg, reps: first.reps };
     state.weightKg = steppers.weightKg;
     state.reps = steppers.reps;

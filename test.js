@@ -35,6 +35,14 @@ import {
   retractionOf,
 } from './js/session.js';
 import { renderHistory, summaryLine, discardedMessage } from './js/session-view.js';
+import {
+  isPending,
+  liftRuns,
+  overviewRows,
+  renderOverview,
+  stateLine,
+  positionLine,
+} from './js/workout-view.js';
 
 const results = [];
 
@@ -2316,12 +2324,44 @@ test('a set that was undone before the interruption stays undone', () => {
   eq(back.logged.length, 0);
 });
 
-test('a skipped lift stays skipped', () => {
+test('a lift that was passed over does not pull the client back to it', () => {
   const back = replaySession(planOf(), [
     done({ id: 'a', exercise_id: 'bench', set_index: 0, logged_at: '2026-08-09T18:20:00.000Z' }),
   ]);
-  eq(back.cursor, 4, 'squat was passed over, so the cursor is on the second set of bench');
+  eq(back.cursor, 4, 'where they were, which is the second set of bench');
   eq(back.plan[back.cursor].item.exercise_id, 'bench');
+  eq(back.logged.length, 1, 'and squat is simply unlogged, which is what it is');
+});
+
+// The whole point of being able to move around: the rack was taken, so bench happened first, and
+// then the phone locked. The forward only walk found no seat for the squat rows behind the cursor,
+// filed all three as sets added by hand, and handed back a plan with two copies of every squat set
+// and the real ones still reading as never done.
+test('a session done out of order replays in the order it was done', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'b', exercise_id: 'bench', set_index: 0, logged_at: '2026-08-09T18:02:00.000Z' }),
+    done({ id: 'a', exercise_id: 'squat', set_index: 0, logged_at: '2026-08-09T18:09:00.000Z' }),
+  ]);
+  eq(back.plan.length, 5, 'no phantom sets');
+  eq(back.logged.map((l) => l.id), ['b', 'a']);
+  eq(back.cursor, 1, 'squat was last, so the second set of squat is next');
+  eq(back.plan[back.cursor].item.exercise_id, 'squat');
+});
+
+test('a row claims its own seat and never a seat already taken', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', set_index: 0, logged_at: '2026-08-09T18:02:00.000Z' }),
+    done({ id: 'b', exercise_id: 'bench', set_index: 0, logged_at: '2026-08-09T18:05:00.000Z' }),
+    done({ id: 'c', set_index: 1, logged_at: '2026-08-09T18:08:00.000Z' }),
+  ]);
+  eq(back.plan.length, 5);
+  eq(back.logged.map((l) => l.setIndex), [0, 0, 1]);
+  eq(new Set(back.logged.map((l) => l.entry)).size, 3, 'three rows, three entries');
+});
+
+test('the undo stack holds entries rather than positions', () => {
+  const back = replaySession(planOf(), [done({ id: 'a', set_index: 0 })]);
+  ok(back.logged[0].entry === back.plan[0], 'which survives a set being inserted before it');
 });
 
 test('an added set is put back into the plan where it was added', () => {
@@ -2364,6 +2404,160 @@ test('replay leaves the plan it was handed alone', () => {
   const plan = planOf();
   replaySession(plan, [done({ id: 'd', set_index: 3, is_extra: true })]);
   eq(plan.length, 5, 'the caller still holds what it passed in');
+});
+
+// ------------------------------------------------------------------ the workout, mid session
+//
+// js/workout-view.js. The list behind the chip top left: every lift in the day, what has been
+// logged against each, and where a tap lands.
+//
+// The gap it closes is a room problem. A rack is taken, so the lift that comes next is not the
+// lift that can be done next, and the only answers used to be skip it or leave the screen. These
+// tests are mostly about what the list refuses to say: it does not score the session, it does not
+// mark a passed over lift as failed, and it does not offer a tap that would write something.
+
+const namedItem = (over = {}) => ({
+  exercise_id: 'squat',
+  log_mode: 'weight_reps',
+  target_sets: 2,
+  target_reps_low: 5,
+  exercise: { id: 'squat', name: 'Squat' },
+  ...over,
+});
+
+const benchItem = namedItem({
+  exercise_id: 'bench',
+  exercise: { id: 'bench', name: 'Bench press' },
+});
+
+const dayOf = () => [
+  ...planForItem(namedItem(), null, opening),
+  ...planForItem(benchItem, null, opening),
+];
+
+test('the plan comes back grouped into the lifts it was built from', () => {
+  const runs = liftRuns(dayOf());
+  eq(runs.length, 2);
+  eq(runs.map((run) => run.entries.length), [2, 2]);
+  eq(runs.map((run) => run.from), [0, 2]);
+});
+
+test('the same lift twice in one day is two lifts and not one of four sets', () => {
+  // A sheet that opens and closes with the same carry. Grouping by exercise id made those one row
+  // claiming four sets, and the set counter on the logging screen read "set 1 of 4" on the first.
+  const runs = liftRuns([
+    ...planForItem(namedItem(), null, opening),
+    ...planForItem(benchItem, null, opening),
+    ...planForItem(namedItem({ target_sets: 1 }), null, opening),
+  ]);
+  eq(runs.length, 3);
+  eq(runs.map((run) => run.entries.length), [2, 2, 1]);
+});
+
+test('a tap lands on the first set of that lift nobody has done', () => {
+  const plan = dayOf();
+  plan[0].status = 'logged';
+  eq(overviewRows(plan, 1)[0].at, 1);
+});
+
+test('a lift with every set logged is not a control', () => {
+  const plan = dayOf();
+  plan[0].status = 'logged';
+  plan[1].status = 'logged';
+  const rows = overviewRows(plan, 2);
+  eq(rows[0].at, null, 'because the only thing a tap could mean there is Add set');
+  eq(rows[0].logged, 2);
+  ok(!renderOverview(rows).includes('data-jump="0"'), 'and the markup carries no way to press it');
+});
+
+test('the lift being done is named as such and carries its position', () => {
+  const rows = overviewRows(dayOf(), 1);
+  eq(rows[1].isCurrent, false);
+  eq(stateLine(rows[0]), 'Now, set 2 of 2');
+  eq(stateLine(rows[1]), 'Not logged yet');
+});
+
+test('a lift that was passed over reads the same as one nobody reached yet', () => {
+  const plan = dayOf();
+  plan[0].status = 'skipped';
+  plan[1].status = 'skipped';
+  const rows = overviewRows(plan, 2);
+  eq(stateLine(rows[0]), 'Not logged yet', 'no badge, no colour, no count of what was missed');
+});
+
+test('a lift that was skipped can still be gone back to', () => {
+  // Skip means move me on now. It was permanent for the length of a session only because the
+  // cursor could not turn round, and keeping it permanent once the cursor can would be a dead end
+  // with no undo on it.
+  const plan = dayOf();
+  plan[0].status = 'skipped';
+  plan[1].status = 'skipped';
+  eq(overviewRows(plan, 2)[0].at, 0);
+  ok(renderOverview(overviewRows(plan, 2)).includes('data-jump="0"'));
+});
+
+test('a lift with sets logged and the rest skipped goes back to what is left', () => {
+  const plan = dayOf();
+  plan[0].status = 'logged';
+  plan[1].status = 'skipped';
+  const rows = overviewRows(plan, 2);
+  eq(rows[0].at, 1, 'the set that was given up, not the one already done');
+  eq(stateLine(rows[0]), '1 of 2 sets logged');
+});
+
+test('part of a lift done says how much, without judging it', () => {
+  const plan = dayOf();
+  plan[0].status = 'logged';
+  eq(stateLine(overviewRows(plan, 2)[0]), '1 of 2 sets logged');
+});
+
+test('the header line is a position and never a score', () => {
+  const plan = dayOf();
+  eq(positionLine(overviewRows(plan, 2)), 'Lift 2 of 2');
+  plan[2].status = 'skipped';
+  plan[3].status = 'skipped';
+  eq(positionLine(overviewRows(plan, 0)), 'Lift 1 of 2', 'a skip changes where you are, not a total');
+  eq(positionLine(overviewRows(plan, 99)), '2 lifts', 'and off the end of the day it is a count');
+  eq(positionLine([]), 'No lifts in this day');
+});
+
+test('the lift being done is the one that fills, and it is the only one', () => {
+  const markup = renderOverview(overviewRows(dayOf(), 0));
+  eq(markup.match(/is-now/g).length, 1);
+  ok(markup.includes('aria-current="true"'));
+});
+
+test('a lift with sets left is pressable and says where it goes', () => {
+  const markup = renderOverview(overviewRows(dayOf(), 0));
+  ok(markup.includes('data-jump="0"'));
+  ok(markup.includes('data-jump="2"'), 'the lift nobody has started yet');
+});
+
+test('what the trainer typed reaches this list as typed', () => {
+  const item = namedItem({
+    exercise: { id: 'squat', name: 'Squat <heavy>' },
+    variation: 'MED GRIP',
+    notes: 'Pause at the bottom',
+    target_reps_text: '1-2 RIR',
+  });
+  const rows = overviewRows(planForItem(item, null, opening), 0);
+  eq(rows[0].variation, 'MED GRIP');
+  eq(rows[0].notes, 'Pause at the bottom');
+  const markup = renderOverview(rows);
+  ok(markup.includes('Squat &lt;heavy&gt;'), 'and a name with a bracket in it is escaped');
+  ok(markup.includes('1-2 RIR'), 'the target line is the trainer own words');
+});
+
+test('an entry nobody has touched is pending without being told it is', () => {
+  eq(isPending({}), true, 'so a fresh plan needs no loop to mark it');
+  eq(isPending({ status: 'logged' }), false);
+  eq(isPending({ status: 'skipped' }), false);
+  eq(isPending(null), false);
+});
+
+test('a day with nothing in it says so rather than rendering an empty list', () => {
+  eq(overviewRows([], 0).length, 0);
+  ok(renderOverview([]).includes('No lifts in this day'));
 });
 
 // ------------------------------------------------------------------ throwing a session away
