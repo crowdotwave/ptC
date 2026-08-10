@@ -73,6 +73,48 @@ export function fromWire(table, row) {
   return out;
 }
 
+/**
+ * The newest queued write per row, for one batch.
+ *
+ * Two puts of the same row inside one batch is ordinary rather than exotic: the builder saves a
+ * row as it is edited, so renaming 'Day 1' twice queues it twice. Postgres refuses an
+ * INSERT ... ON CONFLICT whose values name the same key more than once, with 'ON CONFLICT DO
+ * UPDATE command cannot affect row a second time', and it refuses the whole statement rather
+ * than the duplicate. So a second edit of one row used to jam every write behind it.
+ *
+ * Dropping the older payload is not a loss. Conflict resolution everywhere in this app is last
+ * write wins on updated_at, so the newest queued copy is the row. Both outbox entries still
+ * clear together, because push clears the batch rather than the rows it sent.
+ *
+ * Append only tables never reach this: set_logs is written once and never rewritten, so a
+ * duplicate there would be a replay of an identical row, which its ignoreDuplicates upsert
+ * already handles.
+ */
+export function collapseDuplicates(entries) {
+  const newest = new Map();
+  for (const entry of entries) newest.set(entry.record_id, entry);
+  return [...newest.values()];
+}
+
+/**
+ * Tables that must be updated before they are inserted.
+ *
+ * Both are written by two different people under two different policies: the trainer who owns
+ * the row, and the person the row is about changing their own name or unit. An upsert is an
+ * INSERT ... ON CONFLICT, and Postgres checks the insert policy's with check before it ever
+ * reaches the update path, so the second of those two writers is refused on a row that plainly
+ * already exists. A person who is both a trainer and a client of somebody else could never save
+ * a preference: their clients row belongs to their coach, so clients_trainer_all rejects it,
+ * and clients_self_update never gets consulted.
+ *
+ * trainers is worse. 0002 requires auth_user_id = auth.uid() to insert one, and OMIT_ON_WRITE
+ * strips that column from every write, so the check reads a null the adapter is forbidden to
+ * send. A trainer changing their own unit could never sync at all.
+ *
+ * Every other table has one writer and one policy, and keeps its single round trip.
+ */
+const UPDATE_FIRST = new Set(['clients', 'trainers']);
+
 /** Splits the queue into the longest runs that can go in one request: same op, same table. */
 export function batchQueue(queue) {
   const batches = [];
@@ -117,19 +159,25 @@ export function createRemote({ client, storage }) {
     for (const batch of batchQueue(queue)) {
       try {
         if (batch.op === 'delete') {
-          const ids = batch.entries.map((entry) => entry.record_id);
+          const ids = [...new Set(batch.entries.map((entry) => entry.record_id))];
           const { error } = await client.from(batch.table).delete().in('id', ids);
           if (error) throw new Error(error.message);
         } else {
-          const rows = batch.entries.map((entry) => toWire(batch.table, entry.payload));
-          // An append only table takes on conflict do nothing, so a replayed insert is a no-op
-          // and the write needs no update privilege anywhere. That is what keeps this path
-          // unable to rewrite history even if something upstream tried to.
-          const options = TABLES[batch.table].appendOnly
-            ? { onConflict: 'id', ignoreDuplicates: true }
-            : { onConflict: 'id' };
-          const { error } = await client.from(batch.table).upsert(rows, options);
-          if (error) throw new Error(error.message);
+          const rows = collapseDuplicates(batch.entries).map((entry) =>
+            toWire(batch.table, entry.payload),
+          );
+          if (UPDATE_FIRST.has(batch.table)) {
+            await updateThenInsert(batch.table, rows);
+          } else {
+            // An append only table takes on conflict do nothing, so a replayed insert is a no-op
+            // and the write needs no update privilege anywhere. That is what keeps this path
+            // unable to rewrite history even if something upstream tried to.
+            const options = TABLES[batch.table].appendOnly
+              ? { onConflict: 'id', ignoreDuplicates: true }
+              : { onConflict: 'id' };
+            const { error } = await client.from(batch.table).upsert(rows, options);
+            if (error) throw new Error(error.message);
+          }
         }
       } catch (error) {
         await storage._outboxFail(batch.entries[0], error.message);
@@ -141,6 +189,29 @@ export function createRemote({ client, storage }) {
     }
 
     return { pushed, blocked: null };
+  }
+
+  /**
+   * An update, and an insert only if there was nothing to update.
+   *
+   * The order is the whole point: see UPDATE_FIRST above for which policy refuses what. Zero rows
+   * back from the update is the honest signal that the row is new, because the update policy and
+   * the select policy on both these tables cover the same rows, so a row this person may edit is
+   * a row they can see coming back.
+   *
+   * A row that exists but belongs to somebody else also returns zero and falls through to the
+   * insert, which then fails on the insert policy. That is the correct outcome and the error
+   * names the real problem, which is that this device is trying to write a row it does not own.
+   */
+  async function updateThenInsert(table, rows) {
+    for (const row of rows) {
+      const { data, error } = await client.from(table).update(row).eq('id', row.id).select('id');
+      if (error) throw new Error(error.message);
+      if (data && data.length) continue;
+
+      const { error: insertError } = await client.from(table).insert(row);
+      if (insertError) throw new Error(insertError.message);
+    }
   }
 
   async function fetchAll(table) {

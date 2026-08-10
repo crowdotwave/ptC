@@ -873,15 +873,15 @@ button {
  * A finished session is the only unambiguous success this product has, and it happens once per
  * session rather than once per set, which is what earns it a hue of its own.
  *
- * It does share the screen with cyan, so be honest about that: renderDone hides the steppers and
- * the log action but leaves the rest timer up, and --done and --accent-data measure identical in
- * luminance. Hue alone is 43 degrees and would not be enough on its own. What actually separates
- * them is everything else: the green is 28px on a bordered card with a wash behind it and the
- * word "logged" in it, the cyan is a bare 32px countdown. That is the encoding rule being
- * satisfied by shape, position and words rather than by colour, which is the only way a fourth
- * hue was ever going to be affordable here.
+ * It used to share the screen with cyan, and no longer does. renderDone hid the steppers and the
+ * log action but left the rest timer counting, and --done and --accent-data measure identical in
+ * luminance, so 43 degrees of hue was carrying more than it should have. The separation was real
+ * enough (28px on a bordered card with the word "logged" against a bare 32px countdown) but the
+ * timer had no business being there in the first place: the session is over, so there is nothing
+ * to rest for. renderDone now stops it and hides it, and the fourth hue got cheaper by being
+ * alone on the screen rather than by being argued for.
  *
- * It stays fenced in for the same reason. Not the rest timer, not a chart, not the record. */
+ * It stays fenced in regardless. Not the rest timer, not a chart, not the record. */
 .done {
   display: flex;
   flex-direction: column;
@@ -2445,6 +2445,16 @@ button.navlink:disabled {
 
 .account__who {
   color: var(--muted);
+}
+
+/* A write the server refused. Deliberately the same quiet type as the name beside it and
+   deliberately not coloured: this app has one green and it means a finished session, and adding a
+   red here would put an alarm on every screen for something nobody can act on mid workout. It
+   earns attention by being a sentence that is normally absent, not by shouting. */
+.account__sync {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
 }
 
 .account__out {

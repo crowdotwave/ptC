@@ -20,6 +20,7 @@
 // no tab because it looks like the app is broken rather than like it is not for them.
 
 import { signOutAndClear } from './boot.js';
+import { onSync, syncMessage } from './sync-status.js';
 
 const ICONS = {
   log: '<path d="M3 6h14M3 11h14M3 16h9" />',
@@ -105,6 +106,44 @@ function wireAccount({ storage, client, session }) {
 }
 
 /**
+ * A refused write, named in the page footer, next to sign out.
+ *
+ * The footer because that is already where this app puts the things that are true but not urgent,
+ * in the quietest type on the screen. Not a banner and not a toast: a stalled sync is not worth
+ * interrupting a set over, it is worth being discoverable, and being discoverable is the entire
+ * gap this closes. Nothing here moves and nothing here is coloured, so it cannot be mistaken for
+ * the one thing in this app that celebrates.
+ *
+ * The logging screen keeps its footer hidden while somebody is signed in, so this does not reach
+ * it. That is deliberate and it is the same reason sign out is not there: that screen must never
+ * scroll, and a person mid workout can do nothing useful about a sync anyway.
+ */
+function wireSyncStatus() {
+  const footers = [...document.querySelectorAll('.account')];
+  if (!footers.length) return;
+
+  onSync((result) => {
+    const message = syncMessage(result);
+    for (const footer of footers) {
+      const existing = footer.querySelector('[data-sync-status]');
+      if (!message) {
+        if (existing) existing.remove();
+        continue;
+      }
+      const node = existing ?? document.createElement('span');
+      if (!existing) {
+        node.setAttribute('data-sync-status', '');
+        node.className = 'account__sync';
+        // Ahead of sign out, so the reason lands before the control somebody might reach for
+        // because of it.
+        footer.insertBefore(node, footer.querySelector('[data-signout]'));
+      }
+      node.textContent = message;
+    }
+  });
+}
+
+/**
  * Mounts the shell. `current` names the tab this page is, so it can light up.
  *
  * Kept as one call because a page should not be able to have one without the other: a tab bar
@@ -113,6 +152,7 @@ function wireAccount({ storage, client, session }) {
 export function mountShell(booted, current) {
   renderTabs(booted.actor, current);
   wireAccount(booted);
+  wireSyncStatus();
 }
 
 // The old name, still used by pages that only ever wanted the sign out wiring.

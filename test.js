@@ -17,13 +17,15 @@ import {
 } from './js/program.js';
 import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
-import { toWire, fromWire, batchQueue } from './js/remote.js';
+import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
 import { tokenFromLink } from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
+import { planForItem, setCountOf, countOf } from './js/plan.js';
+import { openSession, replaySession, RESUME_WINDOW_MS } from './js/session.js';
 
 const results = [];
 
@@ -1594,6 +1596,28 @@ test('a delete and a put on the same table are never merged into one request', (
   eq(batches.map((b) => b.op), ['put', 'delete']);
 });
 
+// Postgres refuses an INSERT ... ON CONFLICT naming the same key twice, and refuses the whole
+// statement rather than the duplicate. Editing one row twice is ordinary in the builder, so
+// without this a second edit jams every write queued behind it. Measured on a real device: two
+// edits of one template day, and nothing synced again for three days.
+test('two writes to one row send the newest and never both', () => {
+  const entry = (id, record_id, name) => ({ id, table: 'template_days', op: 'put', record_id, payload: { id: record_id, name } });
+  const rows = collapseDuplicates([
+    entry('q1', 'day-a', 'Day 1'),
+    entry('q2', 'day-b', 'Day 2'),
+    entry('q3', 'day-a', 'Pull day'),
+  ]);
+  eq(rows.length, 2);
+  eq(rows.map((e) => e.payload.name).includes('Day 1'), false, 'the stale payload is dropped');
+  eq(rows.find((e) => e.record_id === 'day-a').payload.name, 'Pull day');
+  eq(rows.find((e) => e.record_id === 'day-b').payload.name, 'Day 2');
+});
+
+test('rows written once are left exactly as they were queued', () => {
+  const entry = (id) => ({ id, table: 'sessions', op: 'put', record_id: id, payload: { id } });
+  eq(collapseDuplicates([entry('1'), entry('2'), entry('3')]).map((e) => e.record_id), ['1', '2', '3']);
+});
+
 // ------------------------------------------------------------------ who may be where
 //
 // Capability, not role. A person who coaches and is also coached holds a trainers row and a
@@ -2001,6 +2025,255 @@ test('anything that is not a sign in link is refused rather than half read', () 
   eq(tokenFromLink(null), null);
   eq(tokenFromLink('https://example.com/no/token/here'), null, 'a url with no token is not a link');
   eq(tokenFromLink('not a url at all?'), null);
+});
+
+// ------------------------------------------------------------------ how many sets there are
+//
+// js/plan.js. The count comes from the program and the numbers come from history, and these were
+// one question until a real workout proved they are two.
+//
+// What happened: four sets prescribed, one logged, phone locked. The next visit built the plan out
+// of last session's rows, found one, and said "Set 1 of 1". Logging that one set took the cursor
+// past the end of the plan, which closed the session, which meant the visit after that read one
+// set of history too. Every one of these tests is a step in that cascade.
+
+const planItem = (over = {}) => ({
+  exercise_id: 'squat',
+  log_mode: 'weight_reps',
+  target_sets: 4,
+  target_reps_low: 9,
+  ...over,
+});
+
+const opening = { kg: 20, source: 'bar' };
+
+// What lastPerformance hands back, built from set index to row.
+const prev = (pairs, startedAt = '2026-08-01T18:00:00.000Z') => ({
+  sessionId: 'sPrev',
+  startedAt,
+  bySetIndex: new Map(pairs),
+});
+
+test('a lift with no history gets the set count the trainer prescribed', () => {
+  eq(planForItem(planItem(), null, opening).length, 4);
+});
+
+test('a session cut short does not shorten the program', () => {
+  const entries = planForItem(planItem(), prev([[0, row({ weight_kg: 60, reps: 12 })]]), opening);
+  eq(entries.length, 4, 'one set logged last time, four still prescribed');
+  eq(entries.map((e) => e.setIndex), [0, 1, 2, 3]);
+});
+
+test('the sets history did not reach are carried from the last one that it did', () => {
+  const entries = planForItem(planItem(), prev([[0, row({ weight_kg: 60, reps: 12 })]]), opening);
+  eq(entries.map((e) => e.weightKg), [60, 60, 60, 60]);
+  eq(entries.map((e) => e.reps), [12, 12, 12, 12]);
+});
+
+test('a carried set never claims a history it does not have', () => {
+  const entries = planForItem(planItem(), prev([[0, row({ weight_kg: 60, reps: 12 })]]), opening);
+  eq(entries[0].lastWeightKg, 60, 'set one was performed, so it has a last time');
+  eq(entries[0].carriedFrom, null);
+  eq(entries[3].lastWeightKg, null, 'set four was not, so it has none');
+  eq(entries[3].lastOn, null);
+  eq(entries[3].carriedFrom, { weightKg: 60, reps: 12 }, 'and says where its number came from');
+});
+
+test('carrying reads the last working set, not the first', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 3 }),
+    prev([[0, row({ weight_kg: 60, reps: 12 })], [1, row({ weight_kg: 70, reps: 10 })]]),
+    opening,
+  );
+  eq(entries[2].weightKg, 70, 'the heavier, more recent set is what would have come next');
+  eq(entries[2].reps, 10);
+});
+
+test('a fuller session than the program asked for is kept whole', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 2 }),
+    prev([[0, row()], [1, row()], [2, row({ is_extra: true })]]),
+    opening,
+  );
+  eq(entries.length, 3, 'an added set stays in the plan rather than being trimmed back');
+});
+
+test('warmups do not count against the prescription', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 3 }),
+    prev([[0, row({ is_warmup: true, weight_kg: 40 })], [1, row({ weight_kg: 80 })]]),
+    opening,
+  );
+  eq(entries.length, 4, 'one warmup plus three working sets');
+  eq(entries.filter((e) => !e.isWarmup).length, 3);
+  eq(entries[0].isWarmup, true, 'and the warmup keeps its place at the front');
+  eq(entries[2].weightKg, 80, 'carrying reads the working set, never the warmup');
+});
+
+test('a blank set count still leaves one set to step through', () => {
+  eq(setCountOf(planItem({ target_sets: null })), 1, 'an NA cell in a workbook');
+  eq(setCountOf(planItem({ target_sets: 0 })), 1);
+  eq(setCountOf({}), 1);
+  eq(planForItem(planItem({ target_sets: null }), null, opening).length, 1);
+});
+
+test('a hold or a carry prefills from its own column rather than from reps', () => {
+  eq(countOf(row({ reps: null, hold_seconds: 45 })), 45);
+  eq(countOf(row({ reps: null, rounds: 6 })), 6);
+  const entries = planForItem(
+    planItem({ log_mode: 'time_hold', target_sets: 2, target_reps_low: null }),
+    prev([[0, row({ reps: null, hold_seconds: 45, weight_kg: 0 })]]),
+    opening,
+  );
+  eq(entries.map((e) => e.reps), [45, 45], 'a null here put the word null on the stepper');
+});
+
+test('the carried numbers are the ones the screen would have to type otherwise', () => {
+  // The point of the whole rule: an interrupted four set lift comes back as four identical taps.
+  const entries = planForItem(planItem(), prev([[0, row({ weight_kg: 60, reps: 12 })]]), opening);
+  ok(entries.every((e) => e.weightKg === 60 && e.reps === 12), 'every set is one tap');
+});
+
+// ------------------------------------------------------------------ picking a session back up
+//
+// js/session.js. A phone locks, a tab is discarded, somebody checks Progress between sets. The
+// logged rows are safe on disk either way, so the only thing lost is the app's memory of where it
+// was, and these rebuild it from the rows.
+
+const openRow = (over = {}) => ({
+  id: 's1',
+  client_id: 'c1',
+  day_index: 0,
+  started_at: '2026-08-09T18:00:00.000Z',
+  completed_at: null,
+  ...over,
+});
+
+const AT = Date.parse('2026-08-09T18:40:00.000Z');
+
+test('a session with no completed_at, started minutes ago, is one somebody is in', () => {
+  eq(openSession([openRow()], { now: AT }).id, 's1');
+});
+
+test('a finished session is not resumable, however recent', () => {
+  eq(openSession([openRow({ completed_at: '2026-08-09T18:35:00.000Z' })], { now: AT }), null);
+});
+
+test('an abandoned session stops offering itself once the window closes', () => {
+  const old = openRow({ started_at: '2026-08-01T18:00:00.000Z' });
+  eq(openSession([old], { now: AT }), null, 'or the day picker would sit on it forever');
+  eq(openSession([old], { now: Date.parse(old.started_at) + RESUME_WINDOW_MS - 1000 }).id, 's1');
+});
+
+test('the most recent open session wins when there is more than one', () => {
+  const rows = [
+    openRow({ id: 'sA', started_at: '2026-08-09T17:00:00.000Z' }),
+    openRow({ id: 'sB', started_at: '2026-08-09T18:20:00.000Z' }),
+  ];
+  eq(openSession(rows, { now: AT }).id, 'sB');
+  eq(openSession([...rows].reverse(), { now: AT }).id, 'sB', 'and order in never changes it');
+});
+
+test('nothing at all is not an error', () => {
+  eq(openSession([], { now: AT }), null);
+  eq(openSession(undefined, { now: AT }), null);
+  eq(openSession([openRow({ started_at: 'not a date' })], { now: AT }), null);
+});
+
+// The plan a fresh run of the day would build: three sets of squat, then two of bench.
+const planOf = () => [
+  ...planForItem(planItem({ exercise_id: 'squat', target_sets: 3 }), null, opening),
+  ...planForItem(planItem({ exercise_id: 'bench', target_sets: 2 }), null, opening),
+];
+
+const done = (over = {}) => row({ session_id: 's1', logged_at: '2026-08-09T18:05:00.000Z', ...over });
+
+test('nothing logged yet leaves the cursor at the top of the plan', () => {
+  const back = replaySession(planOf(), []);
+  eq(back.cursor, 0);
+  eq(back.logged.length, 0);
+  eq(back.plan.length, 5);
+});
+
+test('two sets in comes back two sets in', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', set_index: 0, logged_at: '2026-08-09T18:05:00.000Z' }),
+    done({ id: 'b', set_index: 1, logged_at: '2026-08-09T18:08:00.000Z' }),
+  ]);
+  eq(back.cursor, 2, 'and the next set on screen is set three');
+  eq(back.logged.map((l) => l.id), ['a', 'b']);
+  eq(back.plan[back.cursor].setIndex, 2);
+});
+
+test('rows replay in the order they were performed, not the order they arrive', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'b', set_index: 1, logged_at: '2026-08-09T18:08:00.000Z' }),
+    done({ id: 'a', set_index: 0, logged_at: '2026-08-09T18:05:00.000Z' }),
+  ]);
+  eq(back.logged.map((l) => l.id), ['a', 'b']);
+  eq(back.cursor, 2);
+});
+
+test('a set that was undone before the interruption stays undone', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', set_index: 0 }),
+    done({
+      id: 'a-void', set_index: 0, supersedes_id: 'a', is_void: true,
+      logged_at: '2026-08-09T18:06:00.000Z',
+    }),
+  ]);
+  eq(back.cursor, 0, 'undo put the cursor back and a reload must not move it forward again');
+  eq(back.logged.length, 0);
+});
+
+test('a skipped lift stays skipped', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', exercise_id: 'bench', set_index: 0, logged_at: '2026-08-09T18:20:00.000Z' }),
+  ]);
+  eq(back.cursor, 4, 'squat was passed over, so the cursor is on the second set of bench');
+  eq(back.plan[back.cursor].item.exercise_id, 'bench');
+});
+
+test('an added set is put back into the plan where it was added', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', set_index: 0, logged_at: '2026-08-09T18:02:00.000Z' }),
+    done({ id: 'b', set_index: 1, logged_at: '2026-08-09T18:05:00.000Z' }),
+    done({ id: 'c', set_index: 2, logged_at: '2026-08-09T18:08:00.000Z' }),
+    done({ id: 'd', set_index: 3, is_extra: true, logged_at: '2026-08-09T18:11:00.000Z' }),
+  ]);
+  eq(back.plan.length, 6, 'the plan grew by the one that was added');
+  eq(back.logged.length, 4);
+  eq(back.logged[3].isExtra, true);
+  eq(back.cursor, 4, 'which is the first set of bench');
+  eq(back.plan[back.cursor].item.exercise_id, 'bench');
+});
+
+test('a record set before the interruption is still a record after it', () => {
+  const best = new Map([['squat', 100]]);
+  const back = replaySession(planOf(), [done({ id: 'a', set_index: 0, weight_kg: 120, reps: 5 })], best);
+  ok(back.best.get('squat') > 100, 'the new best carries across the reload');
+  eq(back.logged[0].previousBest, 100, 'and undo can still hand the old one back');
+});
+
+test('a warmup logged before the interruption never sets a record', () => {
+  const best = new Map([['squat', 100]]);
+  replaySession(planOf(), [done({ id: 'a', set_index: 0, weight_kg: 200, reps: 5, is_warmup: true })], best);
+  eq(best.get('squat'), 100);
+});
+
+test('a lift the program no longer contains is left out rather than guessed at', () => {
+  const back = replaySession(planOf(), [
+    done({ id: 'a', set_index: 0 }),
+    done({ id: 'gone', exercise_id: 'deadlift', set_index: 0, logged_at: '2026-08-09T18:09:00.000Z' }),
+  ]);
+  eq(back.logged.map((l) => l.id), ['a'], 'the row still counts everywhere, it just has no seat here');
+  eq(back.cursor, 1);
+});
+
+test('replay leaves the plan it was handed alone', () => {
+  const plan = planOf();
+  replaySession(plan, [done({ id: 'd', set_index: 3, is_extra: true })]);
+  eq(plan.length, 5, 'the caller still holds what it passed in');
 });
 
 // ------------------------------------------------------------------ report

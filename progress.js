@@ -12,6 +12,7 @@ import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';
 import { renderConsistency, renderDetail, sessionLabel } from './js/consistency-view.js';
 import { activeSetLogs } from './js/history.js';
+import { openSession } from './js/session.js';
 import { isoDate, localDayOf } from './js/dates.js';
 import {
   unit,
@@ -426,9 +427,18 @@ async function main() {
   }
 
   // An open session means the client walked away from a set. Offer the way back.
-  const open = (await storage.query('sessions', { client_id: state.client.id, completed_at: null })).sort((a, b) =>
-    b.started_at.localeCompare(a.started_at),
-  )[0];
+  //
+  // Through js/session.js rather than a query of its own, because the logging screen picks a
+  // session back up using the same rule. Offering to resume something that screen would decline
+  // to resume is the app disagreeing with itself, and it is worse than not offering: the link
+  // would land somebody on the next day of the split with no explanation.
+  //
+  // A trainer reading a client with ?client= never sees it. The link goes to their own logging
+  // screen, so it would be an invitation to walk into somebody else's set.
+  const open =
+    state.client.id === actor?.clientId
+      ? openSession(await storage.query('sessions', { client_id: state.client.id }))
+      : null;
   if (open) {
     const resume = el('resume');
     resume.hidden = false;

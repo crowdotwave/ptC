@@ -213,17 +213,27 @@ export function createStorage(driver) {
       }
       try {
         const { pushed, blocked } = await remote.push(queue);
-        if (blocked) {
-          return {
-            remote: true,
-            pushed,
-            pulled: 0,
-            pending: (await storage.pending()).length,
-            error: `${blocked.table}: ${blocked.message}`,
-          };
-        }
+
+        // A blocked push must never stop the pull, and this used to return here.
+        //
+        // The two directions are independent. A write this device cannot get rid of says nothing
+        // about the rows the server is willing to hand over, so starving the pull turns one
+        // refused row into an app that has quietly stopped receiving anything at all. Measured on
+        // a real account: a single rejected preference write blocked every incoming row for three
+        // days, and because a blocked sync still reports its error to nobody in particular, no
+        // screen ever said so. The client list simply went stale and looked fine.
+        //
+        // Pulling anyway is safe. Reconciliation already refuses to delete a row that has an
+        // outbox entry waiting, so local work that has not reached the server survives a pull
+        // that does not know about it yet.
         const pulled = await remote.pull();
-        return { remote: true, pushed, pulled, pending: (await storage.pending()).length, error: null };
+        return {
+          remote: true,
+          pushed,
+          pulled,
+          pending: (await storage.pending()).length,
+          error: blocked ? `${blocked.table}: ${blocked.message}` : null,
+        };
       } catch (error) {
         return {
           remote: true,

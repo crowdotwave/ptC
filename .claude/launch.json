@@ -4,7 +4,7 @@
     {
       "name": "ptc",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8123", "--directory", "."],
+      "runtimeArgs": ["-m", "http.server", "8123"],
       "port": 8123
     }
   ]

@@ -191,6 +191,41 @@ Every table gets RLS enabled with no permissive default. Policies:
 - Write a test that logs in as client A and attempts to read client B's set_logs. It must
   return zero rows. This test runs before any release.
 
+## The write map
+
+Every write the app performs, who performs it, and the policy that has to allow it. Keep this
+current. A new `storage.put` against a table not listed here needs a row adding, and if you
+cannot name the policy that permits it, that is the finding rather than a formality.
+
+| table | written from | acting as | policy that must allow it |
+| --- | --- | --- | --- |
+| `sessions` | logging screen | the client | `sessions_client_all` |
+| `set_logs` | logging screen | the client | `set_logs_client_insert`, insert only |
+| `program_templates` | builder, importer | the trainer | `program_templates_trainer_all` |
+| `template_days` | builder, importer | the trainer | `template_days_trainer_all` |
+| `template_items` | builder, importer | the trainer | `template_items_trainer_all` |
+| `exercises` | builder, on a new lift | the trainer | `exercises_trainer_write` |
+| `assignments` | builder on assign, trainer view on deload | the trainer | `assignments_trainer_all` |
+| `clients` | builder, on creating a client | the trainer | `clients_trainer_all` |
+| `clients` | unit switch | **the client, their own row** | `clients_self_update`, update only |
+| `trainers` | unit switch | **the trainer, their own row** | `trainers_update`, update only |
+
+The last two rows are why this table exists. Everything else has one writer and one policy. Those
+two are written by a second person under a second policy, and both of those policies permit an
+update and nothing else.
+
+**So `clients` and `trainers` may never be written with an upsert.** PostgREST sends an upsert as
+`INSERT ... ON CONFLICT DO UPDATE`, and Postgres validates the insert policy's `with check` before
+it ever reaches the update path. On `clients` that check is `clients_trainer_all`, so somebody who
+is both a trainer and a client of a different coach is refused on their own row. On `trainers` it
+is `auth_user_id = auth.uid()`, and the adapter is required to strip `auth_user_id` from every
+write, so the check reads a null that cannot legally be sent. `js/remote.js` updates these two
+first and inserts only when nothing was there.
+
+This cost three days of a completely silent outage: a rejected preference write sat at the head of
+the outbox, a blocked push used to skip the pull entirely, and no screen said a word. Two of those
+three are now fixed in code. The third is this table.
+
 ## The logging screen
 
 This is the only screen where execution quality decides whether the product gets used.
@@ -204,9 +239,37 @@ Requirements:
   Logging an identical set is a single tap.
 - Adjusting weight or reps is a tap on a stepper, not a keyboard. Keyboard is the fallback,
   never the default.
-- Rest timer starts automatically on set completion and is visible without scrolling.
+- Rest timer starts automatically on set completion and is visible without scrolling. It does not
+  survive the end of the session: the summary card replaces it rather than sharing a screen with
+  it, because a countdown next to "Session logged" is telling somebody to get ready for a set that
+  does not exist. Undo brings the set back and the timer with it.
 - A set is logged optimistically. The UI never blocks on the network.
-- Undo the last logged set is always available for the duration of the session.
+- **How many sets there are comes from `target_sets`. What is on them comes from history.** These
+  look like one question and are not. Building the plan out of last session's rows answers both
+  from history, and then a session cut short rewrites the program: four sets prescribed, one
+  logged, and the next visit reads "Set 1 of 1", closes itself after that single log because a
+  single set was the whole plan, and hands one set of history to the visit after that. A
+  prescription that decays every time somebody is interrupted is not a prescription. Where history
+  is short of the count, the remaining sets are prefilled from the last working set of that lift
+  and say `Carried from your last set`, never `Last time`, because there is no row at that index
+  and claiming one is the screen inventing a history it does not have. `js/plan.js` owns both
+  rules. Warmups do not count against the prescription.
+- **An interrupted session is picked back up, not started over.** This screen's whole state is one
+  object in one tab, and a locked phone or a discarded tab loses it. Nothing logged is ever lost,
+  because the rows are on disk and `set_logs` is append only, so the rows are enough to rebuild
+  where the cursor was, what is in the undo stack, and which extra sets had been added.
+  `js/session.js` does it and both this screen and Progress read the answer from there, so the
+  offer to resume and the ability to resume cannot disagree. An unfinished session stays resumable
+  for six hours, which is longer than any session and shorter than the gap to the next one:
+  without a bound, `completed_at is null` is also what an abandoned session looks like forever.
+  The screen says so on arrival, naming the day and the count, because the failure this fixes was
+  not only landing on the wrong day, it was having no way to tell whether the session was still
+  going.
+- `pickDay` advances the rotation from the last session, and a session exists the moment the first
+  set is logged. So anything that reloads mid workout has to check for an open session first, or
+  back and chest becomes shoulders.
+- Undo the last logged set is always available for the duration of the session, including after a
+  reload, and including for sets logged before it.
 - Adding a set is one tap and appends to the lift the client is on, prefilled from wherever the
   steppers already sit. The added set is written with `set_logs.is_extra` true, recorded at log
   time rather than inferred later from the assignment snapshot, because the trainer needs

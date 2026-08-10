@@ -14,11 +14,13 @@
 import { makeRecord, getDeviceId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
-import { activeSetLogs, lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
+import { lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
+import { planForItem } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
+import { openSession, replaySession } from './js/session.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import {
   unit,
@@ -142,13 +144,18 @@ async function loadClientData(storage, clientId) {
 /**
  * The planned sets, in order, each already carrying the prefill it needs.
  *
- * Where there is history, the plan is exactly what the client did last time for that exercise,
- * set index for set index. That is both the prescription a logging screen actually wants and
- * the only way "last session's weight and reps for that exact exercise and set index" can be
- * true by construction rather than by lookup.
+ * The decisions live in js/plan.js so they can be tested without a DOM. What is left here is the
+ * part that genuinely needs the adapter: reading this client's history for each lift, and reading
+ * the live exercises table for equipment and increments.
+ *
+ * `exclude` is the session currently being resumed. Its rows must not reach the prefill, because
+ * the prefill reads the most recent session and a session still in progress is the most recent
+ * one, which would rebuild the plan as a copy of the sets already logged.
  */
-async function buildPlan(storage, day, sessions) {
-  const sessionStartById = new Map(sessions.map((s) => [s.id, s.started_at]));
+async function buildPlan(storage, day, sessions, { exclude = null } = {}) {
+  const sessionStartById = new Map(
+    sessions.filter((session) => session.id !== exclude).map((s) => [s.id, s.started_at]),
+  );
   const plan = [];
 
   for (const item of sortedItems(day)) {
@@ -163,27 +170,10 @@ async function buildPlan(storage, day, sessions) {
 
     state.best.set(item.exercise_id, bestEstimated1rm(mine, sessionStartById));
 
-    if (previous && previous.bySetIndex.size) {
-      for (const [setIndex, row] of [...previous.bySetIndex.entries()].sort((a, b) => a[0] - b[0])) {
-        plan.push({
-          item,
-          setIndex,
-          isWarmup: row.is_warmup,
-          isExtra: false,
-          logMode: item.log_mode ?? 'weight_reps',
-          weightKg: row.weight_kg,
-          reps: row.reps,
-          lastWeightKg: row.weight_kg,
-          lastReps: row.reps,
-          lastOn: previous.startedAt,
-        });
-      }
-      continue;
-    }
-
-    // No history for this lift, so this runs exactly once per client per exercise. The
-    // trainer's starting_weight_kg is the real answer. When it is blank, prefill.js falls back
-    // to a fact about the equipment rather than a guess about the person, deliberately light.
+    // The trainer's starting_weight_kg is the real answer for a lift with no history. When it is
+    // blank, prefill.js falls back to a fact about the equipment rather than a guess about the
+    // person, deliberately light.
+    //
     // Optional chaining on the snapshot, deliberately. A snapshot is frozen JSON that can be
     // written by the seed, by the builder, by an importer, or by hand, and one missing nested
     // field must not take the whole logging screen down to a blank page mid gym. The live
@@ -194,34 +184,7 @@ async function buildPlan(storage, day, sessions) {
       incrementKg: state.increments.get(item.exercise_id),
     });
 
-    // A hold has no rep target at all, and a carry may not have one either, so the second
-    // stepper needs an opening value that is not null. Ten seconds and one rep are both
-    // obviously too little on purpose, the same bet the opening weight makes: erring low costs
-    // a few taps, erring high costs a failed set.
-    const openingCount =
-      item.target_reps_low ?? (item.log_mode === 'time_hold' ? 10 : 1);
-
-    // A hold prescribes sets but no load, and target_sets can be null on a row a trainer left
-    // blank, so the plan needs at least one set to step through or the lift silently vanishes.
-    const setCount = Number.isInteger(item.target_sets) && item.target_sets > 0 ? item.target_sets : 1;
-
-    for (let setIndex = 0; setIndex < setCount; setIndex += 1) {
-      plan.push({
-        item,
-        setIndex,
-        isWarmup: false,
-        isExtra: false,
-        logMode: item.log_mode ?? 'weight_reps',
-        // A lift with no external load opens at zero, which is the truth rather than a fallback.
-        weightKg:
-          item.log_mode === 'bodyweight_reps' || item.log_mode === 'time_hold' ? 0 : opening.kg,
-        reps: openingCount,
-        lastWeightKg: null,
-        lastReps: null,
-        lastOn: null,
-        openingSource: opening.source,
-      });
-    }
+    plan.push(...planForItem(item, previous, opening));
   }
 
   return plan;
@@ -246,6 +209,7 @@ function render() {
   }
 
   ui.done.hidden = true;
+  ui.rest.hidden = false;
   ui.stepperWeight.hidden = false;
   ui.stepperReps.hidden = false;
   ui.log.hidden = false;
@@ -272,10 +236,17 @@ function render() {
     ? 'Warmup. Move well, save it for the working sets.'
     : written || 'No target set.';
 
+  // Three different things this line can truthfully say, and they are not interchangeable. A set
+  // the client has a row for at this exact index gets the date. A set made up to the trainer's
+  // count gets the number it was prefilled from and says where it came from, because there is no
+  // row at this index and claiming one would be the screen inventing history. Only a lift with no
+  // history at all gets the first time copy.
   ui.lastTime.textContent =
-    entry.lastWeightKg === null
-      ? openingCopy(entry.openingSource)
-      : `Last time ${formatWeight(entry.lastWeightKg)} ${unit()} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`;
+    entry.lastWeightKg !== null
+      ? `Last time ${formatWeight(entry.lastWeightKg)} ${unit()} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`
+      : entry.carriedFrom
+        ? `Carried from your last set, ${formatWeight(entry.carriedFrom.weightKg)} ${unit()} for ${entry.carriedFrom.reps}.`
+        : openingCopy(entry.openingSource);
 
   renderValues();
   renderUndo();
@@ -327,6 +298,12 @@ function renderUndo() {
 
 function renderDone() {
   ui.done.hidden = false;
+  // The session is over, so there is nothing left to rest for. A countdown next to the words
+  // "Session logged" is the screen telling somebody to get ready for a set that does not exist,
+  // and it was also the only place the one green shared a screen with the data cyan. Undo brings
+  // the timer back with the set, which is the only state where it means anything again.
+  stopRest();
+  ui.rest.hidden = true;
   ui.stepperWeight.hidden = true;
   ui.stepperReps.hidden = true;
   ui.log.hidden = true;
@@ -480,7 +457,10 @@ function logSet() {
     state.reps = next.reps;
   }
 
-  startRest(entry.item.rest_seconds);
+  // Only when there is something to rest for. The last set of the day is followed by the summary,
+  // not by another set.
+  if (next) startRest(entry.item.rest_seconds);
+  else stopRest();
   exitTypingMode();
   clearNotice();
   render();
@@ -785,12 +765,30 @@ async function chooseDay(dayIndex) {
   if (!picked || picked.day_index === state.day.day_index) return;
 
   state.day = picked;
+
+  // An open session with nothing left in it, because every set was undone. It is still the row
+  // the next set will be written against, so it has to follow the day picker or the session would
+  // file itself under the day the client changed their mind about.
+  if (state.sessionRecord) {
+    const moved = {
+      ...state.sessionRecord,
+      day_index: picked.day_index,
+      updated_at: new Date().toISOString(),
+    };
+    state.sessionRecord = moved;
+    if (state.sessionWritten) write(() => state.storage.put('sessions', moved));
+  }
+
   const sessions = await state.storage.query(
     'sessions',
     { client_id: state.client.id },
     { orderBy: 'started_at' },
   );
-  state.plan = await buildPlan(state.storage, picked, sessions);
+  // Only reachable with nothing logged, so there is nothing to replay. The session row can still
+  // exist, if every set in it was undone, and it stays excluded for the same reason as on load.
+  state.plan = await buildPlan(state.storage, picked, sessions, {
+    exclude: state.sessionRecord ? state.sessionRecord.id : null,
+  });
   state.cursor = 0;
   const first = state.plan[0];
   if (first) {
@@ -901,7 +899,22 @@ async function main() {
   state.equipment = new Map(exercises.map((row) => [row.id, row.equipment]));
 
   const snapshot = assignment.snapshot;
-  state.day = pickDay(snapshot, sessions);
+
+  // A session already in progress, if there is one.
+  //
+  // This screen's whole state is one object in one tab, and a phone that locks for long enough
+  // loses that tab. Everything logged is on disk, so what is actually missing after a reload is
+  // only the app's memory of where it had got to, and the rows are enough to rebuild it.
+  //
+  // Without this the reload was worse than starting over. pickDay advances from the last session,
+  // and a session exists the moment the first set is logged, so coming back mid workout landed on
+  // the next day of the split rather than the one being trained: back and chest turned into
+  // shoulders. Choosing the right day again then rebuilt the plan from history that now included
+  // the half finished session, so the day shrank to the sets already done and closed itself on
+  // the next tap.
+  const open = openSession(sessions);
+  const openDay = open ? sortedDays(snapshot).find((day) => day.day_index === open.day_index) : null;
+  state.day = openDay ?? pickDay(snapshot, sessions);
 
   // A program with no days in it. Reachable today, because deleting the last day of a template
   // in the builder is allowed. From this side of the app it is the same situation as no program
@@ -913,9 +926,21 @@ async function main() {
     return;
   }
 
-  state.plan = await buildPlan(storage, state.day, sessions);
+  state.plan = await buildPlan(storage, state.day, sessions, { exclude: openDay ? open.id : null });
 
-  const first = state.plan[0];
+  if (openDay) {
+    const rows = await storage.query('set_logs', { session_id: open.id });
+    const replayed = replaySession(state.plan, rows, state.best);
+    state.plan = replayed.plan;
+    state.logged = replayed.logged;
+    state.cursor = replayed.cursor;
+    state.sessionRecord = open;
+    // Already on disk, so the next write must not try to insert it again.
+    state.sessionWritten = true;
+    state.sessionClosed = false;
+  }
+
+  const first = state.plan[state.cursor];
   if (first) {
     state.weightKg = first.weightKg;
     state.reps = first.reps;
@@ -936,6 +961,15 @@ async function main() {
   wire();
   stopRest();
   render();
+
+  // Said out loud, because the failure this fixes was not only landing on the wrong day, it was
+  // having no way to tell whether the session was still going. The count is what makes it
+  // checkable against the room: somebody who has done four sets and reads four knows the app
+  // kept up. Neutral tone, since nothing went wrong and being interrupted is not a failure.
+  if (openDay && state.logged.length) {
+    const sets = state.logged.length;
+    showNotice(`Back in ${dayTitle(state.day)}, ${sets} ${sets === 1 ? 'set' : 'sets'} in.`);
+  }
 }
 
 main();

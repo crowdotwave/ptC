@@ -16,6 +16,7 @@ import { getSupabase, hasConfig } from './supabase.js';
 import { currentSession, signOut } from './auth.js';
 import { createRemote } from './remote.js';
 import { seed, isSeeded, getDefaultClientId } from './seed.js';
+import { publishSync } from './sync-status.js';
 
 // What the local database currently holds. Either 'local' for seeded fake data, or the auth
 // user whose rows are mirrored here.
@@ -151,7 +152,13 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   // Every later one runs behind whatever is already on screen.
   const counts = await storage.counts();
   const empty = wiped || Object.values(counts).every((n) => n === 0);
-  const first = storage.sync();
+  // Published either way. The result of the sync a page does not wait for is exactly the result
+  // that used to vanish, and it is the one carrying the news that this device has stopped
+  // talking to the server.
+  const first = storage.sync().then((result) => {
+    publishSync(result);
+    return result;
+  });
   if (empty) {
     const result = await first;
     if (result.error && !error) error = result.error;
