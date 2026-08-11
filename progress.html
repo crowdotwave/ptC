@@ -31,9 +31,17 @@
            Rendered once, outside render(), because this screen redraws on every unit toggle and
            on every resize and neither should throw away which month you had scrolled to. -->
       <section class="consistency" id="consistency" aria-labelledby="consistency-title">
+        <!-- The arrows sit beside the title, and the all time count sits under it. They used to be
+             a right aligned row of their own above the scroller, which spent a whole band of a
+             phone screen on two buttons and left the title's line half empty. Putting all three on
+             one line does not fit: "Consistency" is 195px at the mid set tier and the count plus
+             the arrows is another 158, against 324 of card on a 390px phone. -->
         <div class="consistency__head">
-          <h1 class="consistency__title" id="consistency-title">Consistency</h1>
-          <span class="consistency__total num" id="consistency-total"></span>
+          <div class="consistency__heading">
+            <h1 class="consistency__title" id="consistency-title">Consistency</h1>
+            <span class="consistency__total num" id="consistency-total"></span>
+          </div>
+          <div class="cal__nav" id="cal-nav"></div>
         </div>
         <div id="consistency-body"></div>
       </section>

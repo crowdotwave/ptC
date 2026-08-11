@@ -116,8 +116,13 @@ export function renderMonth(month) {
   return (
     `<section class="cal__month" data-month="${esc(month.key)}" aria-label="${esc(month.label)}">` +
     `<table class="cal__grid">` +
-    `<caption class="cal__caption"><span class="cal__monthname">${esc(month.label)}</span>` +
-    `<span class="cal__count num">${count}</span></caption>` +
+    // The row inside the caption is a div rather than the caption itself. A <caption> laid out as a
+    // flex container stops taking the table's width and shrinks to fit its own content, which put
+    // "August 2026" and "3 sessions" on four lines in a 46px column. The caption keeps its own
+    // display and the div does the arranging.
+    `<caption class="cal__caption"><div class="cal__captionrow">` +
+    `<span class="cal__monthname">${esc(month.label)}</span>` +
+    `<span class="cal__count num">${count}</span></div></caption>` +
     `<thead><tr>` +
     WEEKDAYS.map(
       ([short, full]) =>
@@ -134,7 +139,28 @@ export function renderMonth(month) {
 }
 
 /**
- * The whole grid: a scroller of month panels, the controls that move it, and the detail line.
+ * The month arrows, which live in the card's header rather than above the scroller.
+ *
+ * Returned separately from the grid because they belong to a different row of the page. The header
+ * already had a whole line to itself carrying a title and a session count, and the arrows had a
+ * second line to themselves carrying nothing else, which is 52px of a phone screen spent on
+ * whitespace beside two buttons. The caller drops this into that row.
+ *
+ * Nothing here names the month being looked at. The panel's own caption does that and scrolls with
+ * it, and a second label up here would be a second answer to "which month is this" that has to be
+ * kept in step with the scroll position. See monthInView in progress.js on why this screen keeps
+ * exactly one.
+ */
+export function renderMonthNav(built) {
+  if (built.months.length < 2) return '';
+  return (
+    `<button type="button" class="button-secondary cal__step" data-step="-1" aria-label="Previous month">&lsaquo;</button>` +
+    `<button type="button" class="button-secondary cal__step" data-step="1" aria-label="Next month">&rsaquo;</button>`
+  );
+}
+
+/**
+ * The grid itself: a scroller of month panels and the detail line under it.
  *
  * The empty state is an invitation and not an apology, per the copy rules. It is also the state a
  * brand new client lands on, which is the single most common first view of this screen.
@@ -144,16 +170,7 @@ export function renderConsistency(built) {
     return '<p class="cal__empty-state">Log a session and this fills in.</p>';
   }
 
-  const controls =
-    built.months.length > 1
-      ? `<div class="cal__nav">` +
-        `<button type="button" class="button-secondary cal__step" data-step="-1" aria-label="Previous month">&lsaquo;</button>` +
-        `<button type="button" class="button-secondary cal__step" data-step="1" aria-label="Next month">&rsaquo;</button>` +
-        `</div>`
-      : '';
-
   return (
-    controls +
     `<div class="cal__scroller" id="cal-scroller">${built.months.map(renderMonth).join('')}</div>` +
     // Height is reserved in CSS so tapping a day does not shift the grid out from under the
     // finger that just tapped it.

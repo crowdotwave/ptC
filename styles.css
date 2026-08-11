@@ -65,6 +65,31 @@
    * --text-primary reads 14.70 on them, so the glyphs give up nothing for it. */
   --surface-base-lit: #241634;
 
+  /* ---------------------------------------------------------------- veils
+   *
+   * The card language on the reading screens, and the only place this palette is translucent.
+   *
+   * A veil is --surface-raised mixed most of the way to transparent. Over the pitch black base
+   * that resolves DARKER than --surface-raised, never lighter, which is what makes this safe:
+   * every text token measured against --surface-base keeps at least the ratio it was measured at,
+   * so the "on raised, --text-primary only" rule does not follow a veil onto a card. A veiled card
+   * is a base surface wearing a tint, not a raised one.
+   *
+   * It is not decoration. The progress screen is a stack of five things that all used to sit
+   * directly on black with nothing but a gap between them, so the eye had to use spacing alone to
+   * work out where the calendar ended and the first chart began. A veil groups without adding a
+   * hard box: --veil-edge is a hairline rather than a border, and the light still falls from above
+   * through --veil-lit. Only the scrolling screens get them. The logging screen is a single object
+   * at arm's length and has nothing to group.
+   *
+   * --veil-blur is what makes the tab bar work rather than the cards: content scrolls under it, so
+   * there is something behind it to blur. Over black there is nothing to blur, and that is fine.
+   * The value is here so the two cannot disagree about how frosted this app is. */
+  --veil: color-mix(in srgb, var(--surface-raised) 16%, transparent);
+  --veil-edge: color-mix(in srgb, var(--surface-raised-rim) 34%, transparent);
+  --veil-lit: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --veil-blur: 18px;
+
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
    *
    * That is the bill for widening the surface separation to 2.51. Raising the surface lifted
@@ -118,7 +143,7 @@
   --pr: #1fe3ff; /* 13.49 / 5.38  the record moment. The only token that glows bright */
   --progress: #ade8f2; /* 15.60 / 6.22  a value that improved */
 
-  /* Done. The only green in the app, and it is fenced in on purpose.
+  /* Done. The only green MEANING in the app, and it is still fenced in on purpose.
    *
    * Emerald as normally drawn sits around 158 degrees, which is 32 from --accent-data at 190 and
    * within a hair of it in luminance. That is the same collision the 196 degree teal ground had,
@@ -126,9 +151,14 @@
    * anywhere cyan already carries meaning: not the rest timer, not a chart, not the record. It
    * marks one thing, a session that is finished, on a card that also says so in words.
    *
+   * The fence used to be worded as one TOKEN in one place. It is now one CLAIM, because the
+   * emerald also faces slot 2 of the consistency grid, where a filled cell is that same finished
+   * session drawn as a calendar square rather than as a card. The arithmetic for why the moss
+   * green it replaced could not be saved is under --split-2-face. The two never share a screen.
+   *
    * If a second green ever seems necessary, the honest move is to check what it would sit next
    * to before picking the hue, not after. */
-  --done: #3ddc84; /* 11.77 / 4.69  the session summary, and nothing else */
+  --done: #3ddc84; /* 11.77 / 4.69  the session summary, and the grid's slot 2 face family */
 
   /* ---------------------------------------------------------------- split identity
    *
@@ -160,15 +190,30 @@
    * makes these look like one family.
    *
    * Hue placement, after excluding what is already owned: cyan 190 +/- 40, action orange 22 +/-
-   * 40, --done at 147, --deload at 224 (measured, not the 240 it looks like), and the ground at
-   * 272. What survives is roughly 62-122 and 297-342, plus a narrow 230-262 between the deload
-   * and the ground. Three hues is what that affords. It is not four.
+   * 40, --deload at 224 (measured, not the 240 it looks like), and the ground at 272. What
+   * survives is roughly 62-150 and 297-342, plus a narrow 230-262 between the deload and the
+   * ground. Three hues is what that affords. It is not four.
+   *
+   * SLOT 2 WAS A MOSS GREEN AT 88 DEGREES AND IS NOW THE EMERALD AT 150, which is a deliberate
+   * loosening of the fence around --done and is worth reading before it is tightened again. The
+   * green window this palette has is 62-122, and at the Y <= 0.0801 ceiling every hue in it lands
+   * on olive: #365513 is what the arithmetic gives and olive is what it looks like, sitting beside
+   * a rose and an indigo that both hold real chroma down here. That is a hue window this design
+   * cannot spend, not a value that needed retuning.
+   *
+   * Taking 147 instead is defensible on the meaning rather than only on the look. --done marks a
+   * finished session, and a filled cell on this grid IS a finished session, so the green is not
+   * being borrowed for a second job: it is the same claim at a different scale. The two never
+   * share a screen either, since the summary card lives on the logging screen and the grid lives
+   * on progress, so there is no place a bright emerald card and a dark emerald slab can be
+   * compared and read as different greens. What it costs is the flat sentence "there is exactly
+   * one green", which is now "there is one green MEANING", and CLAUDE.md says so.
    *
    * Order matters, because a two day upper/lower split is the common case and gets slots 1 and 2:
-   * those are 126 degrees apart, the widest pair available. Slot 3 sits 24 degrees off the ground
-   * violet, which is close, and is acceptable only at slot 3, where two strongly separated colours
-   * are already on screen. The ground never appears as a cell inside the grid, so they do not
-   * touch.
+   * those are 172 degrees apart, which is the widest pair this palette has ever managed and 46
+   * better than the moss it replaced. Slot 3 sits 24 degrees off the ground violet, which is
+   * close, and is acceptable only at slot 3, where two strongly separated colours are already on
+   * screen. The ground never appears as a cell inside the grid, so they do not touch.
    *
    * Slot 4 is deliberately colourless and is the last slot: a fifth day reuses it. A near neutral
    * is the thing this file rejected for the GROUND, on the grounds that a surface carrying the
@@ -185,15 +230,16 @@
    * Ratios are against --surface-base then against --surface-raised, same as every column above.
    * Faces and shades clear the 7:1 between sets floor for --text-primary. Rims do not and are not
    * asked to: a rim is a lit edge, exactly like --surface-raised-rim at 5.28, and never carries
-   * text. Weakest face pair anywhere is slot 1 against slot 4 at 1.02 luminance, carried by 57
-   * degrees of hue and by the glyph. */
+   * text. Weakest face pair anywhere is slot 1 against slot 4 at 1.02 luminance, carried by 45
+   * degrees of hue and by the glyph. Slot 2 against slot 4 is 1.06, so swapping the moss for the
+   * emerald did not move the binding pair. */
   --split-1-face: #782f5d; /*  2.36 / 1.06   rose, 322deg. Text on it 7.72 */
   --split-1-shade: #6a2952; /* 2.06 / 1.22   text 8.84 */
   --split-1-rim: #a9357f; /*   3.52 / 1.40   lit edge, never text */
 
-  --split-2-face: #365513; /*  2.47 / 1.02   moss, 88deg. Text on it 7.38 */
-  --split-2-shade: #304b11; /* 2.15 / 1.17   text 8.49 */
-  --split-2-rim: #467313; /*   3.72 / 1.48   lit edge, never text */
+  --split-2-face: #0e5833; /*  2.46 / 1.02   emerald, 150deg. Text on it 7.40 */
+  --split-2-shade: #0c4b2c; /* 2.06 / 1.22   text 8.85 */
+  --split-2-rim: #117242; /*   3.51 / 1.40   lit edge, never text */
 
   --split-3-face: #423691; /*  2.16 / 1.16   indigo, 248deg. Text on it 8.43 */
   --split-3-shade: #3a2f80; /* 1.90 / 1.32   text 9.56 */
@@ -273,6 +319,8 @@
   --s-5: 1.5rem;
 
   --radius: 12px;
+  /* Cards are rounder than controls, so a container never reads as a very large button. */
+  --radius-card: 18px;
   --tap: 44px;
   --rest-track-height: 8px;
 
@@ -1315,10 +1363,24 @@ button.worknav__row:active {
  * the same radii as the screen, and never goes near text.
  */
 
+/* Veiled cards, matching the consistency grid above them. Three charts, a lift name and a chip row
+ * all sitting on bare black with nothing but a gap between them meant the eye had to use spacing
+ * alone to work out where one measurement ended and the next began, and spacing is the first thing
+ * that goes when a caption runs to two lines. The tint groups; the hairline says where the edge is
+ * without drawing a frame around a frame.
+ *
+ * A veil resolves darker than --surface-raised over the black base, never lighter, so the "on
+ * raised, --text-primary only" rule does not follow it here: --text-secondary keeps at least the
+ * 11.26 it measures on the base, which is what the 14px caption needs. */
 .chart {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
+  padding: var(--s-4) var(--s-3);
+  border: 1px solid var(--veil-edge);
+  border-radius: var(--radius-card);
+  background: var(--veil);
+  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
 .chart__head {
@@ -1326,6 +1388,7 @@ button.worknav__row:active {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--s-3);
+  padding-inline: var(--s-1);
 }
 
 .chart__title {
@@ -1344,6 +1407,7 @@ button.worknav__row:active {
 
 .chart__caption {
   margin: 0;
+  padding-inline: var(--s-1);
   color: var(--text-secondary);
   font-size: var(--t-small);
 }
@@ -1430,6 +1494,15 @@ button.worknav__row:active {
   stroke-dasharray: 4 3;
 }
 
+/* The rules an axis value is read against. Deliberately the quietest line in the file: a grid that
+ * competes with the series is a grid that has to be looked past, and these exist to be counted
+ * rather than seen. Solid rather than dashed, because a dashed rule is already spoken for by
+ * .chart__rule, which means a block boundary. */
+.chart__grid {
+  stroke: color-mix(in srgb, var(--surface-raised) 48%, transparent);
+  stroke-width: 1;
+}
+
 .chart__baseline {
   stroke: var(--surface-raised);
   stroke-width: 1;
@@ -1456,6 +1529,18 @@ button.worknav__row:active {
   font-family: var(--font);
   font-size: 12px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  filter: none;
+}
+
+/* What the latest point is worth, printed at the point. --text-primary rather than --accent-data,
+ * because it sits within a few pixels of a glowing cyan stroke and a cyan numeral there would read
+ * as part of the line rather than as a reading off it. No glow, per the hard rule: this is text. */
+.chart__now {
+  fill: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   filter: none;
 }
@@ -1544,31 +1629,61 @@ button.worknav__row:active {
  *   colour    the face itself. Reinforcement, fourth of four.
  */
 
+/* A veiled card rather than a run of elements on bare black.
+ *
+ * This is the centrepiece and it was the least contained thing on the screen: the month grid, the
+ * legend and the detail line all sat directly on the base with only a gap holding them together,
+ * and the lift name below started at the same left edge in the same colour, so there was nothing
+ * saying where the client wide part of the screen ended and the per lift part began. The veil says
+ * it without drawing a box: a tint, a hairline, and the same fall of light every raised thing in
+ * this app has. */
 .consistency {
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--veil-edge);
+  border-radius: var(--radius-card);
+  background: var(--veil);
+  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
+/* Two columns, and the count stacks under the title rather than sitting beside it.
+ *
+ * All three on one line does not fit and cannot be made to: "Consistency" is about 195px at the
+ * 32px mid set tier, the count and the arrows are another 158, and a 390px phone offers 324 of
+ * card. Letting that wrap left the count and the arrows floating on a line of their own under a
+ * half empty heading. Stacking is the same two lines arranged on purpose, and it survives 360px
+ * with room to spare. */
 .consistency__head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--s-3);
+}
+
+.consistency__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .consistency__title {
   margin: 0;
   font-size: var(--t-md);
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   line-height: 1.1;
 }
 
+/* The all time figure, which is the evidence this product exists to show. Under the title, in the
+ * between sets tier, because it is read once on arrival and not glanced at mid set. */
 .consistency__total {
   color: var(--text-secondary);
-  font-size: var(--t-body);
+  font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* An invitation, not an apology. This is the first view a brand new client gets of this screen. */
@@ -1582,32 +1697,60 @@ button.worknav__row:active {
   text-align: center;
 }
 
+/* Joined, not two loose buttons. One control moving one view, so the shared edge says so, the same
+ * argument the unit switch makes at the other end of the header. */
 .cal__nav {
   display: flex;
-  justify-content: flex-end;
-  gap: var(--s-2);
+  flex: 0 0 auto;
+  align-items: stretch;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.cal__nav:empty {
+  display: none;
 }
 
 .cal__step {
-  width: var(--tap);
+  width: 2.25rem;
+  min-width: 0;
   padding: 0;
-  font-size: var(--t-sm);
+  border-radius: 0;
+  font-size: var(--t-body);
   line-height: 1;
 }
 
-/* Bleeds to the screen edge, same affordance as the lift scroller, and padded for the same reason
- * that one is: overflow-x clips a focus ring, and the ring is 6px. */
+.cal__step + .cal__step {
+  border-left-width: 0;
+}
+
+/* Full bleed across the card, and no horizontal padding of its own. Both halves of that matter.
+ *
+ * The negative margin cancels the card's padding exactly, so the grid keeps the width it had when
+ * this screen had no card at all. That is not aesthetic: seven columns and eight gutters have to
+ * fit and still clear the 44px tap floor, and at a 360px viewport there is nothing spare. A card
+ * that paid for its own padding out of the cells would have taken them to 40px.
+ *
+ * Zero padding then makes each panel exactly the scroller's width, so no part of the neighbouring
+ * month is ever visible. It used to be: the panel was the content width and the 16px of padding
+ * either side was a window onto the month next door, showing a column of cells sliced down the
+ * middle against the screen edge. That was a half visible affordance borrowed from the lift
+ * scroller, where a half chip usefully says there is more. It does not transfer, and the rule
+ * below already says why: snapping here is mandatory precisely because half of two months is not
+ * a thing anybody wants to be looking at. The arrows in the header carry the affordance instead.
+ *
+ * What the padding was actually there for was the focus ring, which overflow-x clips. The cells
+ * take an inset ring instead, further down. */
 .cal__scroller {
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
   margin: 0 calc(var(--s-4) * -1);
-  padding: var(--s-1) var(--s-4);
+  padding: var(--s-1) 0;
   /* mandatory, not the proximity the chip rows use. Those snap partially visible pills; a month
    * is a full panel and half of two months is not a thing anybody wants to be looking at. */
   scroll-snap-type: x mandatory;
-  scroll-padding-left: var(--s-4);
 }
 
 .cal__scroller::-webkit-scrollbar {
@@ -1643,35 +1786,43 @@ button.worknav__row:active {
   }
 }
 
+/* The grid runs to the card's edge, so the words above it get their own inline padding back.
+ * A caption jammed against a hairline reads as a rendering accident. */
 .cal__caption {
+  padding: 0 var(--s-2) var(--s-3);
+  text-align: left;
+  caption-side: top;
+}
+
+.cal__captionrow {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--s-3);
-  padding: 0 var(--s-1) var(--s-2);
-  text-align: left;
-  caption-side: top;
 }
 
 .cal__monthname {
   color: var(--text-primary);
   font-size: var(--t-body);
   font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
+/* Quieter than the card's own total, which is the all time figure two lines above it. Two counts
+ * in the same weight forty pixels apart read as the same number printed twice. */
 .cal__count {
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
 }
 
 .cal__weekday {
-  padding-bottom: var(--s-1);
+  padding-bottom: var(--s-2);
   color: var(--muted);
-  font-size: var(--t-small);
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
 }
 
 .cal__weekday abbr {
@@ -1696,11 +1847,11 @@ button.worknav__row:active {
   gap: 1px;
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: 11px;
 }
 
 .cal__empty {
-  border: 1px solid color-mix(in srgb, var(--surface-raised) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--surface-raised) 42%, transparent);
   color: var(--muted);
 }
 
@@ -1721,6 +1872,9 @@ button.worknav__row:active {
  * surface's contrast ceiling and --text-primary is measured against it. */
 .cal__day {
   position: relative;
+  /* Clips the slot bar to the cell's own rounded shape. See the note on ::before below: this line
+   * is a bug fix and not a tidy up. */
+  overflow: hidden;
   border: 1px solid var(--cal-rim);
   background: linear-gradient(180deg, var(--cal-face) 0%, var(--cal-shade) 100%);
   color: var(--text-primary);
@@ -1748,11 +1902,28 @@ button.worknav__row:active {
 
 /* Signal three: a lit segment on the top edge, positioned by slot. This is the channel that
  * survives when the hues do not, which is the case for slot 3 against slot 4 and for anybody
- * reading this with a colour vision deficiency. */
+ * reading this with a colour vision deficiency.
+ *
+ * THIS IS WHAT WAS DOUBLING, and the geometry is worth writing down so it does not come back.
+ *
+ * The bar was an absolutely positioned box at top: -1px with square top corners, on a parent that
+ * clipped nothing. At slot 1 it started 12% in. On a phone a cell is about 46px and the corner
+ * radius was 10px, so 12% is 5.5px and the bar began four and a half pixels INSIDE the curve,
+ * where the cell itself has no top edge yet. It painted a hard cornered tab, plus 8px of its own
+ * glow, hanging off the rounded corner of the slab: at 46px that reads as a second, offset
+ * rectangle sitting behind the first, and it showed up on whichever slot happened to sit at 12%.
+ * It was invisible in any mockup drawn larger, because at 300px the same 12% is 36px and clears
+ * the radius comfortably.
+ *
+ * Two independent fixes, because one of them is a percentage and percentages follow whatever the
+ * cell size becomes next. The parent clips, and the slot positions are pulled inside the flat run
+ * of the top edge: at an 11px radius that run is 11px to 35px on a 46px cell, and the four
+ * positions below all land in it. The bar is also at top: 0 rather than -1px, so it sits under the
+ * border rather than over it, and the border keeps its own unbroken line. */
 .cal__day::before {
   content: '';
   position: absolute;
-  top: -1px;
+  top: 0;
   height: 3px;
   border-radius: 0 0 3px 3px;
   background: var(--cal-rim);
@@ -1764,10 +1935,24 @@ button.worknav__row:active {
 .is-slot-3 { --cal-face: var(--split-3-face); --cal-shade: var(--split-3-shade); --cal-rim: var(--split-3-rim); }
 .is-slot-4 { --cal-face: var(--split-4-face); --cal-shade: var(--split-4-shade); --cal-rim: var(--split-4-rim); }
 
-.cal__day.is-slot-1::before { left: 12%; right: 62%; }
-.cal__day.is-slot-2::before { left: 37%; right: 37%; }
-.cal__day.is-slot-3::before { left: 62%; right: 12%; }
-.cal__day.is-slot-4::before { left: 12%; right: 12%; }
+.cal__day.is-slot-1::before { left: 24%; right: 56%; }
+.cal__day.is-slot-2::before { left: 40%; right: 40%; }
+.cal__day.is-slot-3::before { left: 56%; right: 24%; }
+.cal__day.is-slot-4::before { left: 24%; right: 24%; }
+
+/* The one focus ring in this app that faces inward.
+ *
+ * The global ring is 6px of --focus outside the element, and this grid lives in an overflow-x
+ * scroller that clips it, so the first and last column would show two thirds of a ring. Turning it
+ * inward keeps the same two bands in the same order, --surface-base then --focus, and makes them
+ * unclippable. It is legible here because a cell is 44px of flat fill carrying two short strings,
+ * which is not true of the controls the outward ring was designed for. */
+.cal__day:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px var(--surface-base),
+    inset 0 0 0 5px var(--focus);
+}
 
 /* Pressed drops the gradient and goes flat with an inner shadow, so a press reads as physical
  * rather than merely recoloured. Same rule as every other slab in the app. */
@@ -1798,13 +1983,24 @@ button.worknav__row:active {
  * is drawn OUTSIDE the cell rather than on its fill, so it does not fight the slot colour for the
  * cell and so it never passes behind the glyph: the hard rule is that glow does not sit behind
  * text, and the glyph is text. The word "record" is in the cell's label and under the month, so
- * this is never colour on its own. */
+ * this is never colour on its own.
+ *
+ * A record in the Monday or Sunday column loses the outer few pixels of its glow to the scroller's
+ * clip, which is the price of the grid running the full width of the card. The ring itself always
+ * fits, because the table's own border-spacing insets every cell from the panel edge, and the ring
+ * is the part carrying the meaning. Widening the panel to save the glow would take every cell
+ * under the 44px tap floor at a 360px viewport, which is a worse trade by a distance. */
 .cal__day.is-record {
   --glow-tint: color-mix(in srgb, var(--pr) var(--glow-strength-celebrate), transparent);
   box-shadow:
     inset 0 1px 0 0 var(--cal-rim),
     0 0 0 2px var(--pr),
-    0 0 var(--glow-radius-celebrate) 0 var(--glow-tint);
+    /* Celebrate STRENGTH at rest RADIUS, which is what .chart__mark.is-record-ring has always
+       done. This rule claimed to match that one and used the celebrate radius, so the same record
+       threw a 30px halo on the grid and a 14px one on the line two screens down. It also spent
+       twice as much glow outside the cell as there is room for in the Monday and Sunday
+       columns. */
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
 /* A record cannot fall on a deload, since progression.js will not let a back off week set one, so
@@ -1840,9 +2036,26 @@ button.worknav__row:active {
   font-size: var(--t-small);
 }
 
-/* Reserved, so tapping a day does not shift the grid out from under the finger that tapped it. */
+.cal__note {
+  padding-inline: var(--s-2);
+  color: var(--muted);
+}
+
+/* Reserved, so tapping a day does not shift the grid out from under the finger that tapped it.
+ * Sunk into the card as its own well, so the line reads as an answer to the tap rather than as a
+ * paragraph that happened to appear under the grid. */
 .cal__detail {
-  min-height: 2.5em;
+  min-height: 3em;
+  margin-top: 0;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-base) 55%, transparent);
+}
+
+/* The height stays reserved and the well does not. An empty sunken box under the grid reads as a
+ * control waiting to be filled in, which is the one thing this line is not. */
+.cal__detail:empty {
+  background: none;
 }
 
 .cal__detailday {
@@ -1853,16 +2066,21 @@ button.worknav__row:active {
 .cal__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-2) var(--s-3);
+  gap: var(--s-2);
   margin: var(--s-3) 0 0;
-  padding: 0;
+  padding: 0 var(--s-2);
   list-style: none;
 }
 
+/* A pill per split, so the legend reads as a row of keys rather than as a sentence with squares in
+ * it. The swatch is the cell shrunk, which is the rule right below this one. */
 .cal__key {
   display: flex;
   align-items: center;
   gap: var(--s-2);
+  padding: 3px var(--s-2) 3px 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-base) 55%, transparent);
   color: var(--text-secondary);
   font-size: var(--t-small);
 }
@@ -2748,11 +2966,26 @@ button.navlink:disabled {
  * at all, and the confirmation is carried by the second tap and by the word "Discard" sitting
  * where "Keep" was not a moment ago. That is shape and position and words, which is what the
  * encoding rules ask for. */
+/* Veiled like the cards above it, and that is the whole of what this section takes from the design
+ * pass. It stays the plainest thing on the screen: no colour, no glyphs, no slot faces, per the
+ * note at the top of js/session-view.js. A maintenance view that competes with the centrepiece is a
+ * maintenance view in the wrong place. */
 .history {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
-  margin-top: var(--s-5);
+  margin-top: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--veil-edge);
+  border-radius: var(--radius-card);
+  background: var(--veil);
+  box-shadow: inset 0 1px 0 0 var(--veil-lit);
+}
+
+/* The rows already separate themselves, so the last one does not need a line before the card's own
+ * edge. */
+.history__row:last-child {
+  border-bottom: 0;
 }
 
 .history__title {
@@ -2875,6 +3108,14 @@ button.navlink:disabled {
 
 /* ---------------------------------------------------------------- tab bar */
 
+/* The one place in this app where a backdrop filter earns itself. Content scrolls underneath a
+ * fixed bar, so there is something behind it to frost; everywhere else on these screens the thing
+ * behind a veil is the black base and a blur of black is black.
+ *
+ * The fallback is the flat base this used to be, declared first, so a browser without
+ * backdrop-filter gets an opaque bar rather than a translucent one with a chart legible through
+ * it. Nothing here relies on the blur: the border still draws the edge and the labels still sit on
+ * their own ink. */
 .tabbar {
   position: fixed;
   left: 0;
@@ -2886,7 +3127,15 @@ button.navlink:disabled {
   gap: var(--s-1);
   padding: var(--s-1) var(--s-2) calc(var(--s-1) + env(safe-area-inset-bottom, 0px));
   background: var(--surface-base);
-  border-top: 1px solid var(--surface-raised);
+  border-top: 1px solid var(--veil-edge);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .tabbar {
+    background: color-mix(in srgb, var(--surface-base) 72%, transparent);
+    -webkit-backdrop-filter: blur(var(--veil-blur)) saturate(160%);
+    backdrop-filter: blur(var(--veil-blur)) saturate(160%);
+  }
 }
 
 /* The gap the log action keeps for itself. Only the pages that carry a tab bar pay for it. */

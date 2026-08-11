@@ -408,7 +408,7 @@ Constraints:
 - The raised surface's luminance is fixed. `--text-primary` clears the 7:1 floor on it by about
   a quarter point, so hue and chroma are open to change and lightness is not. This has now
   survived grey, teal, and violet without another token moving.
-- There is exactly one green, `--done`, and it marks a finished session and nothing else. Emerald
+- There is exactly one green MEANING, `--done`, and it marks a finished session. Emerald
   as normally drawn sits near 158 degrees, which is 32 off `--accent-data` and identical to it in
   luminance, so this is pulled to 147 for 43 degrees of separation and then fenced in: never the
   rest timer, never a chart, never the record. Even where it does share a screen with cyan, what
@@ -416,10 +416,31 @@ Constraints:
   that ended empty is not a success and keeps the neutral card. Before adding a fifth hue, check
   what it will sit next to and measure it, which is the step that was skipped when the ground
   went teal.
+- **That fence is a claim, not a token count, and it now covers two places.** The emerald also
+  faces slot 2 of the consistency grid, because a filled cell there IS a finished session: same
+  claim, drawn as a calendar square rather than as a card. It replaced a moss green at 88 degrees,
+  which was the only hue the split palette had left in the greens and which lands on olive at the
+  luminance ceiling those faces live under. The two greens never share a screen, since the summary
+  card is on the logging screen and the grid is on progress. What is still barred is unchanged:
+  no green on a chart, on the rest timer, or on a record. The arithmetic is under `--split-2-face`.
 - Raised surfaces carry a fall of light, top lit, via `--surface-raised-shade` and
   `--surface-raised-rim`. A gradient on a surface that holds mid set text always runs downward
   from the token value, never upward, because the token value is already the contrast ceiling.
   Pressed states drop the gradient and go flat: that is what makes a press read as depressed.
+- **The reading screens group into veiled cards. The logging screen does not.** `--veil` is
+  `--surface-raised` mixed most of the way to transparent, with `--veil-edge` as a hairline and
+  `--veil-lit` as the same fall of light. Over the pitch black base it resolves DARKER than
+  `--surface-raised`, never lighter, and that is what keeps it safe: every text token measured
+  against `--surface-base` keeps at least the ratio it was measured at, so the "on raised,
+  `--text-primary` only" rule does not follow a veil onto a card. A veiled card is a base surface
+  wearing a tint. It exists because the progress screen was five things stacked on bare black with
+  nothing but a gap holding them apart, and a gap is the first thing that goes when a caption runs
+  to two lines. The logging screen is one object read at arm's length and has nothing to group, so
+  it stays flat.
+- **`backdrop-filter` earns itself in exactly one place, the tab bar.** Content scrolls under a
+  fixed bar, so there is something behind it to frost. Everywhere else the thing behind a veil is
+  the black base, and a blur of black is black. It ships behind `@supports` with the opaque bar as
+  the declared fallback, and nothing depends on it: the border still draws the edge.
 - Minimum touch target 44px, and the primary log action considerably larger
 - Navigation is a tab bar fixed to the bottom. Tabs are chosen by capability, never by role name,
   so somebody who coaches and is also coached sees all four. An earlier rule here kept the bottom
@@ -501,6 +522,19 @@ No hue means "planned". `--deload` can only keep a back off week quiet and clear
 alarm. The dashed stroke and the words are what make it read as intentional, so neither is
 optional.
 
+**Every y axis carries countable rules, and they are chosen in the unit on screen.** The charts
+shipped with two numbers, the top of the box and the bottom, and nothing between them. That is
+enough to see a direction and not enough to read a value, which is the thing somebody actually came
+for: an estimated 1RM two thirds of the way up a box running 96 to 118 has to be worked out rather
+than read. So the domain widens to whole steps of 1, 2, 2.5 or 5 times a power of ten, a hairline
+rule sits on each, and the latest point prints the number it landed on.
+
+The steps are picked against DISPLAY units and never against kilograms. Round kilograms are not
+round pounds: a tidy 5 kg ladder reads 11, 22, 33 on a pound axis, which is a grid of numbers
+nobody would say out loud. `js/charts.js` converts the series once, up front, and kilograms do not
+appear below that line. Rules are the quietest stroke in the file and solid, because dashed is
+already spoken for by `--deload` and by a block boundary.
+
 ### Split identity, on the consistency grid
 
 The grid says which program day each session was. That needs a categorical palette, which is a
@@ -529,18 +563,35 @@ show. Matching them means capping every face at the chroma the green can reach, 
 the desaturated `#46505C` that read as unpainted chrome. The ceiling buys a 1.27x range instead.
 
 **The palette affords three hues, not six.** After excluding cyan 190 +/- 40, orange 22 +/- 40,
-`--done` at 147, `--deload` at 224 (measured, not the 240 it looks like) and the ground at 272,
-what survives is roughly 62 to 122, 297 to 342, and a narrow 230 to 262. Slots 1 and 2 take the two
-widest apart, because a two day upper/lower split is the common case. Slot 4 is deliberately
+`--deload` at 224 (measured, not the 240 it looks like) and the ground at 272, what survives is
+roughly 62 to 150, 297 to 342, and a narrow 230 to 262. Slots 1 and 2 take the two widest apart,
+because a two day upper/lower split is the common case. Slot 4 is deliberately
 colourless and is also the overflow, so a six day program puts days four through six in it. A near
 neutral is what this file rejected for the ground; a single cell meaning "no colour left for this
 one" is a different job, and it measures better than the alternative, which was two saturated faces
 24 degrees apart.
 
+**Slot 2 sits at 150 and takes `--done`'s hue, which is the one exclusion this section drops.**
+The green window here is 62 to 122, and at `Y <= 0.0801` every hue in it is olive: the moss `#365513`
+that shipped first is what the arithmetic gives and olive is what it looks like next to a rose and
+an indigo that both hold real chroma this low. That is a window this design cannot spend, not a
+value that wanted retuning. Taking 147 instead buys slots 1 and 2 a separation of 172 degrees,
+the widest pair this palette has ever had, and it does not overload the token, because a filled
+cell and a finished session are the same claim. See the note under the `--done` rule above.
+
 **Four channels, and hue is the fourth.** A trained day fills where an untrained one does not,
 carries a two letter glyph made unique inside its own program (Upper A and Upper B become UA and
 UB, never U and U), carries a lit bar on its top edge at a slot determined position, and only then
 carries a colour. Fill against no fill is the signal doing the real work, same as the chooser chips.
+
+**The bar lives inside the flat run of the top edge, and the cell clips.** It used to start 12
+percent in with the cell rounded at 10px, which on a 46px phone cell put its left end four pixels
+inside the corner curve, where the cell has no top edge yet. It painted a square cornered tab plus
+its own glow hanging off the rounded corner, and at that size it read as a second slab offset
+behind the first. The trap is that it is invisible at any size you would mock this up at: the same
+12 percent clears the radius comfortably on a 300px cell. Two fixes, because one of them is a
+percentage and percentages follow whatever the cell size becomes next: the positions are pulled
+into the flat run, and `.cal__day` clips its own overflow.
 
 **The no-streak rule survives this and is not softened by it.** A consistency grid is not
 permission to add a streak. There is no streak count, no adherence ratio, no missed day count, and
@@ -549,6 +600,21 @@ black, and `buildConsistency` returns no field a caller could render as a failur
 the last month with work in it rather than on an empty current month, which scrolls to work that
 was done rather than to space where work was not. The satisfaction is meant to come from cells
 accumulating, which is a thing a bad week cannot break.
+
+**A month panel is a whole month or it is nothing.** The scroller carries no horizontal padding and
+each panel is exactly its width, so no part of the neighbouring month is ever on screen. It used to
+show a 16px window onto the month next door, with a column of cells sliced down the middle against
+the screen edge: that is the half visible affordance the lift scroller uses, where half a chip
+usefully says there is more, and it does not transfer here. Snapping is mandatory precisely because
+half of two months is not a thing anybody wants to look at. The arrows carry the affordance, and
+they sit in the card's header beside the session count rather than in a row of their own.
+
+Two things fall out of the grid running the full width of the card, and both are deliberate. The
+cells keep the width they had before there was a card, which matters because seven columns and
+eight gutters at a 360px viewport clear the 44px tap floor by a quarter of a pixel and a card
+paying for its own padding out of them would have taken them to 40. And the cells take an INSET
+focus ring, the only one in the app that faces inward, because the outward 6px ring is clipped by
+the scroller in the first and last column.
 
 ### Glow
 

@@ -10,7 +10,7 @@ import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';
-import { renderConsistency, renderDetail, sessionLabel } from './js/consistency-view.js';
+import { renderConsistency, renderMonthNav, renderDetail, sessionLabel } from './js/consistency-view.js';
 import { activeSetLogs } from './js/history.js';
 import { openSession, loadSessions, summarise, discardSession } from './js/session.js';
 import { renderHistory, discardedMessage } from './js/session-view.js';
@@ -365,18 +365,20 @@ function mountConsistency(sessions, logs) {
   const total = state.consistency.totalSessions;
   el('consistency-total').textContent = total ? `${total} session${total === 1 ? '' : 's'}` : '';
   el('consistency-body').innerHTML = renderConsistency(state.consistency);
+  el('cal-nav').innerHTML = renderMonthNav(state.consistency);
 
   const scroller = el('cal-scroller');
   if (!scroller) return;
 
   openOn(scroller, state.consistency.openAt);
 
-  el('consistency-body').addEventListener('click', (event) => {
+  // The arrows sit in the card's header now, so they are outside the body this listener covers.
+  el('cal-nav').addEventListener('click', (event) => {
     const step = event.target.closest('[data-step]');
-    if (step) {
-      showMonth(scroller, monthInView(scroller) + Number(step.dataset.step));
-      return;
-    }
+    if (step) showMonth(scroller, monthInView(scroller) + Number(step.dataset.step));
+  });
+
+  el('consistency-body').addEventListener('click', (event) => {
     const cell = event.target.closest('[data-day]');
     if (cell) {
       const chosen = cell.getAttribute('aria-pressed') === 'true';
