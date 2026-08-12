@@ -71,6 +71,33 @@
       <section class="done" id="done" hidden>
         <h2 class="done__title" id="done-title">Session logged.</h2>
         <p class="done__stat num" id="done-stat"></p>
+
+        <!-- The one thing the sets cannot say. Optional, once, and only on a session that has
+             something in it: asking how it felt after a session where nothing was logged is the
+             app asking about a workout that did not happen.
+
+             It lives inside the summary card rather than under it, because the answer is about
+             the session the card is announcing. The card is also where the app's one green
+             already lives, which is what the selected chip borrows its rim and glow from. -->
+        <div class="feel" id="feel" hidden>
+          <p class="feel__ask" id="feel-ask">How did that feel?</p>
+          <div class="feel__chips" id="feel-chips" role="group" aria-labelledby="feel-ask"></div>
+          <button type="button" class="button-secondary feel__more" id="feel-more">Add a note</button>
+          <!-- The keyboard is the fallback and never the default, same rule the steppers follow,
+               so it arrives only after a deliberate tap on the button above. -->
+          <div class="feel__note" id="feel-note" hidden>
+            <input
+              class="feel__input"
+              id="feel-text"
+              type="text"
+              maxlength="280"
+              autocomplete="off"
+              enterkeyhint="done"
+              placeholder="Anything worth remembering"
+              aria-label="A note about this session"
+            />
+          </div>
+        </div>
       </section>
 
       <!-- The whole workout, and the way to any lift in it. A state of this screen rather than a

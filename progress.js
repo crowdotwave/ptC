@@ -50,6 +50,10 @@ const state = {
   // here rather than in the markup so a redraw cannot lose or invent it.
   history: [],
   armed: null,
+  // Whether the person reading is the person who trained. Decides the Discard control and nothing
+  // else on this screen, and it defaults to false so a bug that forgets to set it withholds a
+  // control rather than offering one that cannot work.
+  isSelf: false,
 };
 
 function setCopy(id, text) {
@@ -397,16 +401,24 @@ function mountConsistency(sessions, logs) {
 
 // ------------------------------------------------------------------ session history
 //
-// Shown to the person whose training it is, and to nobody else. A trainer reading a client with
-// ?client= sees their charts and their calendar and gets no control over what is in them: 0011
-// gives the update policy to the client alone, so a Discard button on a trainer's screen would be
-// a button that could only ever fail. The one person who can throw away the record of a workout
-// is the person who did it.
+// The LIST is shown to whoever can already see the charts above it. The CONTROL in it is shown to
+// the client alone: 0011 gives the update policy to them, so a Discard button on a trainer's
+// screen would be a button that could only ever fail. The one person who can throw away the record
+// of a workout is the person who did it.
+//
+// The list used to be client-only as well, on the reasoning that it existed to house that control.
+// That stopped being true the moment a session could carry a note: how a set felt is the half of a
+// workout a chart cannot draw, and a coach who cannot read it is being handed the numbers and told
+// the client said something about them. Nothing here is new to a trainer, who already reads every
+// session on this page as a cell, a point and a line.
 
 const SAID_KEY = 'ptc.history.said';
 
 function drawHistory() {
-  el('history-body').innerHTML = renderHistory(state.history, { armedId: state.armed });
+  el('history-body').innerHTML = renderHistory(state.history, {
+    armedId: state.armed,
+    discard: state.isSelf,
+  });
 }
 
 /**
@@ -470,6 +482,9 @@ function mountHistory(sessions, logs) {
   }
 
   el('history-body').addEventListener('click', (event) => {
+    // Belt and braces. Nothing carrying data-act is drawn for a trainer, so this is unreachable
+    // today, and it is one line of insurance against a future redraw that forgets to pass the flag.
+    if (!state.isSelf) return;
     const button = event.target.closest('[data-act]');
     if (!button) return;
     const row = button.closest('[data-session]');
@@ -525,6 +540,7 @@ async function main() {
   // through in the first place.
   const clientId = new URLSearchParams(location.search).get('client') || actor?.clientId;
   state.client = clientId ? await storage.get('clients', clientId) : null;
+  state.isSelf = Boolean(state.client) && state.client.id === actor?.clientId;
   if (!state.client) {
     el('exercise-name').textContent = 'No client selected';
     el('headline').textContent =
@@ -587,7 +603,7 @@ async function main() {
   // After the assignments map, which the labels are resolved from, and before the lift picker's
   // early return: a client whose only rows are warmups still has sessions worth listing, and is
   // exactly the person most likely to want to throw one away.
-  if (state.client.id === actor?.clientId) mountHistory(sessions, logs);
+  mountHistory(sessions, logs);
 
   state.liftList = [...done.keys()]
     .map((id) => state.exercises.get(id))

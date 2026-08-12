@@ -21,6 +21,7 @@ import { planForItem, nextSteppers } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
+import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
 import {
@@ -56,6 +57,12 @@ const ui = {
   done: el('done'),
   doneTitle: el('done-title'),
   doneStat: el('done-stat'),
+  feel: el('feel'),
+  feelAsk: el('feel-ask'),
+  feelChips: el('feel-chips'),
+  feelMore: el('feel-more'),
+  feelNote: el('feel-note'),
+  feelText: el('feel-text'),
   rest: el('rest'),
   restFill: el('rest-fill'),
   restLabel: el('rest-label'),
@@ -94,6 +101,14 @@ const state = {
   sessionWritten: false,
   sessionClosed: false,
   logged: [],
+  // How the session felt, and anything the client wanted to say about it. Held apart from
+  // sessions.client_note, which is the two of them composed into one line, so that a redraw does
+  // not have to take the stored note back apart every time. Both are null and empty until asked.
+  feel: null,
+  feelText: '',
+  // Whether the note field has been opened. A tap, never a default: this screen does not raise a
+  // keyboard on its own anywhere else either.
+  feelTyping: false,
   // The overview panel, open or not. A state of this screen, not a layer over it.
   overview: false,
   // What the notice band is saying, or null. Held here rather than written straight to the DOM
@@ -138,6 +153,25 @@ function write(task) {
   writeQueue = writeQueue.then(task).catch((error) => {
     showNotice(`Saved on this device only. ${error.message}`, 'attention');
   });
+}
+
+/**
+ * Changes the session row, and keeps the copy this file is holding in step with it.
+ *
+ * The copy used to drift, and it was a trap with the pin already pulled. Closing a session wrote
+ * `completed_at` into a spread of `state.sessionRecord` and left the original reading null, which
+ * is why undo has to ask `state.sessionClosed` rather than believe the row in its hand. That was
+ * survivable while closing was the only thing anybody wrote. The moment a second writer spread
+ * that same stale record, saving a note would have quietly reopened a finished session, and the
+ * session would have gone on offering itself up for resume for six hours.
+ *
+ * So there is one writer now and it updates both. Nothing awaits it, per the optimistic rule.
+ */
+function stampSession(patch) {
+  const next = { ...state.sessionRecord, ...patch, updated_at: new Date().toISOString() };
+  state.sessionRecord = next;
+  write(() => state.storage.put('sessions', next));
+  return next;
 }
 
 function showNotice(text, tone = 'neutral') {
@@ -510,9 +544,67 @@ function renderDone() {
       `${Math.round(toDisplay(volume)).toLocaleString()} ${unit()} moved.`
     : 'Open a set and log it when you are ready.';
 
+  // Only a session with something in it gets asked how it felt. "How did that feel?" under
+  // "Nothing logged yet" is the app asking about a workout that did not happen.
+  ui.feel.hidden = !sets;
+  if (sets) renderFeel();
+
   // Undo stays live for the whole session, including after the last set, which is why the
   // secondary row is never hidden.
   renderUndo();
+}
+
+/**
+ * The feelings row, the note, and the acknowledgement.
+ *
+ * Redrawn rather than mutated, the same way the day picker is, so the selected chip after a
+ * reload and the selected chip after a tap cannot be built by two different pieces of code.
+ */
+function renderFeel() {
+  ui.feelChips.innerHTML = FEELINGS.map((word) => {
+    const on = state.feel === word;
+    return (
+      `<button type="button" class="button-secondary feel__item${on ? ' is-on' : ''}" ` +
+      `data-feel="${escapeText(word)}" aria-pressed="${on}">${escapeText(word)}</button>`
+    );
+  }).join('');
+
+  const said = Boolean(state.feel) || Boolean(state.feelText);
+  // "Log set" produces "Logged." per the copy rules, so a question produces an answer rather than
+  // staying a question with something ticked underneath it. This line is also the second place the
+  // green lands, on the card's own background where it measures about 10.5:1.
+  ui.feelAsk.textContent = said ? 'Noted.' : 'How did that feel?';
+  ui.feelAsk.dataset.state = said ? 'said' : 'asking';
+
+  // The button is the way in. Once the field is open it stays open for the rest of the session,
+  // because closing it would throw away a sentence somebody is halfway through typing.
+  ui.feelMore.hidden = state.feelTyping;
+  ui.feelNote.hidden = !state.feelTyping;
+  ui.feelMore.textContent = state.feelText ? 'Edit the note' : 'Add a note';
+  // Never while it has focus. Rewriting the value under a cursor moves the cursor to the end,
+  // which on a phone is how a note ends up saying "shoulder tightt".
+  if (document.activeElement !== ui.feelText) ui.feelText.value = state.feelText;
+}
+
+/**
+ * Records how it felt, or takes the answer back.
+ *
+ * Tapping the chip that is already on clears it, which is the whole of undo for this control. A
+ * separate clear button would be a fifth target on a four target row, and the thing being taken
+ * back is one tap old.
+ */
+function setFeel(word) {
+  state.feel = state.feel === word ? null : word;
+  saveNote();
+  renderFeel();
+}
+
+/** Writes what the client said onto the session row. Optimistic, like everything else here. */
+function saveNote() {
+  if (!state.sessionRecord) return;
+  const note = composeNote(state.feel, state.feelText);
+  if (note === (state.sessionRecord.client_note ?? null)) return;
+  stampSession({ client_note: note });
 }
 
 function shortDate(iso) {
@@ -672,15 +764,14 @@ function logSet() {
       state.sessionWritten = true;
     }
     await state.storage.put('set_logs', record);
-    if (shouldComplete) {
-      state.sessionClosed = true;
-      await state.storage.put('sessions', {
-        ...session,
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    }
   });
+
+  // Queued after the pair above rather than inside them, which the serial queue guarantees, so the
+  // row that closes the session still cannot overtake the set that closed it.
+  if (shouldComplete) {
+    state.sessionClosed = true;
+    stampSession({ completed_at: new Date().toISOString() });
+  }
 }
 
 /**
@@ -728,20 +819,16 @@ function undoLast() {
   closeOverview({ render: false });
   render();
 
-  const session = state.sessionRecord;
-  write(async () => {
-    await state.storage.put('set_logs', retraction);
-    // Taking back the final set reopens the session, otherwise it stays closed with a set
-    // in it that no longer counts.
-    if (session.completed_at !== null || state.sessionClosed) {
-      state.sessionClosed = false;
-      await state.storage.put('sessions', {
-        ...session,
-        completed_at: null,
-        updated_at: new Date().toISOString(),
-      });
-    }
-  });
+  const wasClosed = state.sessionRecord.completed_at !== null || state.sessionClosed;
+  write(() => state.storage.put('set_logs', retraction));
+
+  // Taking back the final set reopens the session, otherwise it stays closed with a set in it that
+  // no longer counts. What the client said about it stays: they said it about the sets they did,
+  // and taking one back does not unsay it.
+  if (wasClosed) {
+    state.sessionClosed = false;
+    stampSession({ completed_at: null });
+  }
 }
 
 /**
@@ -893,17 +980,16 @@ function endSession() {
   closeOverview({ render: false });
   render();
 
-  const session = state.sessionRecord;
-  if (!session) return;
-  write(async () => {
-    if (!state.sessionWritten) return;
-    state.sessionClosed = true;
-    await state.storage.put('sessions', {
-      ...session,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-  });
+  // Nothing was ever logged, so there is no session row to close.
+  //
+  // The test is the record rather than `state.sessionWritten`, which is set inside the write queue
+  // and is therefore still false for the moment between logging a set and that set reaching the
+  // adapter. Ending a session inside that window used to close it and now would not. A record
+  // exists only if a set was logged, and the insert is already ahead of this one in a serial
+  // queue, so asking here is both synchronous and correct.
+  if (!state.sessionRecord) return;
+  state.sessionClosed = true;
+  stampSession({ completed_at: new Date().toISOString() });
 }
 
 function showPr(isPr, exerciseName) {
@@ -1118,6 +1204,36 @@ function wire() {
     if (button) chooseDay(button.dataset.day);
   });
 
+  ui.feelChips.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-feel]');
+    if (button) setFeel(button.dataset.feel);
+  });
+
+  ui.feelMore.addEventListener('click', () => {
+    state.feelTyping = true;
+    renderFeel();
+    ui.feelText.focus();
+  });
+
+  // Commits on blur and on Enter, which is what `change` is on a text input, so there is no Save
+  // button. A save control here would be the only one in the app: everything else writes on the
+  // action itself, and a note that needed confirming would be the one thing on this screen that
+  // could be lost by walking away from it.
+  ui.feelText.addEventListener('change', () => {
+    state.feelText = ui.feelText.value.trim();
+    saveNote();
+    renderFeel();
+  });
+
+  // A phone that locks with the keyboard up never fires `change`. This is the same commit, taken
+  // on the way out.
+  ui.feelText.addEventListener('blur', () => {
+    if (state.feelText === ui.feelText.value.trim()) return;
+    state.feelText = ui.feelText.value.trim();
+    saveNote();
+    renderFeel();
+  });
+
   ui.typeToggle.addEventListener('click', () => {
     if (state.typing) {
       commitTyped();
@@ -1254,6 +1370,13 @@ async function main() {
     // Already on disk, so the next write must not try to insert it again.
     state.sessionWritten = true;
     state.sessionClosed = false;
+    // Anything said about this session before the interruption comes back with it, chip and all.
+    // A client who answered, locked the phone, and came back to log one more set would otherwise
+    // find the row blank and either answer twice or assume the first answer was lost.
+    const already = parseNote(open.client_note);
+    state.feel = already.feel;
+    state.feelText = already.text;
+    state.feelTyping = Boolean(already.text);
   }
 
   const first = state.plan[state.cursor];

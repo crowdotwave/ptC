@@ -166,6 +166,9 @@ async function openClient(clientId) {
   el('view-note').textContent = 'Read only. Program editing is not built yet.';
   el('list-view').hidden = true;
   el('detail-view').hidden = false;
+  // The session list, and with it anything the client said about how a session felt. Charts cannot
+  // draw that half, and it is the half a coach reads before changing next week.
+  el('see-sessions').href = `progress.html?client=${encodeURIComponent(state.client.id)}`;
 
   const sessions = await loadSessions(state.storage, clientId);
   const sessionIds = new Set(sessions.map((s) => s.id));

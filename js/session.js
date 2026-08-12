@@ -304,6 +304,9 @@ export function summarise(sessions, setLogs, labelFor) {
         label: labelFor ? labelFor(session) : `Day ${session.day_index + 1}`,
         sets: working.length,
         warmups: rows.length - working.length,
+        // Passed through as written rather than parsed apart. The word and the sentence were one
+        // line when somebody said them, and this list is the place they get read back.
+        note: session.client_note ?? null,
         // An open session is not an unfinished one to apologise for, it is one somebody may still
         // be in. The list says so rather than leaving a session that looks half written.
         isOpen: !session.completed_at,

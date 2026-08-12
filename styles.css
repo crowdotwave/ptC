@@ -598,6 +598,10 @@ button {
  * colour, which is two signals that are both colour, so it failed the encoding rule from a
  * different direction. Both now resolve here.
  *
+ * Four rows use it now: those two, the builder's section picker, and the feelings on the summary
+ * card. Only the last one re-tints anything, and it re-tints the edges rather than the face, for
+ * a reason that is measured under "how it felt".
+ *
  * These rules must stay below .button-secondary. The chips carry both classes and the item
  * selectors tie it on specificity, so source order is what wins the radius and the padding.
  *
@@ -645,7 +649,11 @@ button {
 
 .daypicker__item.is-on,
 .lifts__item.is-on,
-.sections__item.is-on {
+.sections__item.is-on,
+/* The fourth chip row, on the summary card. It re-tints the border, the rim and the glow further
+ * down the file and takes everything else, including the face luminance, from here. See "how it
+ * felt" for why the green stops at the edges of the chip. */
+.feel__item.is-on {
   --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
   background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
   border-color: var(--surface-raised-rim);
@@ -1263,6 +1271,108 @@ button.worknav__row:active {
   color: var(--text-secondary);
   font-size: var(--t-body);
 }
+
+/* ---------------------------------------------------------------- how it felt
+ *
+ * The subjective half of a session, captured once, on the card that announces the session is over.
+ *
+ * THE GREEN IS ON THE CARD'S CLAIM, NOT ON THE ANSWER, and that distinction is the whole reason
+ * this is allowed to be green at all. --done marks a finished session. This sits inside a finished
+ * session's card and is part of the same claim, so it borrows the hue rather than opening a second
+ * meaning for it. What would break the fence is letting the green vary with the answer: an emerald
+ * "Easy" beside a neutral "All out" would quietly turn the one green into a verdict on how the
+ * workout went, which is both a new meaning and, on this product, the wrong one. So every chip
+ * takes the same green when it is the selected one, and the green says "recorded", same as it does
+ * eight pixels above in the word "logged".
+ *
+ * THE GREEN CANNOT GO IN THE FACE, and this is measured rather than preferred. --surface-raised
+ * sits at Y 0.0755 and the 7:1 boundary for --text-primary is Y 0.0801, which is 0.0046 of
+ * headroom. --done is Y 0.5384, so a 22 percent mix into the face lands at Y 0.1222 and drops the
+ * label to 5.58:1, under the floor for 14px text. Anything small enough to be legal is too small to
+ * see. So the face keeps the raised gradient the other chooser chips use, at the luminance the
+ * whole palette was measured against, and the emerald takes the border, the lit rim and the glow,
+ * which is exactly the treatment the card itself wears one level up.
+ *
+ * The four signals from the chooser chip rule survive intact: the chip fills, the label steps to
+ * 700 and to --text-primary, the top edge catches a rim, and the chip glows. Hue is the fifth and
+ * it is carrying nothing on its own. */
+.feel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+}
+
+/* The question is quiet on purpose. It is an offer, not a form field with a label, and a client
+ * who walks away without answering has done nothing wrong. It is also the only line here that
+ * changes: answering turns it into the acknowledgement, which is where the second patch of green
+ * goes, on the card's own dark background where --done measures about 10.5:1. */
+.feel__ask {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.feel__ask[data-state='said'] {
+  color: var(--done);
+  font-weight: 650;
+}
+
+/* A grid rather than the scrolling row the day picker uses. Four fixed options that never grow
+ * are not a scroller, and a half visible chip would be promising a fifth that does not exist. */
+.feel__chips {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-2);
+}
+
+/* Pill, like every other chooser in the app, and padded tighter because four of these share a
+ * 360px screen where the day picker's chips only had to share it with each other. */
+.feel__item {
+  padding: 0 var(--s-1);
+  border-radius: 999px;
+  font-size: var(--t-small);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Sits below the shared .is-on rule and re-tints it. The gradient, the weight and the fill all
+ * come from there, so a change to how "selected" reads reaches this row too. */
+.feel__item.is-on {
+  --glow-tint: color-mix(in srgb, var(--done) var(--glow-strength-rest), transparent);
+  border-color: color-mix(in srgb, var(--done) 70%, transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--done) 60%, transparent),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
+.feel__more {
+  align-self: flex-start;
+}
+
+/* Full width, because a note is a sentence and a 44px tall input the width of a button would be
+ * a text field pretending to be a search box. It commits on blur and on Enter, so it needs no
+ * Save button of its own: a save control here would be the only one on this screen, and the rest
+ * of the app writes on the action rather than on a second confirmation. */
+.feel__input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--t-small);
+  background: var(--surface-base);
+}
+
+.feel__input::placeholder {
+  color: var(--muted);
+}
+
+/* No focus treatment of its own. The global ring is the app's answer everywhere else, and a green
+ * border underneath it drew a second ring in a second hue on the one card that is meant to be
+ * alone with the green. */
 
 /* Two registers. Neutral is the default because most of what this screen has to say is not a
  * problem: moving on from a lift, closing a session. Only a failed write earns attention. */
@@ -3036,6 +3146,20 @@ button.navlink:disabled {
   color: var(--text-secondary);
   font-size: var(--t-small);
   font-variant-numeric: tabular-nums;
+}
+
+/* The one line on this screen that is not a number, so it is the one line allowed to wrap. It
+ * carries no colour and no green: the emerald on the summary card marks a finished session, and
+ * repeating it here would turn it into a marker for "this one has a note". */
+.history__note {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-style: italic;
+  /* Two lines is a note. Beyond that it is a paragraph, and this list is a maintenance view. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .history__arm,

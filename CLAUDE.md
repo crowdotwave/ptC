@@ -229,6 +229,7 @@ cannot name the policy that permits it, that is the finding rather than a formal
 | --- | --- | --- | --- |
 | `sessions` | logging screen | the client | `sessions_client_all` |
 | `set_logs` | logging screen | the client | `set_logs_client_insert`, insert only |
+| `sessions` | logging screen, the session note | the client | `sessions_client_all` |
 | `sessions` | progress screen, on discard | the client | `sessions_client_all` |
 | `set_logs` | progress screen, on discard | the client | `set_logs_client_insert`, insert only |
 | `program_templates` | builder, importer | the trainer | `program_templates_trainer_all` |
@@ -243,6 +244,12 @@ cannot name the policy that permits it, that is the finding rather than a formal
 The two `clients`/`trainers` unit switch rows are why this table exists. Everything else has one
 writer and one policy. Those two are written by a second person under a second policy, and both of
 those policies permit an update and nothing else.
+
+The session note row adds no policy and no grant either. It is an update to a row the client
+already owns, written through the one function in `app.js` that touches that row, which exists
+because the in-memory copy of it does not carry `completed_at`: a second writer spreading that
+stale copy would have reopened a finished session as a side effect of saving a note, and the
+session would then have offered itself up for resume for six hours.
 
 The two discard rows are the second reason to keep reading it. They add no policy and no grant:
 discarding a session is an update to a row the client already owns and an insert of set rows the
@@ -362,6 +369,17 @@ Requirements:
   anywhere in it by design.
 - No confirmation dialogs anywhere in the logging flow. That includes skip and end session:
   both are reachable by undo or by simply training again, so neither is worth a dialog.
+- **How it felt is asked once, at the end, and never per set.** `sessions.client_note` was in the
+  schema from 0001 and nothing wrote to it for months: the objective half of a workout was recorded
+  to the rep and the subjective half was not recorded at all. For a calisthenics block that is most
+  of what a coach needs, since a max hold that felt easy and a max hold that nearly failed are the
+  same row of numbers. It sits on the summary card, on a session that has something in it, as four
+  effort words plus an optional sentence, and both compose into that one text column. `js/feel.js`
+  owns the composing and the taking apart, so a note can be redrawn as a selected chip after a
+  reload without a second column to migrate. A prompt after every set is a confirmation dialog
+  wearing different clothes, and this screen has none of those: it exists to make an identical set
+  one tap, and "and how was that?" after a max hold takes that back. The words are an effort ladder
+  and carry no failure state, per the no-guilt rule below.
 
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no
 notifications nagging the client to train.
@@ -416,9 +434,18 @@ Constraints:
   that ended empty is not a success and keeps the neutral card. Before adding a fifth hue, check
   what it will sit next to and measure it, which is the step that was skipped when the ground
   went teal.
-- **That fence is a claim, not a token count, and it now covers two places.** The emerald also
+- **That fence is a claim, not a token count, and it now covers three places.** The emerald also
   faces slot 2 of the consistency grid, because a filled cell there IS a finished session: same
-  claim, drawn as a calendar square rather than as a card. It replaced a moss green at 88 degrees,
+  claim, drawn as a calendar square rather than as a card. The third is the feelings row inside
+  that same card, where the selected chip takes an emerald border, rim and glow. **Every option
+  takes the same green.** Letting it vary with the answer is the one move that would break this:
+  an emerald "Easy" beside a neutral "All out" turns the app's one green into a verdict on how the
+  workout went, which is a second meaning and, on a product that refuses to grade anybody, the
+  wrong one. The green there says recorded, exactly as it does in the word "logged" above it. It
+  also stops at the chip's edges rather than entering its face, and that part is measured:
+  `--surface-raised` is Y 0.0755 against a 7:1 boundary of Y 0.0801, so a 22 percent mix of
+  `--done` into the face lands at Y 0.1222 and drops `--text-primary` to 5.58, under the floor for
+  14px. Anything small enough to be legal there is too small to see. It replaced a moss green at 88 degrees,
   which was the only hue the split palette had left in the greens and which lands on olive at the
   luminance ceiling those faces live under. The two greens never share a screen, since the summary
   card is on the logging screen and the grid is on progress. What is still barred is unchanged:

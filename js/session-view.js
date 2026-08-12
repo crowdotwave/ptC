@@ -53,8 +53,8 @@ export function summaryLine(entry) {
   return parts.join(', ');
 }
 
-function renderRow(entry, armedId) {
-  const armed = entry.id === armedId;
+function renderRow(entry, armedId, discardable) {
+  const armed = discardable && entry.id === armedId;
   const time = clock(entry.startedAt);
 
   return (
@@ -65,14 +65,20 @@ function renderRow(entry, armedId) {
     `<span class="history__sets num">${esc(summaryLine(entry))}` +
     // Said in words, never in a colour, same as every other state in this app.
     `${entry.isOpen ? ', still open' : ''}</span>` +
+    // What the client said about it, in their words and in no colour at all. This is the only
+    // thing on this screen that did not come out of a number, which is exactly why it is worth
+    // the line: two identical rows of sets are not two identical sessions.
+    (entry.note ? `<span class="history__note">${esc(entry.note)}</span>` : '') +
     `</div>` +
-    (armed
-      ? `<div class="history__confirm">` +
-        `<button type="button" class="button-secondary history__keep" data-act="keep">Keep</button>` +
-        `<button type="button" class="button-secondary history__go" data-act="discard">Discard</button>` +
-        `</div>`
-      : `<button type="button" class="button-secondary history__arm" data-act="arm" ` +
-        `aria-label="Discard ${esc(entry.label)}, ${esc(stamp(entry.startedAt))}">Discard</button>`) +
+    (!discardable
+      ? ''
+      : armed
+        ? `<div class="history__confirm">` +
+          `<button type="button" class="button-secondary history__keep" data-act="keep">Keep</button>` +
+          `<button type="button" class="button-secondary history__go" data-act="discard">Discard</button>` +
+          `</div>`
+        : `<button type="button" class="button-secondary history__arm" data-act="arm" ` +
+          `aria-label="Discard ${esc(entry.label)}, ${esc(stamp(entry.startedAt))}">Discard</button>`) +
     `</li>`
   );
 }
@@ -84,19 +90,28 @@ function renderRow(entry, armedId) {
  * in here so that this stays a function of its arguments, which is also what makes a redraw after
  * a discard trivial.
  *
+ * `discard` is false when somebody other than the client is reading. It removes the control and
+ * nothing else: 0011 gives the update policy to the client alone, so a Discard button on a
+ * trainer's screen is a button that could only ever fail. The rows themselves are the same rows,
+ * because a trainer reading this list is reading sessions they can already see charted.
+ *
  * The empty state is an invitation rather than an apology, per the copy rules, and it is the
  * state a new client sees.
  */
-export function renderHistory(entries, { armedId = null, limit = 30 } = {}) {
+export function renderHistory(entries, { armedId = null, limit = 30, discard = true } = {}) {
   if (!entries.length) {
-    return '<p class="history__empty">Sessions appear here once you log one.</p>';
+    return `<p class="history__empty">${
+      discard ? 'Sessions appear here once you log one.' : 'Sessions appear here once they log one.'
+    }</p>`;
   }
 
   const shown = entries.slice(0, limit);
   const rest = entries.length - shown.length;
 
   return (
-    `<ul class="history__list">${shown.map((entry) => renderRow(entry, armedId)).join('')}</ul>` +
+    `<ul class="history__list">${shown
+      .map((entry) => renderRow(entry, armedId, discard))
+      .join('')}</ul>` +
     // A count rather than a pager. Somebody scrolling to the bottom of thirty sessions is looking
     // for a specific one, and the honest thing to tell them is how much further back it goes.
     (rest > 0

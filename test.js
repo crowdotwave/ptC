@@ -35,6 +35,7 @@ import {
   retractionOf,
 } from './js/session.js';
 import { renderHistory, summaryLine, discardedMessage } from './js/session-view.js';
+import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import {
   isPending,
   liftRuns,
@@ -2725,6 +2726,96 @@ test('the acknowledgement names what was given up, not only that something was',
   // Both halves are sentences, so the second one starts like one. This shipped reading
   // "Aug 5, 2026. nothing was logged in it." on a real discard.
   ok(!/\. [a-z]/.test(discardedMessage(entry, 0)), discardedMessage(entry, 0));
+});
+
+// ------------------------------------------------------------------ how it felt
+//
+// The subjective half of a session. One text column, so the interesting cases are all about the
+// column holding two things at once and coming back apart cleanly afterwards.
+
+test('a feeling on its own is the whole note', () => {
+  eq(composeNote('Hard', ''), 'Hard');
+  eq(parseNote('Hard'), { feel: 'Hard', text: '' });
+});
+
+test('a note on its own is kept whole and claims no feeling', () => {
+  eq(composeNote(null, 'Left wrist gave out'), 'Left wrist gave out');
+  eq(parseNote('Left wrist gave out'), { feel: null, text: 'Left wrist gave out' });
+});
+
+test('a feeling and a note round trip through the one column', () => {
+  const note = composeNote('All out', 'Last hold nearly failed');
+  eq(note, 'All out. Last hold nearly failed');
+  eq(parseNote(note), { feel: 'All out', text: 'Last hold nearly failed' });
+});
+
+test('nothing said is null rather than an empty string', () => {
+  eq(composeNote(null, ''), null, 'null is what the column has always held');
+  eq(composeNote(null, '   '), null, 'and whitespace is not something somebody said');
+  eq(composeNote('Solid', '   '), 'Solid');
+});
+
+test('a note that merely opens with a feeling does not light up a chip', () => {
+  // The failure this prevents is the app putting a word in somebody's mouth: a chip drawn as
+  // selected that the client never tapped, on a screen whose whole job is an honest record.
+  eq(parseNote('Hard to say what changed'), { feel: null, text: 'Hard to say what changed' });
+  eq(parseNote('Easygoing session'), { feel: null, text: 'Easygoing session' });
+});
+
+test('every note the app has ever stored survives being read by this', () => {
+  // Nothing wrote to client_note before this existed, and the seed writes free sentences.
+  eq(parseNote(null), { feel: null, text: '' });
+  eq(parseNote(undefined), { feel: null, text: '' });
+  eq(parseNote('Short on sleep, kept the load the same.'), {
+    feel: null,
+    text: 'Short on sleep, kept the load the same.',
+  });
+});
+
+test('an unknown word is treated as a sentence, not as a feeling', () => {
+  eq(parseNote('Brutal. and then some'), { feel: null, text: 'Brutal. and then some' });
+});
+
+test('the feelings are an effort ladder and never a verdict', () => {
+  // A four point ladder with no failure state on it. If a word like "Failed" or "Bad" ever gets
+  // added here, the no-guilt rule in CLAUDE.md is what it has to be argued against.
+  eq(FEELINGS.length, 4);
+  ok(!/fail|bad|poor|weak|missed/i.test(FEELINGS.join(' ')), FEELINGS.join(' '));
+});
+
+test('what the client said reaches the list that reads it back', () => {
+  const entry = summarised([hist({ client_note: 'All out. Wrist gave out' })], [])[0];
+  eq(entry.note, 'All out. Wrist gave out');
+  ok(renderHistory([entry]).includes('All out. Wrist gave out'));
+});
+
+test('a session with nothing said carries no empty line', () => {
+  const entry = summarised([hist()], [])[0];
+  eq(entry.note, null);
+  ok(!renderHistory([entry]).includes('history__note'));
+});
+
+test('a client typed note cannot inject markup into the list', () => {
+  const entry = summarised([hist({ client_note: '<img src=x onerror=alert(1)>' })], [])[0];
+  const html = renderHistory([entry]);
+  ok(!html.includes('<img'), html.slice(0, 160));
+  ok(html.includes('&lt;img'), 'escaped, not stripped');
+});
+
+test('a trainer reading the list gets the note and no way to discard', () => {
+  // 0011 gives the update policy to the client alone, so the control would be one that could only
+  // ever fail. The rows are the same rows: a trainer already reads these sessions as chart points.
+  const entry = summarised([hist({ client_note: 'Solid' })], [])[0];
+  const html = renderHistory([entry], { discard: false });
+  ok(html.includes('Solid'), 'the note is the reason a trainer is reading this at all');
+  eq((html.match(/data-act=/g) || []).length, 0, 'and nothing here writes');
+});
+
+test('an armed row cannot survive the list being drawn for somebody else', () => {
+  const entry = summarised([hist()], [])[0];
+  const html = renderHistory([entry], { armedId: entry.id, discard: false });
+  eq((html.match(/data-act="discard"/g) || []).length, 0);
+  ok(!html.includes('is-armed'), 'a stale armed id must not draw a control for a trainer');
 });
 
 // ------------------------------------------------------------------ report

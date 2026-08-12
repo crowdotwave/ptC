@@ -32,6 +32,12 @@
           <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
 
+        <!-- Every session this client logged, including what they said about each one. That list
+             lives on the progress screen, which already renders somebody else's training when a
+             trainer opens it with ?client=, so this is a link rather than a second copy of it.
+             Without it the notes were reachable only by typing a URL. -->
+        <p class="backlink"><a href="#" id="see-sessions">See every session</a></p>
+
         <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
 
         <p class="suggest" id="deload-suggest" hidden></p>
