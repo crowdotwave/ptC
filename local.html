@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>ptC seeded</title>
+    <!-- The whole point of this page.
+         A home screen icon on iOS does not remember the URL it was saved from. iOS reads the
+         linked manifest and launches at its start_url, so saving index.html?local=1 dropped the
+         query, the app booted with no session and no flag, and every launch landed on the sign in
+         screen. This page links a manifest whose start_url carries the flag, which is the only
+         part of the launch iOS actually honours.
+         Two icons rather than one flag on the real manifest: putting ?local=1 in the app's own
+         start_url would boot everybody into fake data. -->
+    <link rel="manifest" href="manifest-local.webmanifest" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="ptC seed" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="stylesheet" href="styles.css" />
+    <!-- Belt and braces, for an iOS old enough to ignore the manifest and reuse this URL instead.
+         replace() rather than href, so the back gesture does not bounce between the two. -->
+    <script>
+      location.replace('index.html?local=1');
+    </script>
+  </head>
+  <body>
+    <main class="auth">
+      <h1 class="auth__title">ptC</h1>
+      <p class="auth__lede">Opening the seeded data.</p>
+      <p class="auth__note"><a href="index.html?local=1">Continue</a></p>
+    </main>
+  </body>
+</html>
