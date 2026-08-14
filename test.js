@@ -24,6 +24,8 @@ import { tokenFromLink } from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
+import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
+import { smoothPath } from './js/charts.js';
 import { planForItem, setCountOf, countOf, nextSteppers } from './js/plan.js';
 import {
   openSession,
@@ -2816,6 +2818,293 @@ test('an armed row cannot survive the list being drawn for somebody else', () =>
   const html = renderHistory([entry], { armedId: entry.id, discard: false });
   eq((html.match(/data-act="discard"/g) || []).length, 0);
   ok(!html.includes('is-armed'), 'a stale armed id must not draw a control for a trainer');
+});
+
+// ------------------------------------------------------------------ work per session
+//
+// js/session-volume.js, the client wide chart under the grid. Two things here are the whole reason
+// the module exists rather than being three lines inside progress.js: the split by program day,
+// without which the line is a sawtooth measuring the day of the week, and the identity coming from
+// the same function the calendar uses, without which a line and a cell can disagree about what a
+// Tuesday was.
+
+// Finished by default, unlike the fixtures above, because this is the one builder that cares: a
+// session still running has no total yet and is not a point.
+const wsession = (id, day, over = {}) => ({
+  id, client_id: 'c1', assignment_id: 'a1', day_index: 0, started_at: `${day}T18:00:00.000Z`,
+  completed_at: `${day}T19:00:00.000Z`, client_note: null, ...over,
+});
+
+const wdays = [cday(0, 'UPPER A'), cday(1, 'LOWER A')];
+
+const work = (sessions, setLogs, assignments = [cassign('a1', '2026-07-01', wdays)]) =>
+  buildSessionVolume({ sessions, setLogs, assignments });
+
+const lineFor = (b, label) => b.lines.find((l) => l.label === label);
+
+test('a session is one point on the line for the day it was', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-03', { day_index: 1 })],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 60, reps: 10 }),
+    ],
+  );
+  eq(b.lines.length, 2);
+  eq(lineFor(b, 'UPPER A').points[0].volumeKg, 500, 'weight times reps');
+  eq(lineFor(b, 'LOWER A').points[0].volumeKg, 600);
+});
+
+test('a day is compared against itself and never against the session before it', () => {
+  // The failure this prevents: the last two sessions are two different days, so a change measured
+  // across them reports that Thursday is not Tuesday and calls it progress.
+  const b = work(
+    [
+      wsession('s1', '2026-07-01'),
+      wsession('s2', '2026-07-03', { day_index: 1 }),
+      wsession('s3', '2026-07-08'),
+      wsession('s4', '2026-07-10', { day_index: 1 }),
+      wsession('s5', '2026-07-15'),
+      wsession('s6', '2026-07-22'),
+    ],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 50 }),
+      row({ session_id: 's3', weight_kg: 100, reps: 6 }),
+      row({ session_id: 's4', weight_kg: 100, reps: 50 }),
+      row({ session_id: 's5', weight_kg: 100, reps: 7 }),
+      row({ session_id: 's6', weight_kg: 100, reps: 8 }),
+    ],
+  );
+  eq(b.lead.label, 'UPPER A', 'the line with the most sessions behind it speaks');
+  eq(b.change.first, 500);
+  eq(b.change.last, 800, 'the last UPPER A, not the last session of any kind');
+});
+
+test('the grid and the chart cannot disagree about which day a session was', () => {
+  const sessions = [wsession('s1', '2026-07-03', { day_index: 1 })];
+  const logs = [row({ session_id: 's1', weight_kg: 100, reps: 5 })];
+  const assignments = [cassign('a1', '2026-07-01', wdays)];
+  const b = work(sessions, logs, assignments);
+  const grid = buildConsistency({
+    sessions, assignments, sessionIdsWithWork: new Set(['s1']), today: '2026-07-05',
+  });
+  const cell = cellFor(grid, '2026-07-03');
+  eq(b.lines[0].slot, cell.slot, 'same slot, so the line is the colour the cell is');
+  eq(b.lines[0].glyph, cell.glyph);
+  eq(b.lines[0].label, cell.label);
+});
+
+test('warmups never reach the line', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's1', set_index: 1, weight_kg: 40, reps: 10, is_warmup: true }),
+    ],
+  );
+  eq(lineFor(b, 'UPPER A').points[0].volumeKg, 500, 'the warmup is not work done');
+});
+
+test('a retracted set is gone from this chart as well as the others', () => {
+  const first = row({ session_id: 's1', weight_kg: 100, reps: 5 });
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-08')],
+    [
+      first,
+      row({ session_id: 's1', supersedes_id: first.id, is_void: true }),
+      row({ session_id: 's2', weight_kg: 100, reps: 5 }),
+    ],
+  );
+  eq(b.totalSessions, 1, 'the session it emptied is not a point either');
+  eq(lineFor(b, 'UPPER A').points.length, 1);
+});
+
+test('a session that comes out at zero is left off rather than drawn on the floor', () => {
+  // Bodyweight rows and holds both compute to nothing. A point at zero would draw a session
+  // nobody did, at the one value on this axis that means "no work".
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-08')],
+    [
+      row({ session_id: 's1', weight_kg: 0, reps: 20 }),
+      row({ session_id: 's1', set_index: 1, weight_kg: 80, reps: null, hold_seconds: 45 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 5 }),
+    ],
+  );
+  eq(b.totalSessions, 1);
+  eq(lineFor(b, 'UPPER A').points[0].sessionIds, ['s2']);
+});
+
+// The dip that is really a session in progress. Opening Progress between the first set and the last
+// is the most likely moment anybody looks at this screen, and every one of those looks used to show
+// the line falling off a cliff that closed itself when the session ended.
+test('a session still running is not a point, because its total is not known yet', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-08', { completed_at: null })],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 1 }),
+    ],
+  );
+  eq(b.totalSessions, 1);
+  eq(lineFor(b, 'UPPER A').points.length, 1, 'and the line does not dive to meet one logged set');
+  eq(b.latest.volumeKg, 500);
+});
+
+// The four dots inside one pixel. Every row still counts; what changes is that a visit is a point.
+test('one program day trained twice in an evening is one visit, not two points', () => {
+  const b = work(
+    [
+      wsession('s1', '2026-07-01'),
+      wsession('s2', '2026-07-01', { started_at: '2026-07-01T18:40:00.000Z', completed_at: '2026-07-01T19:10:00.000Z' }),
+      wsession('s3', '2026-07-08'),
+    ],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 3 }),
+      row({ session_id: 's3', weight_kg: 100, reps: 9 }),
+    ],
+  );
+  const points = lineFor(b, 'UPPER A').points;
+  eq(points.length, 2, 'two visits');
+  eq(points[0].volumeKg, 800, 'the interrupted evening is the work it held, added up');
+  eq(points[0].sessionIds.length, 2, 'and it still knows which sessions it came from');
+  eq(b.totalSessions, 3, 'the sessions are all still counted');
+  eq(b.totalPoints, 2);
+});
+
+test('two different program days on one day stay two points', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-01', { day_index: 1 })],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 9 }),
+    ],
+  );
+  eq(b.lines.length, 2, 'summing across days is the sawtooth this module exists to avoid');
+  eq(lineFor(b, 'UPPER A').points[0].volumeKg, 500);
+  eq(lineFor(b, 'LOWER A').points[0].volumeKg, 900);
+});
+
+// The rule that is deliberately NOT here. A short session is a low point, and the line drops to it.
+test('a finished session holding one set is a point at the height of one set', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-08'), wsession('s3', '2026-07-15')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 10 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 10 }),
+      row({ session_id: 's3', weight_kg: 100, reps: 1 }),
+    ],
+  );
+  eq(lineFor(b, 'UPPER A').points.map((p) => p.volumeKg), [1000, 1000, 100]);
+});
+
+test('a client with nothing loaded gets no lines, so the card can hide itself', () => {
+  const b = work([wsession('s1', '2026-07-01')], [row({ session_id: 's1', weight_kg: 0, reps: 20 })]);
+  eq(b.lines.length, 0);
+  eq(b.evidence, 'none');
+});
+
+// The one place this chart departs from the rule in CLAUDE.md that extra volume never joins the
+// number carrying a claim. The claim here is how much work a session held, and a set somebody
+// chose to add is work they did. The per lift card still separates the two.
+test('a set added beyond the plan is work done and counts here', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's1', set_index: 1, weight_kg: 100, reps: 5, is_extra: true }),
+    ],
+  );
+  eq(lineFor(b, 'UPPER A').points[0].volumeKg, 1000);
+});
+
+test('another client\'s rows never reach the chart', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 'somebody-else', weight_kg: 200, reps: 5 }),
+    ],
+  );
+  eq(b.totalSessions, 1);
+  eq(lineFor(b, 'UPPER A').points[0].volumeKg, 500);
+});
+
+test('a planned deload is marked on the point and kept out of the change', () => {
+  const b = work(
+    [wsession('s1', '2026-07-01'), wsession('s2', '2026-07-08'), wsession('s3', '2026-07-15')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 1 }),
+      row({ session_id: 's3', weight_kg: 100, reps: 6 }),
+    ],
+    [cassign('a1', '2026-07-01', wdays, { deload_weeks: [1] })],
+  );
+  const points = lineFor(b, 'UPPER A').points;
+  eq(points.map((p) => p.isDeload), [false, true, false]);
+  ok(b.hasDeload, 'and the caller can say so in words');
+  eq(b.change.last, 600, 'the back off week is not the end of the trend');
+});
+
+test('more program days than the palette has slots folds the quietest one into a note', () => {
+  // A five day program has five days and four slots, so two of its lines would come out the same
+  // colour with only the glyph telling them apart. The one folded is the one with the least behind
+  // it, and DAY E here is both trained once and trained longest ago.
+  const days = ['A', 'B', 'C', 'D', 'E'].map((name, index) => cday(index, `DAY ${name}`));
+  const sessions = [];
+  const logs = [];
+  days.forEach((day, index) => {
+    const times = index === 4 ? 1 : 2;
+    for (let n = 0; n < times; n += 1) {
+      const id = `s${index}${n}`;
+      const day = index === 4 ? '2026-06-01' : `2026-07-${String(2 * n + 1).padStart(2, '0')}`;
+      sessions.push(wsession(id, day, { day_index: index }));
+      logs.push(row({ session_id: id, weight_kg: 100, reps: 5 }));
+    }
+  });
+  const b = work(sessions, logs, [cassign('a1', '2026-06-01', days)]);
+  eq(b.lines.length, MAX_DAY_LINES);
+  eq(b.hiddenLabels, ['DAY E']);
+  eq(b.totalSessions, 9, 'and the sessions are still counted even where the line is not drawn');
+});
+
+test('a day is a line even when the program it belonged to is long gone', () => {
+  const b = work(
+    [wsession('s1', '2026-06-02', { assignment_id: 'old' }), wsession('s2', '2026-07-01')],
+    [
+      row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+      row({ session_id: 's2', weight_kg: 100, reps: 5 }),
+    ],
+    [cassign('old', '2026-06-01', [cday(0, 'FULL BODY')]), cassign('a1', '2026-07-01', wdays)],
+  );
+  eq(b.lines.map((l) => l.label).sort(), ['FULL BODY', 'UPPER A'], 'history is not repainted');
+});
+
+// The curve, which is the one piece of drawing code in this file. A spline that overshoots draws a
+// session at a volume nobody logged, and it overshoots most where the data is most uneven.
+test('a smoothed curve never rises above the highest point it passes through', () => {
+  const points = [
+    { x: 0, y: 100 },
+    { x: 40, y: 60 },
+    { x: 80, y: 62 },
+    { x: 120, y: 20 },
+    { x: 160, y: 90 },
+  ];
+  const d = smoothPath(points);
+  const numbers = d.match(/-?\d+\.?\d*/g).map(Number);
+  const ys = numbers.filter((_, i) => i % 2 === 1);
+  const lo = Math.min(...points.map((p) => p.y));
+  const hi = Math.max(...points.map((p) => p.y));
+  // Every control point inside the data's own range is what bounds the curve to it, since a cubic
+  // bezier is contained by the hull of its four points.
+  ok(Math.min(...ys) >= lo - 0.01, `dipped to ${Math.min(...ys)} under ${lo}`);
+  ok(Math.max(...ys) <= hi + 0.01, `rose to ${Math.max(...ys)} over ${hi}`);
+});
+
+test('a curve through one point is not a path anybody can stroke', () => {
+  eq(smoothPath([]), '');
+  eq(smoothPath([{ x: 5, y: 5 }]), 'M5.0 5.0', 'a moveto draws nothing, which is correct');
 });
 
 // ------------------------------------------------------------------ report

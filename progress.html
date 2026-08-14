@@ -46,6 +46,21 @@
         <div id="consistency-body"></div>
       </section>
 
+      <!-- The second client wide thing on this screen, and the last one: everything below it is
+           scoped to a single lift. It sits directly under the grid because it is the same question
+           asked one level down. The grid says a session happened on the eleventh. This says how
+           much work was in it, one line per program day, in the grid's own slot colours, so the
+           legend the reader has just scrolled past is the legend for this too.
+           Hidden until there is something to draw, which for a bodyweight-only client is always. -->
+      <section class="chart" id="work-chart" aria-labelledby="work-title" hidden>
+        <div class="chart__head">
+          <h2 class="chart__title" id="work-title">Work per session</h2>
+          <span class="chart__value num" id="work-value"></span>
+        </div>
+        <div id="work-plot"></div>
+        <p class="chart__caption" id="work-caption"></p>
+      </section>
+
       <header class="context">
         <h2 class="context__exercise" id="exercise-name">&nbsp;</h2>
         <div class="context__row">

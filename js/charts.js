@@ -307,6 +307,239 @@ function renderSeriesChart(
   container.innerHTML = out;
 }
 
+// ------------------------------------------------------------------ work per session
+
+/**
+ * A curve through points, guaranteed not to overshoot them.
+ *
+ * Monotone cubic, Fritsch-Carlson tangents, rather than the usual Catmull-Rom or a cardinal
+ * spline. The difference is not cosmetic. A plain spline through 3,200 then 3,300 then 3,100
+ * bulges above 3,300 on its way between them, which draws a session at a volume nobody logged, and
+ * the bulge is largest exactly where the data is most uneven. Clamping the tangent to zero at every
+ * local extreme means the curve turns at the point rather than past it: every peak on this chart is
+ * a session, and the highest ink on the line is the highest number in the data.
+ *
+ * Smoothing at all is a decision, and it is this chart's alone. The per lift charts are straight
+ * segments because a segment there carries a classification, deload or not, and a curve cannot be
+ * half dashed. Here a line is a program day's workload over months, and the shape is the point.
+ *
+ * Exported for test.js alone. It is the only piece of drawing in this file that can be wrong about
+ * the data rather than about the pixels, so it is the only piece worth a unit test.
+ */
+export function smoothPath(points) {
+  const n = points.length;
+  if (!n) return '';
+  const at = (p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+  if (n === 1) return `M${at(points[0])}`;
+
+  const dx = [];
+  const slope = [];
+  for (let i = 0; i < n - 1; i += 1) {
+    dx[i] = points[i + 1].x - points[i].x;
+    slope[i] = dx[i] === 0 ? 0 : (points[i + 1].y - points[i].y) / dx[i];
+  }
+
+  const m = new Array(n);
+  m[0] = slope[0];
+  m[n - 1] = slope[n - 2];
+  for (let i = 1; i < n - 1; i += 1) {
+    // A sign change is a turning point, and a tangent of zero is what makes the curve turn ON the
+    // point. Otherwise the weighted harmonic mean, which cannot exceed either neighbouring slope.
+    if (slope[i - 1] * slope[i] <= 0) {
+      m[i] = 0;
+    } else {
+      const w1 = 2 * dx[i] + dx[i - 1];
+      const w2 = dx[i] + 2 * dx[i - 1];
+      m[i] = (w1 + w2) / (w1 / slope[i - 1] + w2 / slope[i]);
+    }
+  }
+
+  let d = `M${at(points[0])}`;
+  for (let i = 0; i < n - 1; i += 1) {
+    const run = dx[i] / 3;
+    const c1 = { x: points[i].x + run, y: points[i].y + m[i] * run };
+    const c2 = { x: points[i + 1].x - run, y: points[i + 1].y - m[i + 1] * run };
+    d += ` C${at(c1)} ${at(c2)} ${at(points[i + 1])}`;
+  }
+  return d;
+}
+
+/**
+ * Labels that would sit on top of each other, pushed apart.
+ *
+ * Two program days ending a month apart at similar volumes put their glyphs in the same twelve
+ * pixels, and two glyphs overprinted is worse than either being slightly off its own line. Walks
+ * top down and pushes each label down to clear the one above, which is stable: the order never
+ * changes, so a label cannot swap sides of its neighbour between redraws.
+ */
+function spread(entries, gap, floor, ceiling) {
+  const sorted = [...entries].sort((a, b) => a.y - b.y);
+  let last = -Infinity;
+  for (const entry of sorted) {
+    entry.labelY = Math.max(entry.y, last + gap, floor);
+    last = entry.labelY;
+  }
+  // Anything pushed off the bottom comes back up, which can only happen when there are more labels
+  // than the box is tall, and is still better than one printed outside the card.
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    if (sorted[i].labelY > ceiling) sorted[i].labelY = ceiling - (sorted.length - 1 - i) * gap;
+  }
+  return entries;
+}
+
+/** Ids have to be unique across every chart on the page, and there are four of them on Progress. */
+let gradientSeq = 0;
+
+/**
+ * Work per session, one line per program day, in the consistency grid's own slot colours.
+ *
+ * The colours are the point rather than decoration. This card sits directly under the grid, whose
+ * legend has just told the reader that rose is UPPER A and emerald is LOWER A, and it answers the
+ * question the grid cannot: the grid says a session happened on the eleventh, this says how much
+ * work was in it. Painting the lines in a second palette would make the reader learn the same
+ * split twice.
+ *
+ * Hue is still the fourth signal and not the first, per the encoding rules. A line carries its own
+ * position in the box, a marker at every session, a glyph at its end, and a legend row naming it in
+ * words. What colour adds is the tie back to the grid.
+ *
+ * Zero based, unlike the estimated 1RM line, because this one is filled. A wash under a line reads
+ * as quantity whether or not it was meant to, so a floor above zero would draw a session at half
+ * the ink of one that was twice the work. The fill is what makes four overlapping series legible,
+ * so the axis pays for it rather than the other way round.
+ */
+export function renderSessionVolumeChart(container, built, { height = 208, scale = toDisplay } = {}) {
+  container.innerHTML = '';
+  const lines = built.lines.filter((line) => line.points.length);
+  if (!lines.length) return;
+
+  const width = widthOf(container);
+  const pad = { top: 16, right: 26, bottom: 26, left: 48 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  // Display units from here down. Nothing below this line is in kilograms.
+  const every = lines.flatMap((line) => line.points);
+  const at = (point) => scale(point.volumeKg);
+  const max = Math.max(...every.map(at), 1);
+  // Five rules rather than the four the other charts ask for. Session volume runs to five figures,
+  // so a four rule axis lands on a step of ten thousand and spends the top third of the box on
+  // headroom above a series that never gets there.
+  const { domain, ticks } = axisTicks(0, max, { target: 5 });
+
+  const x = linear(timeDomain(every), [pad.left, pad.left + plotW]);
+  const y = linear(domain, [pad.top + plotH, pad.top]);
+  const base = pad.top + plotH;
+  const uid = `sv${(gradientSeq += 1)}`;
+
+  let out = svgOpen(width, height, `Work per session, ${lines.length} program days`);
+
+  // One wash per slot. The gradient carries the slot class itself, because --cal-face is set by
+  // that class and a gradient in <defs> inherits from <defs> rather than from whatever references
+  // it, so the class has to be where the variable is read.
+  // Keyed by position rather than by the day's name, which is free text a trainer typed: "UPPER A"
+  // carries a space, and a space in an id is a url(#) that resolves to nothing and a wash that
+  // silently does not paint.
+  const washId = (index) => `${uid}-${index}`;
+  out += '<defs>';
+  lines.forEach((line, index) => {
+    out +=
+      `<linearGradient id="${washId(index)}" class="is-slot-${line.slot}" x1="0" y1="0" x2="0" y2="1">` +
+      '<stop class="chart__wash-top" offset="0" /><stop class="chart__wash-base" offset="1" />' +
+      '</linearGradient>';
+  });
+  out += '</defs>';
+
+  out += gridBlock(ticks, y, { left: pad.left, right: width - pad.right });
+  out += `<line class="chart__baseline" x1="${pad.left}" y1="${base}" x2="${width - pad.right}" y2="${base}" />`;
+
+  const ends = lines.map((line) => {
+    const last = line.points[line.points.length - 1];
+    return { line, y: y(at(last)), labelY: y(at(last)) };
+  });
+  spread(ends, 13, pad.top + 4, base);
+
+  // Every wash first, then every stroke, rather than each line complete before the next one starts.
+  // A day that dips low draws a fill across the whole width under it, and painting that after the
+  // line it crosses buries the line: on the seeded two day split the upper day's whole curve
+  // disappeared under the lower day's wash. Washes are the background, so they go in the
+  // background. Within each pass, slot order, so a redraw cannot shuffle the stacking.
+  const plottedByLine = lines.map((line) =>
+    line.points.map((p) => ({ x: x(Date.parse(p.date)), y: y(at(p)) })),
+  );
+
+  plottedByLine.forEach((plotted, index) => {
+    if (plotted.length < 2) return;
+    const wash =
+      `${smoothPath(plotted)} L${plotted[plotted.length - 1].x.toFixed(1)} ${base} ` +
+      `L${plotted[0].x.toFixed(1)} ${base} Z`;
+    out += `<path class="chart__wash" d="${wash}" fill="url(#${washId(index)})" />`;
+  });
+
+  lines.forEach((line, index) => {
+    const plotted = plottedByLine[index];
+    if (plotted.length > 1) {
+      out += `<path class="chart__curve is-slot-${line.slot}" d="${smoothPath(plotted)}" />`;
+    }
+
+    for (const point of line.points) {
+      const cx = x(Date.parse(point.date));
+      const cy = y(at(point));
+      if (point.isDeload) {
+        // Planned, so it takes the shape the deload has everywhere else rather than a dip in a
+        // line nobody explained. The words are under the chart.
+        out +=
+          `<rect class="chart__mark is-deload" x="${(cx - 3.5).toFixed(1)}" y="${(cy - 3.5).toFixed(1)}" ` +
+          `width="7" height="7" />`;
+      } else {
+        out += `<circle class="chart__node is-slot-${line.slot}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" />`;
+      }
+    }
+  });
+
+  // The glyph at the end of each line, which is the same two letters the grid puts in the cell.
+  // In --text-primary rather than in the slot's own rim: a rim is a lit edge at about 3.5 against
+  // black, which is a fine stroke and an illegal colour for 12px text.
+  for (const end of ends) {
+    const cx = x(Date.parse(end.line.points[end.line.points.length - 1].date));
+    out +=
+      `<text class="chart__glyph" x="${(cx + 7).toFixed(1)}" y="${(end.labelY + 4).toFixed(1)}">` +
+      `${esc(end.line.glyph)}</text>`;
+  }
+
+  const firstDeload = every.find((p) => p.isDeload);
+  if (firstDeload) {
+    out += `<text class="chart__note" x="${pad.left}" y="${height - 8}">Squares are planned deloads</text>`;
+  } else {
+    out += `<text class="chart__axis" x="${pad.left}" y="${height - 8}">${esc(shortDay(every[0].date))}</text>`;
+  }
+  out += `<text class="chart__axis" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${esc(
+    shortDay(every[every.length - 1].date),
+  )}</text>`;
+  out += '</svg>';
+
+  // The legend is markup rather than more SVG, and it carries the numbers the lines end on. Four
+  // values printed inside the box would need fifty pixels of the right margin on a 328px chart,
+  // and they would be the only numbers on the screen not sitting in a row anybody can scan. It is
+  // built the same way the grid's legend is, for the same reason: a key that is not made out of
+  // the thing it explains stops matching the first time either one is retuned.
+  out +=
+    '<ul class="chart__keys">' +
+    lines
+      .map((line) => {
+        const last = line.points[line.points.length - 1];
+        return (
+          `<li class="chart__key"><span class="chart__keymark is-slot-${line.slot}" aria-hidden="true">` +
+          `${esc(line.glyph)}</span>${esc(line.label)} ` +
+          `<b class="num">${esc(axisNum(at(last)))}</b></li>`
+        );
+      })
+      .join('') +
+    '</ul>';
+
+  container.innerHTML = out;
+}
+
 // ------------------------------------------------------------------ volume
 
 /**

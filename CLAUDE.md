@@ -464,6 +464,18 @@ Constraints:
   nothing but a gap holding them apart, and a gap is the first thing that goes when a caption runs
   to two lines. The logging screen is one object read at arm's length and has nothing to group, so
   it stays flat.
+- **A veil is a fall of light, not a flat wash, and it ends in the base.** The first version was one
+  even tint edge to edge, which made a card the only object in this app with no light direction on
+  it while every control on the logging screen is lit along its top and shaded along its bottom. It
+  also spent the black: a violet at sixteen percent across half a phone screen is a large grey
+  purple rectangle, and on an OLED panel the base is the one surface that costs nothing to draw and
+  cannot be imitated. So the wash starts at `--veil` under the lit top edge and falls to
+  `--veil-deep`, which is near enough to nothing that the bottom of every card IS `--surface-base`,
+  and the hairline goes with it: `--veil-edge` on the top, `--veil-edge-low` on the other three,
+  because a line of even weight all the way round is a box drawn on a screen rather than an object
+  sitting on one. There is no drop shadow anywhere in this app and there cannot be: a black shadow
+  on a black base separates nothing. Objects here are lifted by light on their own edges.
+  All three cards take this from one rule in `styles.css`, not three copies of it.
 - **`backdrop-filter` earns itself in exactly one place, the tab bar.** Content scrolls under a
   fixed bar, so there is something behind it to frost. Everywhere else the thing behind a veil is
   the black base, and a blur of black is black. It ships behind `@supports` with the opaque bar as
@@ -572,8 +584,26 @@ cell is a slab in the ground role saying which kind of day this was, never how m
 there was, so it cannot compete for the meaning cyan owns. `--split-N-face`, `-shade` and `-rim`
 inherit the lit slab treatment unchanged.
 
-They are fenced the way `--done` is fenced: the grid and its legend, and nowhere else. Never a
-chart, never a control, never text.
+They are fenced the way `--done` is fenced, and the fence now names three places rather than two:
+the grid, its legend, and the work per session chart directly under it. Never a control, never
+text, and never any other chart.
+
+**That third place is a deliberate loosening and the reasoning has to survive it.** The rule exists
+so a surface cannot compete for the meaning cyan owns, and the test of it is what a colour is
+claiming. On that chart a line's colour says which program day it is, exactly as a cell's face
+does; its HEIGHT says how much work was in the session, and height is not a thing hue is being
+asked to encode. The chart also sits immediately under the legend that defines those colours, so
+painting it in a second palette would make a reader learn the same split twice.
+
+The pair to measure is `--split-2-rim` against `--accent-data`, since the cyan charts are one card
+further down: 150 degrees against 190 is 40 apart, which is under the 43 the `--done` note bought
+itself. What separates them here is luminance, and by a margin nothing else in this file has.
+`--split-2-rim` reads 3.51 against the base and `--accent-data` reads 11.79, a factor of 3.4, where
+the pair that forced the no-intensity-only rule differed by 1.14. A dark emerald stroke inside a
+labelled card cannot be read as the bright cyan series in the next one.
+
+What would break this is a second chart taking these colours for anything other than program day
+identity. There is no third use, and a proposal for one is a proposal to make these data tokens.
 
 **Luminance is a ceiling here, not a fixed point, and that is the one rule these break with
 `--surface-raised`.** That token pins luminance for two reasons: `--text-primary` must clear 7:1 on
@@ -703,7 +733,33 @@ a real client has a few blocks logged and the progress screens can be developed 
 5. Trainer view: client list, program builder, per-client progression.
 6. Consistency grid and charts. Done. `js/consistency.js` builds it, `js/consistency-view.js`
    draws it, and it leads the progress screen. It is the first client wide thing on that screen,
-   which is why it holds the h1 and the lift name below it is an h2.
+   which is why it holds the h1 and the lift name below it is an h2. The second and last client
+   wide thing is the work per session chart under it, `js/session-volume.js` and
+   `renderSessionVolumeChart`: the grid says a session happened, that says how much was in it.
+   **It is one line per program day and never one line in total.** A single tonnage line alternates
+   the size of an upper day and a lower day, so it encodes the day of the week and a trend drawn
+   through it measures nothing. It is not one line per lift either: bench against leg press is not
+   a comparison anybody has, the magnitudes differ by an order of magnitude so the small lifts flatten
+   onto the axis, and the per lift answer is one card below where the picker puts it.
+   Which day a session was is decided once, in `identifySessions`, and both the grid and the chart are
+   handed the answer, so a line cannot be painted a colour the cell above it is not.
+   **A session still running is not a point, and several sessions of one program day on one day are
+   one point.** The first is not a low number, it is a number that does not exist yet: including it
+   meant the line dipped every time somebody opened Progress between their first set and their last,
+   which is the most likely moment anybody looks at this screen. The second is one visit, which is
+   what a client restarting on the right day or picking a dead phone back up produces, and drawn
+   apart they are four dots inside one pixel of an eight week axis, so they read as a vertical wall
+   rather than as the day's work. They sum, exactly as the grid puts two sessions in one cell. Two
+   sessions of DIFFERENT days on one date stay apart: those are different lines.
+   Neither rule hides a short session. A finished session holding one set is a point at the height
+   of one set and the line drops to meet it, because that is the week somebody did almost nothing.
+   No guilt is a rule about words and colour. It is not licence to move the data.
+   It counts everything performed, warmups aside, with prescribed sets and added sets in one number.
+   That is the one departure from "extra volume is never folded into a number carrying a claim", and
+   it is narrow: that rule protects the per lift volume chart, whose claim is that the prescription
+   is being met, and where an added set would be inflating the evidence for it. The claim here is how
+   much work a session held, and a set somebody chose to add is work they did. The per lift card
+   still separates the two, so nothing is hidden, it is only totalled differently.
 7. Payment log and CSV export.
 8. Export cards.
 

@@ -314,7 +314,7 @@ export function suggestDeloadWeeks(progression) {
   });
 }
 
-function changeBetween(values) {
+export function changeBetween(values) {
   if (values.length < 2) return null;
   const first = values[0];
   const last = values[values.length - 1];

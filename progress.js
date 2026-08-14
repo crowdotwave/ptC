@@ -30,7 +30,9 @@ import {
   renderRepsAtLoadChart,
   renderRepsChart,
   renderHoldChart,
+  renderSessionVolumeChart,
 } from './js/charts.js';
+import { buildSessionVolume } from './js/session-volume.js';
 
 const el = (id) => document.getElementById(id);
 const state = {
@@ -43,6 +45,10 @@ const state = {
   // built once and never rebuilt by render(), which runs on every unit toggle and every resize.
   // Which month is showing is deliberately NOT here: the scroll position is that answer.
   consistency: null,
+  // Work per session, client wide. Built once alongside the grid, for the same reason the grid is:
+  // it is not scoped to a lift, so picking another one cannot change it. It is REDRAWN on a unit
+  // toggle and on a resize, because it carries weights and it measures its container.
+  work: null,
   assignments: new Map(),
   sessionsByDay: new Map(),
   logsBySession: new Map(),
@@ -209,6 +215,71 @@ function render() {
         ? 'One session at this load. The comparison starts next time.'
         : `Current block, ${lines.length} load${lines.length === 1 ? '' : 's'}. The bar holding still while reps climb is progress.`,
   );
+}
+
+// ------------------------------------------------------------------ work per session
+//
+// The client wide chart, between the grid and the lift picker. js/session-volume.js decides what
+// counts and why it is split by program day rather than totalled; this only says it in words.
+
+/**
+ * What the lines add up to, in a sentence.
+ *
+ * It speaks about ONE line, named, and never about the last two sessions. The last two sessions are
+ * usually two different program days, so "up 4,300 lb since last time" would be reporting that
+ * Thursday is not Tuesday. The line with the most sessions behind it is the one with something to
+ * say, and js/session-volume.js picks it.
+ */
+function workCaption(built) {
+  const day = built.lead ? built.lead.label : 'this program';
+  const extra =
+    built.hiddenCount > 0
+      ? ` ${built.hiddenCount} other day${built.hiddenCount === 1 ? '' : 's'} not shown.`
+      : '';
+
+  switch (built.evidence) {
+    case 'none':
+      return 'Nothing with a weight on it logged yet.';
+    case 'single':
+      return `One session on ${day}. Log it again and the comparison starts.${extra}`;
+    case 'compare':
+      return `Two sessions on ${day}. A comparison, not a trend.${extra}`;
+    default: {
+      const change = built.change;
+      if (!change) return `Every session you have logged, by program day.${extra}`;
+      const move = `${change.absolute >= 0 ? 'Up' : 'Down'} ${volumeLabel(Math.abs(change.absolute))}${
+        change.percent === null ? '' : `, ${change.percent > 0 ? '+' : ''}${change.percent} percent`
+      }`;
+      // Same warning the per lift volume chart carries, and for the same reason: sets by reps by
+      // weight is only comparable while the rep range holds still.
+      return `${move} on ${day} since the first one. Volume is not comparable across a change of rep range.${extra}`;
+    }
+  }
+}
+
+function drawWork() {
+  const built = state.work;
+  const card = el('work-chart');
+  if (!built || !built.lines.length) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  setCopy('work-value', built.latest ? volumeLabel(built.latest.volumeKg) : '');
+  renderSessionVolumeChart(el('work-plot'), built);
+  setCopy('work-caption', workCaption(built));
+}
+
+/**
+ * Every chart on the screen that carries a weight or measures its container.
+ *
+ * Both of those are true of the client wide chart as well as the per lift ones, so a unit toggle
+ * and a resize have to reach both. The consistency grid is deliberately not in here: it holds a
+ * scroll position, and redrawing it would throw away which month you had scrolled back to.
+ */
+function redraw() {
+  drawWork();
+  if (state.data) render();
 }
 
 // ------------------------------------------------------------------ consistency
@@ -575,9 +646,7 @@ async function main() {
   }
 
   mountUnitSwitch(el('unit-switch'));
-  onUnitChange(() => {
-    if (state.data) render();
-  });
+  onUnitChange(redraw);
 
   const exercises = await storage.query('exercises', {});
   for (const ex of exercises) state.exercises.set(ex.id, ex);
@@ -599,6 +668,11 @@ async function main() {
   const assignments = await storage.query('assignments', { client_id: state.client.id });
   state.assignments = new Map(assignments.map((a) => [a.id, a]));
   mountConsistency(sessions, logs);
+
+  // Same rows, same place in the load, for the same reason as the grid: a client whose only lift so
+  // far is one they have done twice has nothing for the picker below and something for this.
+  state.work = buildSessionVolume({ sessions, setLogs: logs, assignments });
+  drawWork();
 
   // After the assignments map, which the labels are resolved from, and before the lift picker's
   // early return: a client whose only rows are warmups still has sessions worth listing, and is
@@ -627,7 +701,7 @@ async function main() {
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(render, 150);
+    resizeTimer = setTimeout(redraw, 150);
   });
 }
 

@@ -84,10 +84,30 @@
    *
    * --veil-blur is what makes the tab bar work rather than the cards: content scrolls under it, so
    * there is something behind it to blur. Over black there is nothing to blur, and that is fine.
-   * The value is here so the two cannot disagree about how frosted this app is. */
-  --veil: color-mix(in srgb, var(--surface-raised) 16%, transparent);
-  --veil-edge: color-mix(in srgb, var(--surface-raised-rim) 34%, transparent);
-  --veil-lit: color-mix(in srgb, var(--text-primary) 7%, transparent);
+   * The value is here so the two cannot disagree about how frosted this app is.
+   *
+   * A VEIL IS A FALL OF LIGHT, NOT A TINT, and that is what these five tokens are for. The first
+   * version was one flat 16% wash edge to edge, which is the same lighting model the rest of this
+   * app rejects: every raised control here is lit along its top and shaded along its bottom, and a
+   * card was the only object on screen with no light direction at all. Flat also spent the black.
+   * Sixteen percent of a violet over half a phone screen is a large grey-purple rectangle, and on
+   * an OLED panel the base is the one surface that costs nothing and looks like nothing else.
+   *
+   * So the wash starts at --veil and falls to --veil-deep, which is near enough to nothing that the
+   * bottom of every card IS the base. The card is brightest where the light hits it, at the top
+   * edge, and dissolves into black at the bottom. The edge does the same thing: --veil-edge on the
+   * top, --veil-edge-low around the rest, because a hairline of even weight all the way round is a
+   * box drawn on the screen rather than an object sitting on it.
+   *
+   * Contrast is unaffected, and it can only improve. The rule this family lives under is that a
+   * veil resolves DARKER than --surface-raised over the black base, so every text token keeps at
+   * least the ratio it measures against --surface-base. Taking 16% down to 11% moves further into
+   * that margin rather than out of it. */
+  --veil: color-mix(in srgb, var(--surface-raised) 11%, transparent);
+  --veil-deep: color-mix(in srgb, var(--surface-raised) 2%, transparent);
+  --veil-edge: color-mix(in srgb, var(--surface-raised-rim) 38%, transparent);
+  --veil-edge-low: color-mix(in srgb, var(--surface-raised-rim) 13%, transparent);
+  --veil-lit: color-mix(in srgb, var(--text-primary) 9%, transparent);
   --veil-blur: 18px;
 
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
@@ -162,8 +182,9 @@
 
   /* ---------------------------------------------------------------- split identity
    *
-   * Which program day a session was, on the consistency grid. Fenced to that grid and its legend,
-   * the way --done is fenced to the session summary. Never a chart, never a control, never text.
+   * Which program day a session was. Fenced to three places, the way --done is fenced to the
+   * session summary: the consistency grid, its legend, and the work per session chart directly
+   * under it. Never a control, never text, never any other chart.
    *
    * These are SURFACE FACES, not data tokens, and that distinction is the whole design. The cyan
    * ladder above is capped at six by the note there, and a seventh forces a real trade. This does
@@ -171,6 +192,14 @@
    * kind of day this was, not how much of anything there was. So it can never compete for the
    * meaning cyan owns, and it inherits the lit slab treatment unchanged, face grading to shade
    * with the rim catching the top edge.
+   *
+   * THE CHART IS THE ONE LOOSENING OF THAT, and it holds for the same reason rather than in spite
+   * of it. A line there is coloured by which program day it is and nothing else; how much work the
+   * session held is its height. Hue is still saying which kind of day this was. The pair worth
+   * measuring is --split-2-rim against --accent-data, since the cyan charts are one card below: 150
+   * degrees against 190 is 40 apart, under the 43 the --done note bought. Luminance is what carries
+   * it instead, 3.51 against 11.79, a factor of 3.4 where the pair that forced the no-intensity-only
+   * rule differed by 1.14. See CLAUDE.md, under split identity, before taking these anywhere else.
    *
    * LUMINANCE IS A CEILING HERE, NOT A FIXED POINT, and this is the one place these differ from
    * --surface-raised. That token pins luminance for two reasons: --text-primary must clear 7:1 on
@@ -248,6 +277,44 @@
   --split-4-face: #4b4750; /*  2.32 / 1.08   no hue left, 6% saturation. Text on it 7.85 */
   --split-4-shade: #423f47; /* 2.03 / 1.24   text 8.98 */
   --split-4-rim: #695d7b; /*   3.44 / 1.37   lit edge, never text */
+
+  /* ---------------------------------------------------------------- split identity, as a line
+   *
+   * The same four days, drawn as strokes on the work per session chart instead of as slabs on the
+   * grid. Same hues to the degree, because a line has to be the colour of the cell it belongs to.
+   * Everything else is different, and both differences are the same realisation: a FACE is a
+   * surface somebody reads text off, and a LINE is light on black.
+   *
+   * The faces are capped at Y <= 0.0801 so --text-primary clears 7:1 on them. Nothing writes on a
+   * stroke, so that ceiling does not apply, and holding a 2.3 contrast surface colour up as a line
+   * is what made this chart look washed out: the rims it used first sit at 3.2 to 3.5, which is a
+   * hairline on a calendar cell and a dim smear across 300 pixels of black.
+   *
+   * LUMINANCE IS A CEILING HERE TOO, NOT A FIXED POINT, and getting that wrong is worth recording
+   * because the wrong answer is the one that sounds more rigorous. Four lines overlaid in one box
+   * have a problem the calendar does not: green carries 0.7152 of the luminance sum against blue's
+   * 0.0722, so at equal chroma the emerald line is three times the visual weight of the indigo one
+   * and the eye reads it as the important series with the others as its shadow. The obvious fix is
+   * to equalise luminance, and it was tried here first. It fails for exactly the reason the faces
+   * note gives: matching a rose at 322 to a green at 147 means pulling both down to what the rose
+   * can reach at that lightness, and every hue comes back pastel. Equal weight, no colour.
+   *
+   * So each hue holds the most chroma it has, under a ceiling of about Y 0.36. That is 5.89 to 8.08
+   * against the base, a spread of 1.37, which takes the green from three times the indigo's weight
+   * to a quarter more than it. Saturation is 75, 85, 55 and 12 percent at 322, 147, 248 and 262
+   * degrees, and 55 is not a compromise: it is as saturated as a blue gets before it stops being
+   * light and starts being a surface again.
+   *
+   * The ceiling is also what keeps this family clear of --accent-data at 11.79. The weakest case is
+   * the emerald, 1.46 times dimmer than the cyan series in the next card down, on top of 43 degrees
+   * of hue and a different card. That is the separation CLAUDE.md leans on for letting these into a
+   * chart at all, so lifting this ceiling is not a taste change, it is spending that argument.
+   *
+   * Ratios are against --surface-base. There is no second column: these never touch a surface. */
+  --split-1-line: #ff40b9; /*  6.62  rose, 322deg, 75% sat */
+  --split-2-line: #1bb862; /*  8.08  emerald, 147deg, 85% sat. --done's hue at 0.69 its luminance */
+  --split-3-line: #8573ff; /*  5.89  indigo, 248deg, 55% sat, and as bright as this hue gets */
+  --split-4-line: #a29aae; /*  7.95  no hue left, 12% sat. Separated from slot 3 by chroma */
 
   /* State. --muted is disabled text on --surface-base only. --focus always ships with a
    * 2px --surface-base inner ring, so it never has to contrast with the fill underneath it. */
@@ -385,6 +452,29 @@ button {
 
 .pr {
   box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
+}
+
+/* ---------------------------------------------------------------- veiled cards
+ *
+ * The card language on the reading screens, in one rule, because there are three of them and they
+ * were three copies of the same four declarations. The third copy is how a card ends up a hairline
+ * brighter than its neighbour for a release.
+ *
+ * Everything about the look is argued at the --veil tokens above. What is here is the arrangement:
+ * the wash falls from the lit top edge to nothing well before the bottom, the top hairline is the
+ * bright one and the other three are a third of it, and the inset highlight is the same rim every
+ * pressable thing in this app catches along its top edge.
+ *
+ * There is no drop shadow, and that is not an omission. The base is #000000, so a black shadow on
+ * black separates nothing. On this palette an object is lifted by the light on its own edge. */
+.consistency,
+.chart,
+.history {
+  border: 1px solid var(--veil-edge-low);
+  border-top-color: var(--veil-edge);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, var(--veil) 0%, var(--veil-deep) 58%, transparent 100%);
+  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
 /* ---------------------------------------------------------------- screen skeleton */
@@ -1487,10 +1577,6 @@ button.worknav__row:active {
   flex-direction: column;
   gap: var(--s-2);
   padding: var(--s-4) var(--s-3);
-  border: 1px solid var(--veil-edge);
-  border-radius: var(--radius-card);
-  background: var(--veil);
-  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
 .chart__head {
@@ -1582,6 +1668,114 @@ button.worknav__row:active {
   stroke-width: 2;
   --glow-tint: color-mix(in srgb, var(--pr) var(--glow-strength-celebrate), transparent);
   filter: drop-shadow(0 0 var(--glow-radius-rest) var(--glow-tint));
+}
+
+/* ---------------------------------------------------------------- work per session
+ *
+ * The only chart in this app drawn in the split identity palette rather than in cyan, and the only
+ * one that is smoothed and filled. Both are explained in js/charts.js renderSessionVolumeChart and
+ * in the --split-N-* block above: it sits under the consistency grid, one line per program day, in
+ * the same colours the grid's legend has just defined.
+ *
+ * The stroke takes --cal-line, which is the one member of each slot family built to be light rather
+ * than surface. It started on --cal-rim, the lit edge of the slab, and a 3.2 contrast hairline that
+ * reads as an edge on a 46px calendar cell reads as a dim smear when it is 300px long. Nothing here
+ * puts text in either: the glyph at the end of each line is --text-primary. */
+.chart__curve {
+  fill: none;
+  stroke: var(--cal-line);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  --glow-tint: color-mix(in srgb, var(--cal-line) var(--glow-strength-rest), transparent);
+  filter: drop-shadow(0 0 var(--glow-radius-rest) var(--glow-tint));
+}
+
+/* The wash under a curve, and the reason this axis is zero based: filled area reads as quantity
+ * whether it was meant to or not.
+ *
+ * SCREEN, NOT NORMAL, and that is the whole of what fixed the stacking. Four translucent fills
+ * composited the ordinary way means every overlap is a colour that belongs to neither day: a rose
+ * wash under an emerald one came out a muddy brown that is not on this palette anywhere, and which
+ * of the two got muddied depended on nothing more meaningful than slot order. Screen adds light
+ * instead of covering it, which over a black base is both the physically right model and a
+ * commutative one, so an overlap is the two days' light together and the drawing order stops
+ * mattering. It is also what the OLED base is for: light on black adds, it does not mix like paint.
+ *
+ * The stops take --cal-line rather than --cal-face for the same reason the stroke does. A surface
+ * token at a third opacity is how the first version got its washed out look. */
+.chart__wash {
+  stroke: none;
+  mix-blend-mode: screen;
+}
+
+/* Low, and lower than it looks like it wants to be. Screen means an overlap is the sum of the light
+ * in it, and two saturated hues summed are on their way to white, so a heavy wash trades mud for
+ * grey and loses the colour either way. At a third the strokes carry the vibrance and the fills
+ * only say which line owns which ground. */
+.chart__wash-top {
+  stop-color: var(--cal-line);
+  stop-opacity: 0.3;
+}
+
+.chart__wash-base {
+  stop-color: var(--cal-line);
+  stop-opacity: 0;
+}
+
+.chart__node {
+  fill: var(--cal-line);
+}
+
+/* Two letters at the end of a line, the same two the grid puts in a cell. No glow: this is text. */
+.chart__glyph {
+  fill: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  filter: none;
+}
+
+/* The key, carrying the number each line ended on. Built out of the calendar's legend so the two
+ * cannot drift: same pill, same shrunk slab, same slot variables. */
+.chart__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0 var(--s-1);
+  list-style: none;
+}
+
+.chart__key {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 3px var(--s-3) 3px 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-base) 55%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.chart__key b {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.chart__keymark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border: 1px solid var(--cal-rim);
+  border-radius: 7px;
+  background: linear-gradient(180deg, var(--cal-face) 0%, var(--cal-shade) 100%);
+  box-shadow: inset 0 1px 0 0 var(--cal-rim);
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 700;
 }
 
 .chart__bar.is-prescribed {
@@ -1752,10 +1946,6 @@ button.worknav__row:active {
   flex-direction: column;
   gap: var(--s-3);
   padding: var(--s-4);
-  border: 1px solid var(--veil-edge);
-  border-radius: var(--radius-card);
-  background: var(--veil);
-  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
 /* Two columns, and the count stacks under the title rather than sitting beside it.
@@ -2040,10 +2230,12 @@ button.worknav__row:active {
   box-shadow: 0 0 8px 0 var(--glow-tint);
 }
 
-.is-slot-1 { --cal-face: var(--split-1-face); --cal-shade: var(--split-1-shade); --cal-rim: var(--split-1-rim); }
-.is-slot-2 { --cal-face: var(--split-2-face); --cal-shade: var(--split-2-shade); --cal-rim: var(--split-2-rim); }
-.is-slot-3 { --cal-face: var(--split-3-face); --cal-shade: var(--split-3-shade); --cal-rim: var(--split-3-rim); }
-.is-slot-4 { --cal-face: var(--split-4-face); --cal-shade: var(--split-4-shade); --cal-rim: var(--split-4-rim); }
+/* --cal-line is the stroke value, and it is carried on the same class as the slab values so a cell
+ * and the line for that same day cannot be given different slots by two different rules. */
+.is-slot-1 { --cal-face: var(--split-1-face); --cal-shade: var(--split-1-shade); --cal-rim: var(--split-1-rim); --cal-line: var(--split-1-line); }
+.is-slot-2 { --cal-face: var(--split-2-face); --cal-shade: var(--split-2-shade); --cal-rim: var(--split-2-rim); --cal-line: var(--split-2-line); }
+.is-slot-3 { --cal-face: var(--split-3-face); --cal-shade: var(--split-3-shade); --cal-rim: var(--split-3-rim); --cal-line: var(--split-3-line); }
+.is-slot-4 { --cal-face: var(--split-4-face); --cal-shade: var(--split-4-shade); --cal-rim: var(--split-4-rim); --cal-line: var(--split-4-line); }
 
 .cal__day.is-slot-1::before { left: 24%; right: 56%; }
 .cal__day.is-slot-2::before { left: 40%; right: 40%; }
@@ -3086,10 +3278,6 @@ button.navlink:disabled {
   gap: var(--s-2);
   margin-top: var(--s-3);
   padding: var(--s-4);
-  border: 1px solid var(--veil-edge);
-  border-radius: var(--radius-card);
-  background: var(--veil);
-  box-shadow: inset 0 1px 0 0 var(--veil-lit);
 }
 
 /* The rows already separate themselves, so the last one does not need a line before the card's own

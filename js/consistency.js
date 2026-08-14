@@ -111,6 +111,55 @@ function daysOfAssignment(assignment) {
 }
 
 /**
+ * Which program day each session was, and whether it fell in a planned deload.
+ *
+ * Exported because the grid is no longer the only thing that asks. js/session-volume.js draws one
+ * line per program day directly under the grid, in the grid's own slot colours, so a line painted
+ * slot 2 above a column of slot 3 cells would be the app disagreeing with itself about what a
+ * Tuesday was. One function decides, both callers are handed the answer.
+ *
+ * The split is read from each session's OWN assignment snapshot, so renaming a program does not
+ * repaint history and neither does being moved onto a new one.
+ */
+export function identifySessions({ sessions = [], assignments = [] } = {}) {
+  const assignmentById = new Map(assignments.map((a) => [a.id, a]));
+  const daysByAssignment = new Map();
+  const dayFor = (assignmentId, dayIndex) => {
+    if (!assignmentById.has(assignmentId)) return null;
+    if (!daysByAssignment.has(assignmentId)) {
+      daysByAssignment.set(assignmentId, daysOfAssignment(assignmentById.get(assignmentId)));
+    }
+    return daysByAssignment.get(assignmentId).find((d) => d.dayIndex === dayIndex) ?? null;
+  };
+
+  const out = new Map();
+  for (const session of sessions) {
+    const assignment = assignmentById.get(session.assignment_id) ?? null;
+    const programDay = dayFor(session.assignment_id, session.day_index);
+
+    // Deload comes from the assignment this session belongs to, never the current one. A client
+    // three programs later must not have last spring's week six light up because this spring's
+    // program happens to back off in its sixth week.
+    const week = assignment ? weekIndexOf(session.started_at, assignment.starts_on) : null;
+    const deloadWeeks = Array.isArray(assignment?.deload_weeks) ? assignment.deload_weeks : [];
+
+    out.set(session.id, {
+      sessionId: session.id,
+      assignmentId: session.assignment_id ?? null,
+      dayIndex: session.day_index ?? null,
+      // A session logged with no program behind it is still a session. It gets the colourless slot
+      // and says so, rather than being dropped for not fitting the model.
+      label: programDay ? programDay.label : 'Unprogrammed',
+      glyph: programDay ? programDay.glyph : '.',
+      slot: programDay ? programDay.slot : SPLIT_SLOTS,
+      weekIndex: week,
+      isDeload: week !== null && deloadWeeks.includes(week),
+    });
+  }
+  return out;
+}
+
+/**
  * The consistency view: one entry per calendar month, each a full Monday-first grid.
  *
  * `today` is passed in rather than read, for the same reason js/progression.js takes its rows
@@ -130,15 +179,7 @@ export function buildConsistency({
   from = null,
   to = null,
 } = {}) {
-  const assignmentById = new Map(assignments.map((a) => [a.id, a]));
-  const daysByAssignment = new Map();
-  const dayFor = (assignmentId, dayIndex) => {
-    if (!assignmentById.has(assignmentId)) return null;
-    if (!daysByAssignment.has(assignmentId)) {
-      daysByAssignment.set(assignmentId, daysOfAssignment(assignmentById.get(assignmentId)));
-    }
-    return daysByAssignment.get(assignmentId).find((d) => d.dayIndex === dayIndex) ?? null;
-  };
+  const identity = identifySessions({ sessions, assignments });
 
   // One entry per session that actually holds work, keyed to the local day it happened on.
   const byDay = new Map();
@@ -149,26 +190,8 @@ export function buildConsistency({
     const day = localDayOf(session.started_at);
     if (!day) continue;
 
-    const assignment = assignmentById.get(session.assignment_id) ?? null;
-    const programDay = dayFor(session.assignment_id, session.day_index);
-
-    // Deload comes from the assignment this session belongs to, never the current one. A client
-    // three programs later must not have last spring's week six light up because this spring's
-    // program happens to back off in its sixth week.
-    const week = assignment ? weekIndexOf(session.started_at, assignment.starts_on) : null;
-    const deloadWeeks = Array.isArray(assignment?.deload_weeks) ? assignment.deload_weeks : [];
-
     const entry = {
-      sessionId: session.id,
-      assignmentId: session.assignment_id ?? null,
-      dayIndex: session.day_index ?? null,
-      // A session logged with no program behind it is still a session. It gets the colourless slot
-      // and says so, rather than being dropped for not fitting the model.
-      label: programDay ? programDay.label : 'Unprogrammed',
-      glyph: programDay ? programDay.glyph : '.',
-      slot: programDay ? programDay.slot : SPLIT_SLOTS,
-      weekIndex: week,
-      isDeload: week !== null && deloadWeeks.includes(week),
+      ...identity.get(session.id),
       // Whether any lift set a record here. Decided by js/progression.js and handed in, because
       // that module already owns what a record is and two answers to that question is one too
       // many. It follows that a record can never fall on a deload: progression.js skips those

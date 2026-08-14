@@ -15,7 +15,7 @@ import { buildSnapshot } from './snapshot.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 6;
+const SEED_VERSION = 7;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
