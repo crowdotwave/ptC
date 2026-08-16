@@ -20,7 +20,7 @@ import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.
 import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
-import { tokenFromLink } from './js/auth.js';
+import { tokenFromLink, describeAuthError, cooldownLeft, RESEND_COOLDOWN_S } from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
@@ -2045,6 +2045,65 @@ test('anything that is not a sign in link is refused rather than half read', () 
   eq(tokenFromLink(null), null);
   eq(tokenFromLink('https://example.com/no/token/here'), null, 'a url with no token is not a link');
   eq(tokenFromLink('not a url at all?'), null);
+});
+
+// ------------------------------------------------------------------ being told no, usefully
+//
+// Outlook fetches links to scan them, which spends a single use sign in link before the person
+// taps it. The resends that follow exhaust a sending quota of two an hour, and the raw Supabase
+// message for that states a fact about our project rather than the thing to do, which is to type
+// the code from the email they already have.
+
+test('a per address cooldown is read out of the message and carries its own count', () => {
+  const d = describeAuthError({ message: 'For security purposes, you can only request this after 51 seconds.' });
+  eq(d.kind, 'wait');
+  eq(d.waitSeconds, 51);
+  eq(/51s/.test(d.message), true, 'the count reaches the person');
+});
+
+// The one that matters. Nothing about waiting for another email, because another email is not
+// coming for an hour and a live code is already sitting in their inbox.
+test('the project sending quota sends people to the code they already have', () => {
+  for (const error of [
+    { message: 'Email rate limit exceeded', status: 429 },
+    { code: 'over_email_send_rate_limit', message: 'anything at all' },
+  ]) {
+    const d = describeAuthError(error);
+    eq(d.kind, 'quota');
+    eq(/type its code/i.test(d.message), true);
+  }
+});
+
+test('a spent link and a spent code read as spent rather than as broken', () => {
+  eq(describeAuthError({ code: 'otp_expired', message: 'Token has expired or is invalid' }).kind, 'expired');
+  eq(describeAuthError({ message: 'Email link is invalid or has expired' }).kind, 'expired');
+});
+
+// A 429 with none of the above wording is still a rate limit and must not fall through to the
+// raw message, which is where this started.
+test('an unrecognised 429 is still handled as a rate limit', () => {
+  eq(describeAuthError({ status: 429, message: 'Too Many Requests' }).kind, 'quota');
+});
+
+test('an error nobody anticipated keeps its own message rather than being swallowed', () => {
+  eq(describeAuthError({ message: 'Signups not allowed for otp' }).message, 'Signups not allowed for otp');
+  eq(describeAuthError({}).message, 'That did not work. Try again.', 'and never an empty string');
+});
+
+test('the cooldown counts down and then clears', () => {
+  const sent = 1_000_000;
+  eq(cooldownLeft(sent, sent), RESEND_COOLDOWN_S);
+  eq(cooldownLeft(sent, sent + 40_000), 20);
+  eq(cooldownLeft(sent, sent + RESEND_COOLDOWN_S * 1000), 0);
+  eq(cooldownLeft(sent, sent + 999_000), 0, 'long past');
+  eq(cooldownLeft(0, sent), 0, 'never sent');
+});
+
+// lastSentAt is written by a browser clock. A device that jumps forward and then back would
+// otherwise leave the send button dead for the length of the jump, on the one screen with
+// nothing behind it.
+test('a clock that jumped does not lock the button', () => {
+  eq(cooldownLeft(5_000_000, 1_000_000), 0);
 });
 
 // ------------------------------------------------------------------ how many sets there are

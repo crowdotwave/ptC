@@ -1,0 +1,34 @@
+<!-- Paste this into the Supabase dashboard under Authentication, Emails, Magic Link.
+     It is committed here because it is load bearing and the dashboard has no history.
+
+     The one rule: this template carries a code and NO link.
+
+     The link and the code are the same token. Supabase spends that token for whoever fetches
+     the confirmation URL first, and Outlook fetches every link it delivers in order to scan it.
+     So a template carrying both is not a code path with a link for convenience, it is a code
+     path that Outlook breaks anyway: the scan spends the token and the code dies with it.
+     Removing {{ .ConfirmationURL }} is the entire fix. Putting it back reopens the outage.
+
+     Six digits typed by hand is a path no scanner can walk.
+
+     Deliberately plain. This is read on a phone in a mail app that will rewrite whatever CSS it
+     disagrees with, so it uses inline styles, a table free layout, and no colour that carries
+     meaning on its own. -->
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 420px; margin: 0 auto; padding: 24px; color: #16181d;">
+  <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.5;">
+    Here is your code to sign in to ptC.
+  </p>
+
+  <p style="margin: 0 0 20px; font-size: 34px; font-weight: 700; letter-spacing: 0.16em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">
+    {{ .Token }}
+  </p>
+
+  <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.5;">
+    Type it into the app on the phone you train with. It works for one hour, and it works only
+    once.
+  </p>
+
+  <p style="margin: 0; font-size: 13px; line-height: 1.5; color: #5b6270;">
+    If you did not ask to sign in, nothing has happened to your account and you can ignore this.
+  </p>
+</div>

@@ -19,6 +19,12 @@ depends on the one before it.
 4. `tests/rls_isolation.sql` proves the policies actually isolate. It checks that 0003 ran, so
    it fails fast rather than confusingly if the order slipped.
 
+Then `email-templates/`, which is not SQL and is not optional. The magic link template has to be
+replaced with the code only one there before anybody signs in from an Outlook address. Outlook
+fetches links to scan them, and a sign in link is spent by whoever fetches it first, so the default
+template delivers a dead link and the retries that follow exhaust the sending quota for the whole
+project. That README has the reasoning and the three dashboard settings it depends on.
+
 The SQL editor runs as `postgres`, which has `bypassrls`. That is what lets the test build its
 fixtures while the policies stay in force for the parts being tested.
 
