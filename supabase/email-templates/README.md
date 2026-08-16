@@ -1,7 +1,8 @@
 # Email templates
 
-One template, `magic-link.html`, pasted into the dashboard under Authentication, Emails, Magic
-Link. Committed here because it is load bearing and the dashboard keeps no history of it.
+One body, `sign-in-code.html`, pasted into the dashboard under Authentication, Emails, into both
+the Confirm signup template and the Magic Link template. Committed here because it is load bearing
+and the dashboard keeps no history of it.
 
 ## Why the link had to go
 
@@ -23,26 +24,61 @@ the part that is easy to get wrong: adding `{{ .Token }}` while leaving `{{ .Con
 place fixes nothing, because the scanner still fetches the link and the code dies with it. The
 confirmation URL has to be absent.
 
-## The dashboard settings this depends on
+## Setting it up
 
-Three, and the first is the only one that is not optional.
+SMTP comes first, and not for the reason it looks like. Since June 2026 a free tier project
+sending through Supabase's own sender cannot edit these templates at all, and configuring any
+custom SMTP restores that on any plan. So the sender swap is not just how the two per hour limit
+gets lifted, it is how the templates become editable in the first place. Upgrading to Pro is not
+required and does not help.
 
-1. **Authentication, Emails, Magic Link.** Body is `magic-link.html`. Subject line something like
-   `Your ptC sign in code`. Confirm no `{{ .ConfirmationURL }}` survives anywhere in it.
-2. **Authentication, Sign In / Providers, Email.** Email OTP expiry, one hour, which is the
-   default. The app tells people a code lasts an hour, so shortening this makes the app a liar.
-3. **Authentication, SMTP Settings.** The built in sender is for testing and its two per hour is
-   the reason a couple of retries locked the project. Any real sender lifts it, and the limit then
-   moves to Authentication, Rate Limits, which starts at 30 an hour and is adjustable.
+**1. A sender.** Brevo, because its free tier verifies a single sending address without owning a
+domain, which the alternatives mostly do not: Resend and Postmark want a verified domain before
+they will send to anybody but you. Verify the address, then take an SMTP key from SMTP & API.
+Host `smtp-relay.brevo.com`, port `587`, username the SMTP login shown there, password the key
+rather than the account password.
 
-Item 3 is the one that stops this recurring. Items 1 and 2 stop the retries being necessary in the
-first place, which matters more: a higher ceiling on a broken loop is a slower outage, not a fixed
-one.
+Brevo rewrites the visible From when the sender is a free address like gmail, so the first emails
+through a new sender can land in junk. Check there before concluding it did not send.
+
+**2. Authentication, SMTP Settings.** Enable custom SMTP and paste those in. The template editors
+unlock once this is on, which may need a reload.
+
+**3. Authentication, Rate Limits.** Off the floor of two an hour. The default once SMTP is
+configured is 30 an hour and it is adjustable.
+
+**4. Authentication, Emails.** Paste `sign-in-code.html` into **both** Confirm signup and Magic
+Link, subject something like `Your ptC sign in code`. Confirm no `{{ .ConfirmationURL }}` survives
+in either. Doing only one of the two is the mistake this file exists to prevent: see the note in
+the template itself.
+
+**5. Authentication, Sign In / Providers, Email.** Email OTP expiry one hour, which is the
+default. The app tells people a code lasts an hour, so shortening this makes the app a liar.
+
+Step 3 is what stops a bad afternoon becoming an outage. Step 4 is what stops the retries being
+needed at all, which matters more: a higher ceiling on a broken loop is a slower outage rather than
+a fixed one.
+
+## Proving it worked
+
+Sign in with an address nobody depends on, not a client's. What should arrive is an email with six
+digits and no link in it.
+
+Then check the half that is easy to skip, because it is the half that breaks silently. The two
+templates serve different people: an address that has signed in before exercises Magic Link, and
+an address that has never been seen exercises Confirm signup. Test a brand new address too, or the
+first thing to exercise Confirm signup will be a real client.
 
 ## What the app does with this
 
-`js/auth.js` `verifyCode` sends the typed code to `verifyOtp` with `type: 'email'`. The rest of the
-handling is in `auth-page.js`, and two parts of it exist because of this failure:
+`js/auth.js` `verifyCode` sends the typed code to `verifyOtp`, trying `email`, then `signup`, then
+`magiclink`, and stopping at the first that is accepted. That is the same split as the templates:
+a first sign in carries a signup token and every later one carries a magiclink token, sending the
+wrong type is rejected, and a single hardcoded type would fail for whichever kind the project was
+not handing out. It gives up the moment an error is about anything other than the token, so a rate
+limit costs one request rather than three.
+
+The rest of the handling is in `auth-page.js`, and two parts of it exist because of this failure:
 
 - The code box is reachable before any send and after a refused one. A code lasts an hour and the
   quota resets in an hour, so somebody the quota has cut off is nearly always holding a live code.

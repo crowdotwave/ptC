@@ -20,7 +20,9 @@ import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.
 import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
-import { tokenFromLink, describeAuthError, cooldownLeft, RESEND_COOLDOWN_S } from './js/auth.js';
+import {
+  tokenFromLink, describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
+} from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
@@ -49,12 +51,26 @@ import {
 
 const results = [];
 
+// Tests that return a promise are waited for before the report is written. Without this the
+// harness calls fn(), gets a promise back, drops it, and records a pass: an async assertion that
+// fails would report green, which is worse than no test at all. Sync tests still run and record
+// in order, so the report reads the same as it always has.
+const pending = [];
+
 function test(name, fn) {
+  const entry = { name, ok: true };
+  results.push(entry);
+  const failed = (error) => {
+    entry.ok = false;
+    entry.error = error?.message ?? String(error);
+  };
   try {
-    fn();
-    results.push({ name, ok: true });
+    const returned = fn();
+    if (returned && typeof returned.then === 'function') {
+      pending.push(returned.then(() => {}, failed));
+    }
   } catch (error) {
-    results.push({ name, ok: false, error: error.message });
+    failed(error);
   }
 }
 
@@ -2090,6 +2106,88 @@ test('an error nobody anticipated keeps its own message rather than being swallo
   eq(describeAuthError({}).message, 'That did not work. Try again.', 'and never an empty string');
 });
 
+// Supabase hands out a signup token to somebody signing in for the first time and a magiclink
+// token to everybody after that, and rejects the wrong type. A single hardcoded type therefore
+// fails for exactly one of those groups, and the group it fails for is every new client.
+const codeClient = (accept) => {
+  const tried = [];
+  return {
+    tried,
+    auth: {
+      async verifyOtp({ type }) {
+        tried.push(type);
+        return type === accept
+          ? { data: { session: { access_token: 'ok' } }, error: null }
+          : { data: {}, error: { code: 'otp_expired', message: 'Token has expired or is invalid' } };
+      },
+    },
+  };
+};
+
+test('a code is tried against each kind of token until one is accepted', async () => {
+  for (const accept of CODE_TYPES) {
+    const client = codeClient(accept);
+    const session = await verifyCode(client, 'clay@example.com', '123456');
+    eq(Boolean(session), true, `${accept} signs in`);
+    eq(client.tried[client.tried.length - 1], accept, 'and stops there');
+  }
+});
+
+test('the first kind accepted costs one request and no more', async () => {
+  const client = codeClient('email');
+  await verifyCode(client, 'clay@example.com', '123456');
+  eq(client.tried, ['email']);
+});
+
+// The retry is for a token that did not match, never for being asked too often. Hearing the same
+// rate limit three times spends three of an allowance that is the reason this bug was reported.
+test('a rate limit stops the retries rather than spending the allowance', async () => {
+  const tried = [];
+  const client = {
+    auth: {
+      async verifyOtp({ type }) {
+        tried.push(type);
+        return { data: {}, error: { status: 429, message: 'Too Many Requests' } };
+      },
+    },
+  };
+  let threw = false;
+  try {
+    await verifyCode(client, 'clay@example.com', '123456');
+  } catch {
+    threw = true;
+  }
+  eq(threw, true);
+  eq(tried, ['email'], 'one request, not three');
+});
+
+test('a code nothing accepts surfaces the real error', async () => {
+  const client = codeClient('nothing at all');
+  let message = '';
+  try {
+    await verifyCode(client, 'clay@example.com', '123456');
+  } catch (error) {
+    message = error.message;
+  }
+  eq(client.tried, CODE_TYPES);
+  eq(message, 'Token has expired or is invalid', 'rather than an undefined from the last loop');
+});
+
+test('the address and the code are normalised before they are sent', async () => {
+  let sent = null;
+  const client = {
+    auth: {
+      async verifyOtp(args) {
+        sent = args;
+        return { data: { session: {} }, error: null };
+      },
+    },
+  };
+  await verifyCode(client, '  Clay@Example.COM ', '  123456 ');
+  eq(sent.email, 'clay@example.com');
+  eq(sent.token, '123456');
+});
+
 test('the cooldown counts down and then clears', () => {
   const sent = 1_000_000;
   eq(cooldownLeft(sent, sent), RESEND_COOLDOWN_S);
@@ -3167,6 +3265,8 @@ test('a curve through one point is not a path anybody can stroke', () => {
 });
 
 // ------------------------------------------------------------------ report
+
+await Promise.all(pending);
 
 const passed = results.filter((r) => r.ok).length;
 const failed = results.filter((r) => !r.ok);

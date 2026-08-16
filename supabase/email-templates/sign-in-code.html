@@ -1,5 +1,15 @@
-<!-- Paste this into the Supabase dashboard under Authentication, Emails, Magic Link.
-     It is committed here because it is load bearing and the dashboard has no history.
+<!-- Paste this into the Supabase dashboard under Authentication, Emails, into BOTH the
+     "Confirm signup" template and the "Magic Link" template. It is committed here because it is
+     load bearing and the dashboard has no history.
+
+     Both, because signInWithOtp picks between them by whether the person already exists. Somebody
+     signing in for the first time gets Confirm signup, and everybody after that gets Magic Link.
+     Doing only Magic Link fixes the people who have already signed in once and leaves every new
+     client on a link that Outlook eats, which is the harder failure to notice: it looks fixed
+     right up until the next client is invited.
+
+     One body rather than two files, so the two cannot drift apart. The wording suits both, since
+     a first code and a later code do the same job.
 
      The one rule: this template carries a code and NO link.
 

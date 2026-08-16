@@ -130,14 +130,41 @@ export function cooldownLeft(lastSentAt, now, seconds = RESEND_COOLDOWN_S) {
  * confirmation link at all. The link and the code are one token: leave the link in the template
  * and the scanner still spends it, taking the code with it. See supabase/email-templates.
  */
+export const CODE_TYPES = ['email', 'signup', 'magiclink'];
+
+/**
+ * True when a failure is about this particular token rather than about how often we are asking.
+ * Retrying another type is only ever worth a request in the first case: a rate limit answers the
+ * same way to every type, and burning the verify allowance to hear it three times is how a person
+ * ends up locked out for five minutes instead of one.
+ */
+function worthAnotherType(error) {
+  return describeAuthError(error).kind === 'expired';
+}
+
 export async function verifyCode(client, email, token) {
-  const { data, error } = await client.auth.verifyOtp({
-    email: email.trim().toLowerCase(),
-    token: token.trim(),
-    type: 'email',
-  });
-  if (error) throw error;
-  return data.session ?? null;
+  const address = email.trim().toLowerCase();
+  const code = token.trim();
+  let last = null;
+
+  // Supabase does not issue one kind of email code. A person who has never signed in gets the
+  // Confirm signup template and a signup token, and everybody after that gets Magic Link and a
+  // magiclink token, which is the same split tokenFromLink reads off a pasted link. Sending the
+  // wrong type is rejected, so a single hardcoded 'email' works for whichever kind the project
+  // happens to be handing out and silently fails for the other. That failure lands entirely on
+  // people signing in for the first time, which is every new client, and it looks like the code
+  // being wrong rather than the type being wrong.
+  for (const type of CODE_TYPES) {
+    try {
+      const { data, error } = await client.auth.verifyOtp({ email: address, token: code, type });
+      if (error) throw error;
+      return data.session ?? null;
+    } catch (error) {
+      last = error;
+      if (!worthAnotherType(error)) throw error;
+    }
+  }
+  throw last;
 }
 
 /**
