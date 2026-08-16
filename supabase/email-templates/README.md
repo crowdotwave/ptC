@@ -94,8 +94,11 @@ installed app has its own storage container and a link tapped in Mail signs you 
 instead. A code fixes that better than the paste box did: six digits typed on the phone land in
 whatever container is doing the typing.
 
-`isStandalone`, `tokenFromLink` and `verifyLink` are still in `js/auth.js` and are called by no
-screen. They survive one revision because what makes them unnecessary is a dashboard field with no
-version history, so a template lost or reverted to the Supabase default puts a link back in the
-email, takes the code out, and leaves that the only way in until somebody notices. Delete them once
-the template is applied by something that keeps a history, or once that risk is accepted.
+The functions behind that box, `isStandalone`, `tokenFromLink` and `verifyLink`, are gone from
+`js/auth.js` along with their tests. Nothing called them once the box went.
+
+That leaves one thing resting on these templates alone. They are a dashboard field with no version
+history, so reverting one to the Supabase default puts a link back in the email and takes the code
+out, and no code path is left that can read a link. The recovery is to paste `sign-in-code.html`
+back in, which is the reason it is committed here. Anybody restoring this project from scratch
+should treat step 4 above as part of the deploy rather than as setup that was done once.

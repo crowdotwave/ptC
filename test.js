@@ -21,7 +21,7 @@ import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
 import {
-  tokenFromLink, describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
+  describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
@@ -2018,49 +2018,6 @@ test('the summary counts what a trainer is about to create', () => {
   eq(s.distinctExercises, 2);
   eq(s.modes.bodyweight_reps, 1, 'a body weight load is its own mode');
   eq(s.modes.weight_reps, 1);
-});
-
-// ------------------------------------------------------------------ signing in on a home screen
-//
-// On iOS a home screen web app has its own storage container, separate from Safari's. A magic
-// link tapped in Mail opens Safari, so the session is created there and the app the person
-// actually trains with is still signed out. Nothing in the web platform routes a link into that
-// container, so the link is pasted in instead and its token exchanged here.
-
-test('a token is pulled out of a pasted sign in link', () => {
-  const link = 'https://abc.supabase.co/auth/v1/verify?token=pkce_abc123&type=magiclink&redirect_to=https%3A%2F%2Fexample.com%2F';
-  eq(tokenFromLink(link), { tokenHash: 'pkce_abc123', type: 'magiclink' });
-});
-
-// The type is read from the link rather than assumed, because a first sign in is a signup and a
-// later one is a magiclink, and sending the wrong one is rejected.
-test('the link carries its own type and that is what is used', () => {
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h&type=signup').type, 'signup');
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h&type=email').type, 'email');
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h').type, 'email', 'a sane default');
-});
-
-test('the newer token_hash spelling works alongside the older token one', () => {
-  eq(tokenFromLink('https://x.test/auth/confirm?token_hash=abc&type=email').tokenHash, 'abc');
-  eq(tokenFromLink('https://x.test/auth/confirm?token=abc&type=email').tokenHash, 'abc');
-});
-
-// A redirect can leave the parameters in the fragment rather than the query.
-test('a token in the fragment is found too', () => {
-  eq(tokenFromLink('https://x.test/auth/confirm#token_hash=frag123&type=magiclink'),
-     { tokenHash: 'frag123', type: 'magiclink' });
-});
-
-test('a bare hash pasted without its url still works', () => {
-  eq(tokenFromLink('pkce_abc123'), { tokenHash: 'pkce_abc123', type: 'email' });
-});
-
-test('anything that is not a sign in link is refused rather than half read', () => {
-  eq(tokenFromLink(''), null);
-  eq(tokenFromLink('   '), null);
-  eq(tokenFromLink(null), null);
-  eq(tokenFromLink('https://example.com/no/token/here'), null, 'a url with no token is not a link');
-  eq(tokenFromLink('not a url at all?'), null);
 });
 
 // ------------------------------------------------------------------ being told no, usefully

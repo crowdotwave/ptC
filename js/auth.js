@@ -149,11 +149,10 @@ export async function verifyCode(client, email, token) {
 
   // Supabase does not issue one kind of email code. A person who has never signed in gets the
   // Confirm signup template and a signup token, and everybody after that gets Magic Link and a
-  // magiclink token, which is the same split tokenFromLink reads off a pasted link. Sending the
-  // wrong type is rejected, so a single hardcoded 'email' works for whichever kind the project
-  // happens to be handing out and silently fails for the other. That failure lands entirely on
-  // people signing in for the first time, which is every new client, and it looks like the code
-  // being wrong rather than the type being wrong.
+  // magiclink token. Sending the wrong type is rejected, so a single hardcoded 'email' works for
+  // whichever kind the project happens to be handing out and silently fails for the other. That
+  // failure lands entirely on people signing in for the first time, which is every new client,
+  // and it looks like the code being wrong rather than the type being wrong.
   for (const type of CODE_TYPES) {
     try {
       const { data, error } = await client.auth.verifyOtp({ email: address, token: code, type });
@@ -165,88 +164,6 @@ export async function verifyCode(client, email, token) {
     }
   }
   throw last;
-}
-
-// ---------------------------------------------------------------- the link path, no longer wired
-//
-// Nothing below here is called by a screen. The emails carry six digits and no link, so there is
-// no link to detect, paste, or exchange, and the sign in screen no longer offers a box for one.
-//
-// It survives one revision rather than being deleted because the thing that makes it unnecessary
-// lives in a dashboard field with no version history. If those templates are ever lost or reverted
-// to the Supabase defaults, the emails go back to carrying a link and no code, and this is the
-// only way anybody gets in until somebody notices. Delete it once the template is applied by
-// something that keeps a history, or once that risk is accepted.
-
-/**
- * True when this is running as a home screen app rather than a browser tab.
- *
- * It matters because on iOS a home screen web app gets its own storage container, separate from
- * Safari's. A magic link tapped in Mail opens Safari, so the session is created in Safari and
- * the home screen app, which is where the person actually trains, is still signed out and asks
- * for their email again. Nothing in the web platform lets a link route into that container.
- *
- * A code needs none of this: six digits typed on the phone land in whatever container is doing
- * the typing.
- */
-export function isStandalone() {
-  try {
-    return (
-      window.navigator.standalone === true ||
-      window.matchMedia('(display-mode: standalone)').matches ||
-      window.matchMedia('(display-mode: fullscreen)').matches
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Pulls the one time token out of a pasted sign in link.
- *
- * This is the way around the storage split that needs nothing bought and nothing installed. The
- * link in the email already carries its own token:
- *
- *   https://<ref>.supabase.co/auth/v1/verify?token=<hash>&type=magiclink&redirect_to=...
- *
- * So instead of tapping it, which lands the session in the wrong browser, the link is copied and
- * pasted into the app, and the token is exchanged here, in the container that will hold it.
- *
- * Also accepts a bare token, so somebody who pasted only part of it still gets in, and accepts
- * the newer token_hash spelling alongside the older token one.
- */
-export function tokenFromLink(raw) {
-  const value = (raw ?? '').toString().trim();
-  if (!value) return null;
-
-  // A bare hash, pasted without the surrounding URL.
-  if (!/[?#/]/.test(value)) return { tokenHash: value, type: 'email' };
-
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  // Supabase puts them in the query, but a redirect can leave them in the fragment instead.
-  const params = new URLSearchParams(url.search || '');
-  const hash = new URLSearchParams((url.hash || '').replace(/^#/, ''));
-  const pick = (key) => params.get(key) ?? hash.get(key);
-
-  const tokenHash = pick('token_hash') ?? pick('token');
-  if (!tokenHash) return null;
-
-  // The email carries its own type, so it is read rather than assumed: a first sign in is
-  // 'signup' and a later one is 'magiclink', and sending the wrong one is rejected.
-  const type = pick('type') || 'email';
-  return { tokenHash, type };
-}
-
-/** Exchanges a token hash for a session in this browser context. */
-export async function verifyLink(client, { tokenHash, type }) {
-  const { data, error } = await client.auth.verifyOtp({ token_hash: tokenHash, type });
-  if (error) throw error;
-  return data.session ?? null;
 }
 
 export async function signOut(client) {
