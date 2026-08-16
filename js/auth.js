@@ -167,6 +167,17 @@ export async function verifyCode(client, email, token) {
   throw last;
 }
 
+// ---------------------------------------------------------------- the link path, no longer wired
+//
+// Nothing below here is called by a screen. The emails carry six digits and no link, so there is
+// no link to detect, paste, or exchange, and the sign in screen no longer offers a box for one.
+//
+// It survives one revision rather than being deleted because the thing that makes it unnecessary
+// lives in a dashboard field with no version history. If those templates are ever lost or reverted
+// to the Supabase defaults, the emails go back to carrying a link and no code, and this is the
+// only way anybody gets in until somebody notices. Delete it once the template is applied by
+// something that keeps a history, or once that risk is accepted.
+
 /**
  * True when this is running as a home screen app rather than a browser tab.
  *
@@ -174,6 +185,9 @@ export async function verifyCode(client, email, token) {
  * Safari's. A magic link tapped in Mail opens Safari, so the session is created in Safari and
  * the home screen app, which is where the person actually trains, is still signed out and asks
  * for their email again. Nothing in the web platform lets a link route into that container.
+ *
+ * A code needs none of this: six digits typed on the phone land in whatever container is doing
+ * the typing.
  */
 export function isStandalone() {
   try {

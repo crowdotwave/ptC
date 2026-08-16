@@ -87,8 +87,15 @@ The rest of the handling is in `auth-page.js`, and two parts of it exist because
 - The send button counts down locally through the cooldown rather than spending a request to be
   told to wait.
 
-`tokenFromLink` and `verifyLink` stay. They are for pasting a link on a home screen app, where iOS
-gives the installed app its own storage container and a tapped link signs you in to Safari instead.
-That path is unreachable from this template, which carries no link, and it is kept because the
-paste box also accepts a bare token and because a project that has not yet applied this template
-still needs it.
+The sign in screen offers a code and nothing else. The box for pasting a link is gone, because
+these templates carry no link to paste and an input asking for something no email contains is a
+dead end on the one screen nobody can get past. It existed for a home screen app on iOS, where the
+installed app has its own storage container and a link tapped in Mail signs you in to Safari
+instead. A code fixes that better than the paste box did: six digits typed on the phone land in
+whatever container is doing the typing.
+
+`isStandalone`, `tokenFromLink` and `verifyLink` are still in `js/auth.js` and are called by no
+screen. They survive one revision because what makes them unnecessary is a dashboard field with no
+version history, so a template lost or reverted to the Supabase default puts a link back in the
+email, takes the code out, and leaves that the only way in until somebody notices. Delete them once
+the template is applied by something that keeps a history, or once that risk is accepted.
