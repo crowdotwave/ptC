@@ -19,7 +19,9 @@
   <body>
     <main class="auth">
       <h1 class="auth__title">ptC</h1>
-      <p class="auth__lede" id="lede">Enter the email your trainer has for you.</p>
+      <p class="auth__lede" id="lede">
+        Enter the email your trainer has for you and we will send you a six digit code.
+      </p>
 
       <form class="auth__form" id="email-form" novalidate>
         <label class="auth__label" for="email">Email</label>
@@ -41,34 +43,28 @@
         <button class="auth__go" id="send" type="submit" disabled>Loading</button>
       </form>
 
-      <!-- The typed code, behind a disclosure rather than shown alongside the link.
-           It only works if the Supabase email template carries {{ .Token }}, which the default
-           template does not and which needs a paid plan to change on Supabase's own sender. So
-           for most deploys this input is a dead end, and offering a dead end beside a working
-           link is worse than not offering it. The link is the path. This is the escape hatch
-           for a phone whose mail app opens links somewhere unhelpful. -->
-      <button class="auth__alt" id="show-code" type="button" hidden>Have a code instead?</button>
+      <!-- Revealed as soon as the page is wired, alongside the send button being enabled, and
+           that is the fix rather than a detail. It used to be revealed only after an email sent
+           successfully, so the one person who most needs it, somebody the sending quota has just
+           cut off, could not reach it. A code lasts an hour and the quota resets in an hour, so
+           somebody who has been refused is nearly always holding a live code with nowhere to type
+           it.
 
-      <!-- The way in for a home screen app. On iOS that runs in its own storage container, so a
-           link tapped in Mail signs you in to Safari and leaves this app signed out. Pasting the
-           link here exchanges its token in the container that will actually keep it. -->
-      <form class="auth__form" id="link-form" hidden novalidate>
-        <label class="auth__label" for="link">Paste the sign in link from the email</label>
-        <input
-          class="auth__input"
-          id="link"
-          type="text"
-          inputmode="url"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck="false"
-          placeholder="https://..."
-        />
-        <button class="auth__go" id="verify-link" type="submit">Sign in</button>
-      </form>
+           Starts hidden for the same reason the send button starts disabled: supabase-js comes
+           from a CDN, and a control that is on screen before its handler is attached does nothing
+           when tapped, which reads as a broken app on the one screen nobody can get past. -->
+      <button class="auth__alt" id="show-code" type="button" hidden>I already have a code</button>
+
+      <!-- There was a box here for pasting a sign in link, for a home screen app on iOS, which
+           gets its own storage container so a link tapped in Mail signs you in to Safari and
+           leaves the installed app signed out. It is gone because the emails carry no link to
+           paste: see supabase/email-templates. A code fixes that container split better than the
+           paste box did, since six digits typed on the phone land in whatever container is doing
+           the typing, and an input asking for something no email contains is a dead end on the one
+           screen nobody can get past. -->
 
       <form class="auth__form" id="code-form" hidden novalidate>
-        <label class="auth__label" for="code">Or paste the code from the email</label>
+        <label class="auth__label" for="code">Six digit code from the email</label>
         <input
           class="auth__input num"
           id="code"

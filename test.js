@@ -20,7 +20,9 @@ import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.
 import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can } from './js/boot.js';
-import { tokenFromLink } from './js/auth.js';
+import {
+  describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
+} from './js/auth.js';
 import { validate } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
@@ -49,12 +51,26 @@ import {
 
 const results = [];
 
+// Tests that return a promise are waited for before the report is written. Without this the
+// harness calls fn(), gets a promise back, drops it, and records a pass: an async assertion that
+// fails would report green, which is worse than no test at all. Sync tests still run and record
+// in order, so the report reads the same as it always has.
+const pending = [];
+
 function test(name, fn) {
+  const entry = { name, ok: true };
+  results.push(entry);
+  const failed = (error) => {
+    entry.ok = false;
+    entry.error = error?.message ?? String(error);
+  };
   try {
-    fn();
-    results.push({ name, ok: true });
+    const returned = fn();
+    if (returned && typeof returned.then === 'function') {
+      pending.push(returned.then(() => {}, failed));
+    }
   } catch (error) {
-    results.push({ name, ok: false, error: error.message });
+    failed(error);
   }
 }
 
@@ -2004,47 +2020,145 @@ test('the summary counts what a trainer is about to create', () => {
   eq(s.modes.weight_reps, 1);
 });
 
-// ------------------------------------------------------------------ signing in on a home screen
+// ------------------------------------------------------------------ being told no, usefully
 //
-// On iOS a home screen web app has its own storage container, separate from Safari's. A magic
-// link tapped in Mail opens Safari, so the session is created there and the app the person
-// actually trains with is still signed out. Nothing in the web platform routes a link into that
-// container, so the link is pasted in instead and its token exchanged here.
+// Outlook fetches links to scan them, which spends a single use sign in link before the person
+// taps it. The resends that follow exhaust a sending quota of two an hour, and the raw Supabase
+// message for that states a fact about our project rather than the thing to do, which is to type
+// the code from the email they already have.
 
-test('a token is pulled out of a pasted sign in link', () => {
-  const link = 'https://abc.supabase.co/auth/v1/verify?token=pkce_abc123&type=magiclink&redirect_to=https%3A%2F%2Fexample.com%2F';
-  eq(tokenFromLink(link), { tokenHash: 'pkce_abc123', type: 'magiclink' });
+test('a per address cooldown is read out of the message and carries its own count', () => {
+  const d = describeAuthError({ message: 'For security purposes, you can only request this after 51 seconds.' });
+  eq(d.kind, 'wait');
+  eq(d.waitSeconds, 51);
+  eq(/51s/.test(d.message), true, 'the count reaches the person');
 });
 
-// The type is read from the link rather than assumed, because a first sign in is a signup and a
-// later one is a magiclink, and sending the wrong one is rejected.
-test('the link carries its own type and that is what is used', () => {
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h&type=signup').type, 'signup');
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h&type=email').type, 'email');
-  eq(tokenFromLink('https://abc.supabase.co/auth/v1/verify?token=h').type, 'email', 'a sane default');
+// The one that matters. Nothing about waiting for another email, because another email is not
+// coming for an hour and a live code is already sitting in their inbox.
+test('the project sending quota sends people to the code they already have', () => {
+  for (const error of [
+    { message: 'Email rate limit exceeded', status: 429 },
+    { code: 'over_email_send_rate_limit', message: 'anything at all' },
+  ]) {
+    const d = describeAuthError(error);
+    eq(d.kind, 'quota');
+    eq(/type its code/i.test(d.message), true);
+  }
 });
 
-test('the newer token_hash spelling works alongside the older token one', () => {
-  eq(tokenFromLink('https://x.test/auth/confirm?token_hash=abc&type=email').tokenHash, 'abc');
-  eq(tokenFromLink('https://x.test/auth/confirm?token=abc&type=email').tokenHash, 'abc');
+test('a spent link and a spent code read as spent rather than as broken', () => {
+  eq(describeAuthError({ code: 'otp_expired', message: 'Token has expired or is invalid' }).kind, 'expired');
+  eq(describeAuthError({ message: 'Email link is invalid or has expired' }).kind, 'expired');
 });
 
-// A redirect can leave the parameters in the fragment rather than the query.
-test('a token in the fragment is found too', () => {
-  eq(tokenFromLink('https://x.test/auth/confirm#token_hash=frag123&type=magiclink'),
-     { tokenHash: 'frag123', type: 'magiclink' });
+// A 429 with none of the above wording is still a rate limit and must not fall through to the
+// raw message, which is where this started.
+test('an unrecognised 429 is still handled as a rate limit', () => {
+  eq(describeAuthError({ status: 429, message: 'Too Many Requests' }).kind, 'quota');
 });
 
-test('a bare hash pasted without its url still works', () => {
-  eq(tokenFromLink('pkce_abc123'), { tokenHash: 'pkce_abc123', type: 'email' });
+test('an error nobody anticipated keeps its own message rather than being swallowed', () => {
+  eq(describeAuthError({ message: 'Signups not allowed for otp' }).message, 'Signups not allowed for otp');
+  eq(describeAuthError({}).message, 'That did not work. Try again.', 'and never an empty string');
 });
 
-test('anything that is not a sign in link is refused rather than half read', () => {
-  eq(tokenFromLink(''), null);
-  eq(tokenFromLink('   '), null);
-  eq(tokenFromLink(null), null);
-  eq(tokenFromLink('https://example.com/no/token/here'), null, 'a url with no token is not a link');
-  eq(tokenFromLink('not a url at all?'), null);
+// Supabase hands out a signup token to somebody signing in for the first time and a magiclink
+// token to everybody after that, and rejects the wrong type. A single hardcoded type therefore
+// fails for exactly one of those groups, and the group it fails for is every new client.
+const codeClient = (accept) => {
+  const tried = [];
+  return {
+    tried,
+    auth: {
+      async verifyOtp({ type }) {
+        tried.push(type);
+        return type === accept
+          ? { data: { session: { access_token: 'ok' } }, error: null }
+          : { data: {}, error: { code: 'otp_expired', message: 'Token has expired or is invalid' } };
+      },
+    },
+  };
+};
+
+test('a code is tried against each kind of token until one is accepted', async () => {
+  for (const accept of CODE_TYPES) {
+    const client = codeClient(accept);
+    const session = await verifyCode(client, 'clay@example.com', '123456');
+    eq(Boolean(session), true, `${accept} signs in`);
+    eq(client.tried[client.tried.length - 1], accept, 'and stops there');
+  }
+});
+
+test('the first kind accepted costs one request and no more', async () => {
+  const client = codeClient('email');
+  await verifyCode(client, 'clay@example.com', '123456');
+  eq(client.tried, ['email']);
+});
+
+// The retry is for a token that did not match, never for being asked too often. Hearing the same
+// rate limit three times spends three of an allowance that is the reason this bug was reported.
+test('a rate limit stops the retries rather than spending the allowance', async () => {
+  const tried = [];
+  const client = {
+    auth: {
+      async verifyOtp({ type }) {
+        tried.push(type);
+        return { data: {}, error: { status: 429, message: 'Too Many Requests' } };
+      },
+    },
+  };
+  let threw = false;
+  try {
+    await verifyCode(client, 'clay@example.com', '123456');
+  } catch {
+    threw = true;
+  }
+  eq(threw, true);
+  eq(tried, ['email'], 'one request, not three');
+});
+
+test('a code nothing accepts surfaces the real error', async () => {
+  const client = codeClient('nothing at all');
+  let message = '';
+  try {
+    await verifyCode(client, 'clay@example.com', '123456');
+  } catch (error) {
+    message = error.message;
+  }
+  eq(client.tried, CODE_TYPES);
+  eq(message, 'Token has expired or is invalid', 'rather than an undefined from the last loop');
+});
+
+test('the address and the code are normalised before they are sent', async () => {
+  let sent = null;
+  const client = {
+    auth: {
+      async verifyOtp(args) {
+        sent = args;
+        return { data: { session: {} }, error: null };
+      },
+    },
+  };
+  await verifyCode(client, '  Clay@Example.COM ', '  123456 ');
+  eq(sent.email, 'clay@example.com');
+  eq(sent.token, '123456');
+});
+
+test('the cooldown counts down and then clears', () => {
+  const sent = 1_000_000;
+  eq(cooldownLeft(sent, sent), RESEND_COOLDOWN_S);
+  eq(cooldownLeft(sent, sent + 40_000), 20);
+  eq(cooldownLeft(sent, sent + RESEND_COOLDOWN_S * 1000), 0);
+  eq(cooldownLeft(sent, sent + 999_000), 0, 'long past');
+  eq(cooldownLeft(0, sent), 0, 'never sent');
+});
+
+// lastSentAt is written by a browser clock. A device that jumps forward and then back would
+// otherwise leave the send button dead for the length of the jump, on the one screen with
+// nothing behind it.
+test('a clock that jumped does not lock the button', () => {
+  eq(cooldownLeft(5_000_000, 1_000_000), 0);
 });
 
 // ------------------------------------------------------------------ how many sets there are
@@ -3108,6 +3222,8 @@ test('a curve through one point is not a path anybody can stroke', () => {
 });
 
 // ------------------------------------------------------------------ report
+
+await Promise.all(pending);
 
 const passed = results.filter((r) => r.ok).length;
 const failed = results.filter((r) => !r.ok);
