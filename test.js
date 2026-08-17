@@ -15,7 +15,7 @@ import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
   isBodyweightLoad, prescribesLoad,
 } from './js/program.js';
-import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle } from './js/snapshot.js';
+import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
@@ -1239,6 +1239,74 @@ test('a day the builder created and nobody named still has something to call it'
 test('naming a day that is not there does not throw', () => {
   eq(dayTitle(undefined), 'Day 1');
   eq(dayTitle(null), 'Day 1');
+});
+
+// ------------------------------------------------------------------ which block a client is on
+//
+// starts_on decides and created_at breaks the tie, and the tie is the ordinary case: a trainer
+// who assigns a program, spots something in the editor, fixes it and assigns again has produced
+// two rows carrying today's date. A single column sort with a limit of one returned whichever
+// came back first, so the client could keep training from the snapshot that was just replaced.
+
+const fakeStore = (rows) => ({ query: async () => rows });
+const block = (name, startsOn, createdAt) => ({
+  id: `a-${name}`, client_id: 'c1', template_id: `t-${name}`,
+  snapshot: { template: { name } }, starts_on: startsOn, created_at: createdAt,
+});
+
+test('the latest starts_on is the block a client is on', async () => {
+  const current = await currentAssignment(
+    fakeStore([
+      block('old', '2026-06-01', '2026-06-01T09:00:00.000Z'),
+      block('new', '2026-08-01', '2026-08-01T09:00:00.000Z'),
+    ]),
+    'c1',
+  );
+  eq(current.snapshot.template.name, 'new');
+});
+
+test('two blocks starting the same day go to whichever was assigned last', async () => {
+  const current = await currentAssignment(
+    fakeStore([
+      block('first', '2026-08-17', '2026-08-17T09:00:00.000Z'),
+      block('corrected', '2026-08-17', '2026-08-17T14:30:00.000Z'),
+    ]),
+    'c1',
+  );
+  eq(current.snapshot.template.name, 'corrected', 'the correction wins, not the row order');
+
+  // and the same the other way round, so this cannot pass on input order alone
+  const reversed = await currentAssignment(
+    fakeStore([
+      block('corrected', '2026-08-17', '2026-08-17T14:30:00.000Z'),
+      block('first', '2026-08-17', '2026-08-17T09:00:00.000Z'),
+    ]),
+    'c1',
+  );
+  eq(reversed.snapshot.template.name, 'corrected');
+});
+
+// created_at arrives in two formats that do not sort against each other. A row written on this
+// device carries toISOString, a row that has been through the server carries what Postgres
+// renders, and a space sorts before a T, so as text the synced row always looked older.
+test('a synced timestamp and a local one are compared as instants, not as text', async () => {
+  const current = await currentAssignment(
+    fakeStore([
+      block('local, and earlier', '2026-08-17', '2026-08-17T09:00:00.000Z'),
+      block('synced, and later', '2026-08-17', '2026-08-17 14:30:00.048006+00'),
+    ]),
+    'c1',
+  );
+  eq(current.snapshot.template.name, 'synced, and later');
+
+  ok(
+    '2026-08-17 14:30:00.048006+00' < '2026-08-17T09:00:00.000Z',
+    'as text the later synced row sorts first, which is the trap this avoids',
+  );
+});
+
+test('a client with no blocks is on nothing, and it does not throw', async () => {
+  eq(await currentAssignment(fakeStore([]), 'c1'), null);
 });
 
 // ------------------------------------------------------------------ dates that are not times

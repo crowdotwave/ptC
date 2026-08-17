@@ -99,14 +99,59 @@ export function buildSnapshot({ template, days, items, exercises }) {
  * so that it stays the same rule: the Programs tab showing one program while the Log tab steps
  * through another would be the app disagreeing with itself about what somebody is meant to do
  * today.
+ *
+ * Ties on `starts_on` go to whichever was written last. That case is not exotic, it is what a
+ * trainer produces the moment they correct a program they have already handed out: assign, spot
+ * something in the editor, fix it, assign again, all inside one afternoon and all carrying today's
+ * date. Before this the two rows were separated by nothing, so a single column sort with a limit
+ * of one returned whichever the storage happened to hand back first, and the client could go on
+ * training from the snapshot that had just been superseded.
  */
 export async function currentAssignment(storage, clientId) {
-  const rows = await storage.query(
-    'assignments',
-    { client_id: clientId },
-    { orderBy: 'starts_on', direction: 'desc', limit: 1 },
-  );
-  return rows[0] ?? null;
+  const rows = await storage.query('assignments', { client_id: clientId });
+  if (!rows.length) return null;
+
+  // Ordered here rather than by the adapter, which sorts on one column and cannot express the
+  // tie break below. The row count is a client's blocks over months, so reading them all is
+  // cheaper than the bug was.
+  return rows.reduce((best, row) => {
+    if (row.starts_on !== best.starts_on) return row.starts_on > best.starts_on ? row : best;
+    return assignedAt(row) > assignedAt(best) ? row : best;
+  });
+}
+
+/**
+ * When an assignment was handed out, as an instant.
+ *
+ * created_at rather than updated_at, and that is the whole reason this is a function. An
+ * assignment row is updated long after it is handed out, every time a trainer marks a back off
+ * week from the client's chart, so ordering on updated_at would let marking a deload on an old
+ * block promote it over the block the client is actually doing.
+ *
+ * Parsing is careful because created_at reaches this module in two different formats that do not
+ * sort against each other. A row written on this device carries new Date().toISOString(),
+ * '2026-08-05T06:11:58.048Z'. A row that has come back from the server carries what Postgres
+ * renders, '2026-08-05 06:11:58.048006+00', which fromWire passes through untouched. A space is
+ * 0x20 and a T is 0x54, so comparing them as text puts every synced row before every local one
+ * whatever the clock says, which is the exact failure this tie break exists to fix.
+ *
+ * The normalising is measured rather than assumed, and it is not the obvious version: Date.parse
+ * accepts the raw Postgres string through a lenient path, and REJECTS it once the space becomes a
+ * T, because six fractional digits and a bare '+00' offset are both outside the ISO grammar the
+ * strict path uses. So the fraction is cut to three and the offset given its minutes, and the raw
+ * string stays as the fallback for anything this does not recognise.
+ */
+function assignedAt(assignment) {
+  const text = String(assignment?.created_at ?? '').trim();
+  if (!text) return 0;
+  const iso = text
+    .replace(' ', 'T')
+    .replace(/(\.\d{3})\d+/, '$1')
+    .replace(/([+-]\d{2})$/, '$1:00');
+  const at = Date.parse(iso);
+  if (!Number.isNaN(at)) return at;
+  const raw = Date.parse(text);
+  return Number.isNaN(raw) ? 0 : raw;
 }
 
 /**
