@@ -106,6 +106,33 @@ export function isBodyweightLoad(raw) {
   return /\b(bw|body\s*weight)\b/i.test((raw ?? '').toString());
 }
 
+// A real quantity of weight, as opposed to a number that happens to be in the cell. '5-7 SPEED'
+// is the reason this needs units rather than digits.
+const LOAD_QUANTITY = /\d+(\.\d+)?\s*(kg|kgs|kilo|kilos|lb|lbs|pound|pounds|plate|plates)\b/i;
+
+// Things you hold, named in the Adjust column. A band, a box or a height is not one of these.
+const IMPLEMENT = /\b(dumbell|dumbbell|db|barbell|bb|kettlebell|kb|plate|plates|med\s*ball|medicine\s*ball|weight|weighted)\b/i;
+
+/**
+ * True when the Load cell names an external load rather than a pace or nothing at all.
+ *
+ * Three different things appear in that column and only two of them are a load: an effort target
+ * ('1-2 RIR', 'RPE 8'), a real quantity ('2 PLATES', '25 - 45 LBS'), or a word about pace
+ * ('MODERATE', '5-7 SPEED') which is not one. That third case is the whole reason this exists,
+ * because it is what tells a loaded carry apart from a row erg, and on the sheet both of those
+ * are a distance in the Reps column with no rep count anywhere.
+ *
+ * Bodyweight is deliberately false. The body is a load and it is not one anybody selects, and
+ * isBodyweightLoad already routes those rows to a mode of their own.
+ */
+export function prescribesLoad(raw) {
+  const text = (raw ?? '').toString().trim();
+  if (!text || /^(na|n\/a)$/i.test(text)) return false;
+  if (isBodyweightLoad(text)) return false;
+  if (parseLoad(text).rpe !== null) return true;
+  return LOAD_QUANTITY.test(text);
+}
+
 /** 'NA' or blank -> null, otherwise the count. 14 of 61 rows had no set count. */
 export function parseSets(raw) {
   const text = (raw ?? '').toString().trim();
@@ -128,39 +155,72 @@ export function parseGroup(raw) {
  * prescription means the weight is the point and there are no reps, so weight only. Anything
  * with no load prescription at all is instruction, not a set, and is not logged.
  *
+ * That last sentence was the documented rule for a long time and was not the implemented one: the
+ * distance branch returned weight only whatever the Load cell said, so a 500m row erg and a 400m
+ * ski erg and three 100m runs all came through asking a client to enter a weight for a machine
+ * that has none. Measured on one real workbook, eight rows out of sixty one. prescribesLoad is
+ * what makes the code say what the comment always said.
+ *
+ * Returns `certain` alongside, which is a claim about this function rather than about the row: it
+ * is true when the two cells decided the answer between them and false when something had to be
+ * assumed. The review screen flags on it. Flagging every row that is not weight and reps, which
+ * is what it did before, marks a 30 second hold and a plain bodyweight push up as though they
+ * needed a decision, and marking everything is the same as marking nothing.
+ *
  * The trainer overrides any of this in the builder. This is only the opening guess.
  */
-export function inferLogging({ repsText, loadText, sets }) {
+export function inferLogging({ repsText, loadText, adjustText, sets }) {
   const reps = parseReps(repsText);
   const load = (loadText ?? '').toString().trim();
-  const bodyweight = isBodyweightLoad(load);
+  // The Adjust column names what the client changes between sets, so an implement in it is
+  // evidence of a load in its own right. 'BW' beside 'DUMBELL' is a weighted jump squat, and
+  // reading the Load cell alone there hides the dumbbell and asks a client to jump empty handed.
+  const implement = IMPLEMENT.test((adjustText ?? '').toString());
+  const loaded = prescribesLoad(load) || implement;
+  const bodyweight = isBodyweightLoad(load) && !implement;
   const text = reps.text ?? '';
 
   // Seconds in the Reps column is a hold, not a distance: '30 SEC'. 6 rows. Minutes are
   // deliberately not included, because a Reps cell reading '10 MINS' is a cardio block rather
   // than something anybody holds.
   if (/^\d+\s*(sec|secs|second|seconds)\b/i.test(text)) {
-    return { isLogged: true, logMode: 'time_hold' };
+    return { isLogged: true, logMode: 'time_hold', certain: true };
   }
 
   // AMRAP in the Reps column means as many reps as possible of this exercise, so it is a rep
   // count the client discovers rather than one the trainer set. Both rows carrying it are
   // bodyweight, which is why it is not the 'rounds' mode: rounds is a circuit, and this is one
   // exercise taken to failure.
+  // Never certain: AMRAP names the reps and says nothing about what is in the hands.
   if (/^amrap$/i.test(text)) {
-    return { isLogged: true, logMode: bodyweight ? 'bodyweight_reps' : 'weight_reps' };
+    return { isLogged: true, logMode: bodyweight ? 'bodyweight_reps' : 'weight_reps', certain: false };
   }
 
   // A pure interval: no reps, no sets, and the Load cell is a duration. Nothing to measure.
   if (reps.low === null && sets === null && /^\d+\s*(min|mins|minute|minutes|sec)/i.test(load)) {
-    return { isLogged: false, logMode: 'weight_reps' };
+    return { isLogged: false, logMode: 'weight_reps', certain: true };
   }
 
   if (reps.low !== null) {
-    return { isLogged: true, logMode: bodyweight ? 'bodyweight_reps' : 'weight_reps' };
+    if (bodyweight) return { isLogged: true, logMode: 'bodyweight_reps', certain: true };
+    // A rep count with an empty or unreadable Load cell cannot tell a loaded lift from a
+    // bodyweight one, and both are ordinary. That is the guess worth showing somebody.
+    return { isLogged: true, logMode: 'weight_reps', certain: loaded };
   }
-  if (reps.text) return { isLogged: true, logMode: 'weight_only' };
-  return { isLogged: false, logMode: 'weight_reps' };
+
+  // A distance or a duration, so there are no reps to count. Whether it is a set at all is the
+  // Load cell's answer: a carry or a sled has a weight on it and is the point of the row, an erg
+  // or a run does not and is an instruction.
+  if (reps.text) {
+    if (loaded) return { isLogged: true, logMode: 'weight_only', certain: true };
+    if (bodyweight) return { isLogged: true, logMode: 'bodyweight_reps', certain: false };
+    return { isLogged: false, logMode: 'weight_reps', certain: true };
+  }
+
+  // Both cells empty. On a real sheet this is a note somebody typed in the exercise column, like
+  // the '^REPEAT X10^' under a set of running intervals, and it is worth a human's eye because
+  // what it needs is deleting rather than a log mode.
+  return { isLogged: false, logMode: 'weight_reps', certain: false };
 }
 
 /** One spreadsheet row to the fields template_items wants. */
@@ -169,7 +229,7 @@ export function rowToItem({ number, exercise, adjust, sets, reps, load, rest }) 
   const parsedLoad = parseLoad(load);
   const parsedSets = parseSets(sets);
   const group = parseGroup(number);
-  const logging = inferLogging({ repsText: reps, loadText: load, sets: parsedSets });
+  const logging = inferLogging({ repsText: reps, loadText: load, adjustText: adjust, sets: parsedSets });
 
   return {
     group_label: group.label,

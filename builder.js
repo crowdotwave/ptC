@@ -40,9 +40,15 @@ const state = {
   // each carrying whatever they are on right now.
   assignSnapshot: null,
   assignClients: [],
-  // Which half of the screen is on: 'mine' or 'build'. Only ever a real choice for somebody who
-  // holds both. Held here so that coming back from a program returns to the half you left.
+  // Which half of the screen is on: 'mine', 'build' or 'everyone'. Held here so that coming back
+  // from a program returns to the half you left.
   section: 'mine',
+  // Staff, per ptc.is_staff(). Reading only: it widens what this screen will show and never what
+  // it will write, because there is no staff write policy on any table to widen it to.
+  isStaff: false,
+  // Where Back goes from the preview. That view has two ways in now, from the editor and from
+  // somebody else's program, and only one of them has an editor to return to.
+  previewReturn: 'edit',
 };
 
 const esc = (v) =>
@@ -53,10 +59,23 @@ const esc = (v) =>
 const SECTIONS = [
   ['mine', 'Your program'],
   ['build', 'Programs you build'],
+  ['everyone', 'Everyone else'],
 ];
 
-/** True only when this person holds both, which is the only time there is a choice to make. */
-const hasBothSections = () => state.hasMine && Boolean(state.trainer);
+/**
+ * The halves this person actually holds, in order.
+ *
+ * Capabilities rather than a role name, which is the rule the whole screen is built on: a clients
+ * row earns 'mine', a trainers row earns 'build', and staff earns 'everyone'. Somebody can hold
+ * all three, and the two accounts building this app do.
+ */
+function availableSections() {
+  const held = new Set();
+  if (state.hasMine) held.add('mine');
+  if (state.trainer) held.add('build');
+  if (state.isStaff) held.add('everyone');
+  return SECTIONS.filter(([key]) => held.has(key));
+}
 
 /**
  * Shows one half and hides the other.
@@ -72,16 +91,21 @@ const hasBothSections = () => state.hasMine && Boolean(state.trainer);
  * exactly the clutter being removed.
  */
 function renderSections() {
-  const both = hasBothSections();
-  const on = both ? state.section : state.hasMine ? 'mine' : 'build';
+  const available = availableSections();
+  const keys = available.map(([key]) => key);
+  // Falls back rather than trusting state.section, which defaults to 'mine' and is wrong for a
+  // trainer who holds no clients row.
+  const on = keys.includes(state.section) ? state.section : keys[0] ?? 'build';
 
   el('mine-view').hidden = on !== 'mine';
   el('list-view').hidden = on !== 'build';
+  el('everyone-view').hidden = on !== 'everyone';
 
+  // One option is not a chooser, it is a label for the only thing you have.
   const picker = el('section-picker');
-  picker.hidden = !both;
-  if (both) {
-    picker.innerHTML = SECTIONS.map(
+  picker.hidden = available.length < 2;
+  if (available.length > 1) {
+    picker.innerHTML = available.map(
       ([key, label]) =>
         `<button type="button" class="button-secondary sections__item${key === on ? ' is-on' : ''}" ` +
         `data-section="${key}"${key === on ? ' aria-current="true"' : ''}>${label}</button>`,
@@ -155,6 +179,7 @@ function archivedRow(template, assigned) {
 function hideList() {
   el('list-view').hidden = true;
   el('mine-view').hidden = true;
+  el('everyone-view').hidden = true;
   el('section-picker').hidden = true;
   el('unit-switch').hidden = true;
 }
@@ -167,6 +192,8 @@ async function showList() {
   el('view-title').textContent = 'Programs';
 
   const on = renderSections();
+
+  if (on === 'everyone') return showEveryone();
 
   // A client who does not also coach has nothing to build, so there is no list to fill.
   if (!state.trainer) {
@@ -362,9 +389,116 @@ function showPreview() {
   error.hidden = true;
   el('edit-view').hidden = true;
   el('preview-view').hidden = false;
+  state.previewReturn = 'edit';
+  el('preview-back').textContent = 'Back to the program';
   el('view-title').textContent = state.template.name;
   el('view-note').textContent = 'What the client reads.';
   mountProgramView(el('preview-body'), { snapshot });
+}
+
+// ------------------------------------------------------------------ everyone else, read only
+
+/**
+ * Every other trainer's programs, for the accounts building the app.
+ *
+ * The rows are already here. pull() fetches every table unfiltered and lets the database decide
+ * what comes back, so the nine staff select policies in 0006 have been putting other trainers'
+ * templates in this mirror all along. What was missing was a screen that asked for them: showList
+ * filters on the signed in trainer's own id, which is correct for the half of this screen that
+ * edits and wrong as a description of what staff can see.
+ *
+ * Archived programs are listed rather than drawered. The drawer on the build list exists because
+ * that is a list somebody reads every day and archiving is how they keep it short. This list is
+ * opened to check something, and a program being archived is one of the things worth checking.
+ */
+async function showEveryone() {
+  el('view-note').textContent = 'Read only. Programs other people build.';
+
+  const [templates, trainers] = await Promise.all([
+    state.storage.query('program_templates', {}),
+    state.storage.query('trainers', {}),
+  ]);
+
+  const names = new Map(trainers.map((t) => [t.id, t.display_name]));
+  const mine = state.trainer?.id ?? null;
+  const others = templates
+    .filter((t) => t.trainer_id !== mine)
+    .sort(
+      (a, b) =>
+        (names.get(a.trainer_id) ?? '').localeCompare(names.get(b.trainer_id) ?? '') ||
+        a.name.localeCompare(b.name),
+    );
+
+  if (!others.length) {
+    el('everyone-list').innerHTML =
+      '<li class="clientlist__empty">Nobody else has built a program yet.</li>';
+    return;
+  }
+
+  const rows = await Promise.all(
+    others.map(async (template) => {
+      const assignments = await state.storage.query('assignments', { template_id: template.id });
+      const facts = [names.get(template.trainer_id) ?? 'Unknown trainer', assignedLine(assignments.length)]
+        .concat(template.archived_at ? [`archived ${dayLabel(template.archived_at)}`] : [])
+        .join('. ');
+      return (
+        `<li class="clientlist__row">` +
+        `<button type="button" class="clientlist__button" data-readonly="${template.id}">` +
+        `<span class="clientlist__name">${esc(template.name)}</span>` +
+        `<span class="clientlist__facts num">${esc(facts)}</span></button></li>`
+      );
+    }),
+  );
+
+  el('everyone-list').innerHTML = rows.join('');
+}
+
+/**
+ * Somebody else's program, frozen and read as their client reads it.
+ *
+ * Through buildSnapshot into the preview rather than into the editor, and that is the design
+ * rather than a shortcut. Staff hold a select policy on every table this touches and a write
+ * policy on none of them, so an editor here would be a table of inputs whose every save
+ * program_templates_trainer_all refuses. This file already declines to offer that shape once, on
+ * the assign list, and the reasoning transfers exactly.
+ *
+ * Freezing rather than rendering the rows loose also means what is on screen is the object an
+ * assignment would carry, so a program that cannot be frozen says so here too. That is worth
+ * having: it is the failure a trainer would otherwise meet at the moment they put somebody on it.
+ */
+async function openReadOnly(templateId) {
+  const template = await state.storage.get('program_templates', templateId);
+  if (!template) return;
+
+  const days = (await state.storage.query('template_days', { template_id: templateId })).sort(
+    (a, b) => a.day_index - b.day_index,
+  );
+  const items = [];
+  for (const day of days) {
+    items.push(...(await state.storage.query('template_items', { day_id: day.id })));
+  }
+
+  hideList();
+  el('import-view').hidden = true;
+  el('edit-view').hidden = true;
+  el('assign-view').hidden = true;
+  el('preview-view').hidden = false;
+  state.previewReturn = 'everyone';
+  el('preview-back').textContent = 'Back to programs';
+  el('view-title').textContent = template.name;
+
+  const error = el('preview-error');
+  try {
+    const snapshot = buildSnapshot({ template, days, items, exercises: state.exercises });
+    error.hidden = true;
+    el('view-note').textContent = 'Read only. What their client reads.';
+    mountProgramView(el('preview-body'), { snapshot });
+  } catch (failure) {
+    error.hidden = false;
+    error.textContent = failure.message;
+    el('preview-body').innerHTML = '';
+    el('view-note').textContent = 'This program cannot be shown to a client yet.';
+  }
 }
 
 // ------------------------------------------------------------------ assigning
@@ -923,6 +1057,39 @@ function refreshExerciseOptions() {
 
 // ------------------------------------------------------------------ wiring
 
+/**
+ * The controls that belong to every version of this screen.
+ *
+ * Separate from wire() because that one is trainer only: New program and the day table reach for
+ * state.trainer.id, so attaching them for somebody without a trainers row would be wiring up a
+ * crash. The chooser and the preview are not trainer only, and a staff account holding no
+ * trainers row would otherwise get a section picker whose chips do nothing.
+ */
+function wireCommon() {
+  el('section-picker').addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-section]');
+    if (chip) {
+      state.section = chip.dataset.section;
+      showList();
+    }
+  });
+
+  // Two ways in, and only one of them has an editor behind it to go back to.
+  el('preview-back').addEventListener('click', (event) => {
+    event.preventDefault();
+    if (state.previewReturn === 'everyone') return showList();
+    return showEdit();
+  });
+}
+
+/** Staff only, and the only thing it opens is a read only view. */
+function wireOversight() {
+  el('everyone-list').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-readonly]');
+    if (button) openReadOnly(button.dataset.readonly);
+  });
+}
+
 function wire() {
   el('program-list').addEventListener('click', (event) => {
     const button = event.target.closest('[data-template]');
@@ -935,19 +1102,6 @@ function wire() {
   });
 
   el('preview').addEventListener('click', showPreview);
-
-  el('section-picker').addEventListener('click', (event) => {
-    const chip = event.target.closest('[data-section]');
-    if (chip) {
-      state.section = chip.dataset.section;
-      showList();
-    }
-  });
-
-  el('preview-back').addEventListener('click', (event) => {
-    event.preventDefault();
-    showEdit();
-  });
 
   el('assign').addEventListener('click', showAssign);
 
@@ -1117,13 +1271,20 @@ async function main() {
   el('viewer-name').textContent = viewerName();
 
   state.hasMine = Boolean(actor?.clientId);
+  state.isStaff = Boolean(actor?.isStaff);
   state.trainer = actor?.trainerId ? await storage.get('trainers', actor.trainerId) : null;
 
+  // A trainer needs the library to type a row against it. Staff need it to freeze somebody else's
+  // program, because buildSnapshot resolves every exercise_id through this list and throws by
+  // name when it cannot.
+  if (state.trainer || state.isStaff) state.exercises = await storage.query('exercises', {});
+
   if (state.trainer) {
-    state.exercises = await storage.query('exercises', {});
     refreshExerciseOptions();
     wire();
   }
+  if (state.isStaff) wireOversight();
+  wireCommon();
 
   await showList();
   if (state.hasMine) await showMine(storage, actor.clientId);

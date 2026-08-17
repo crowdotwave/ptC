@@ -13,7 +13,7 @@ import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
 import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
-  isBodyweightLoad,
+  isBodyweightLoad, prescribesLoad,
 } from './js/program.js';
 import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
@@ -808,24 +808,65 @@ test('a lettered set number marks a superset or a circuit', () => {
 
 test('a rep count means the normal weight and reps', () => {
   eq(inferLogging({ repsText: '6-8', loadText: '1-2 RIR', sets: 4 }),
-     { isLogged: true, logMode: 'weight_reps' });
+     { isLogged: true, logMode: 'weight_reps', certain: true });
 });
 
 // A carry or a sled: the load is the whole point and there are no reps to count.
-test('a distance with a load logs weight only', () => {
+//
+// The second case used to assert weight_only for a load of 'N/A', under a test named 'with a
+// load'. The name was the correct rule and the assertion was the shipped bug: a 400m ski erg
+// carries nothing, and asking a client to enter a weight for it is asking for a number that does
+// not exist. See prescribesLoad.
+test('a distance with a load logs weight only, and without one is not logged', () => {
   eq(inferLogging({ repsText: '50 FT', loadText: '2 PLATES', sets: 3 }),
-     { isLogged: true, logMode: 'weight_only' });
+     { isLogged: true, logMode: 'weight_only', certain: true });
+  eq(inferLogging({ repsText: '50 FT', loadText: '1-2 RIR', sets: 3 }),
+     { isLogged: true, logMode: 'weight_only', certain: true });
   eq(inferLogging({ repsText: '400M', loadText: 'N/A', sets: 3 }),
-     { isLogged: true, logMode: 'weight_only' });
+     { isLogged: false, logMode: 'weight_reps', certain: true });
+  eq(inferLogging({ repsText: '500M', loadText: '', sets: 3 }),
+     { isLogged: false, logMode: 'weight_reps', certain: true });
+});
+
+// A word about pace is not a load, and it is the case that separates a sled from a run. Both are
+// a distance in the Reps column, and only one of them has anything on it.
+test('a pace word in the load column is not a load', () => {
+  ok(prescribesLoad('1-2 RIR'));
+  ok(prescribesLoad('RPE 8'));
+  ok(prescribesLoad('2 PLATES'));
+  ok(prescribesLoad('25 - 45 LBS'));
+  ok(!prescribesLoad('MODERATE'));
+  ok(!prescribesLoad('5-7 SPEED'));
+  ok(!prescribesLoad('N/A'));
+  ok(!prescribesLoad(''));
+  ok(!prescribesLoad('BW'), 'the body is a load nobody selects, and has its own mode');
+
+  eq(inferLogging({ repsText: '100M', loadText: 'MODERATE', sets: null }),
+     { isLogged: false, logMode: 'weight_reps', certain: true });
 });
 
 // A running interval has no sets, no reps, and a duration in the Load cell. There is nothing
 // to measure, so nothing is asked for.
 test('a cardio interval is not logged at all', () => {
   eq(inferLogging({ repsText: 'N/A', loadText: '3 MINS', sets: null }),
-     { isLogged: false, logMode: 'weight_reps' });
+     { isLogged: false, logMode: 'weight_reps', certain: true });
   eq(inferLogging({ repsText: 'N/A', loadText: '1 MINUTE', sets: null }),
-     { isLogged: false, logMode: 'weight_reps' });
+     { isLogged: false, logMode: 'weight_reps', certain: true });
+});
+
+// Certainty is a claim about the inference, not about the row. It is what the review screen
+// flags on, so a rule that decided cleanly must not ask for a second opinion.
+test('certainty separates a decided row from a guessed one', () => {
+  ok(inferLogging({ repsText: '12', loadText: '1 RIR', sets: 3 }).certain,
+     'a rep count beside an effort target is decided');
+  ok(inferLogging({ repsText: '12', loadText: 'BW', sets: 3 }).certain,
+     'a rep count beside the body is decided');
+  ok(!inferLogging({ repsText: '12', loadText: '', sets: 3 }).certain,
+     'a rep count with an empty load cell could be either');
+  ok(!inferLogging({ repsText: 'AMRAP', loadText: '1 RIR', sets: 1 }).certain,
+     'AMRAP says nothing about what is in the hands');
+  ok(!inferLogging({ repsText: '', loadText: '', sets: null }).certain,
+     'a row with nothing in either cell is a note somebody typed, and wants deleting');
 });
 
 test('the target line shows what the trainer wrote, not a reassembly of it', () => {
@@ -1847,11 +1888,13 @@ test('a rep count sitting in the Rest column is not read as a duration', () => {
 // Reps cell reading '10 MINS' is a cardio block rather than something anybody holds.
 test('seconds in the reps column is a hold, minutes are not', () => {
   eq(inferLogging({ repsText: '30 SEC', loadText: '1 RIR', sets: 3 }),
-     { isLogged: true, logMode: 'time_hold' });
+     { isLogged: true, logMode: 'time_hold', certain: true });
   eq(inferLogging({ repsText: '45 SEC', loadText: 'BW', sets: 3 }),
-     { isLogged: true, logMode: 'time_hold' });
-  eq(inferLogging({ repsText: '10 MINS', loadText: '5-7 SPEED', sets: null }).logMode,
-     'weight_only', 'a ten minute block is not a hold');
+     { isLogged: true, logMode: 'time_hold', certain: true });
+  // Ten minutes on a stair master is still not a hold. It is now not logged either, because
+  // '5-7 SPEED' is a pace and prescribes no load to enter.
+  eq(inferLogging({ repsText: '10 MINS', loadText: '5-7 SPEED', sets: null }),
+     { isLogged: false, logMode: 'weight_reps', certain: true }, 'a ten minute block is not a hold');
 });
 
 // 9 rows. A Load cell naming the body is a bodyweight lift, which now has its own mode rather
@@ -1864,18 +1907,31 @@ test('a load naming the body makes it a bodyweight lift', () => {
   ok(!isBodyweightLoad('1 RIR'));
 
   eq(inferLogging({ repsText: '12', loadText: 'BODY WEIGHT', sets: 3 }),
-     { isLogged: true, logMode: 'bodyweight_reps' });
+     { isLogged: true, logMode: 'bodyweight_reps', certain: true });
   eq(inferLogging({ repsText: '12', loadText: '1 RIR', sets: 3 }),
-     { isLogged: true, logMode: 'weight_reps' });
+     { isLogged: true, logMode: 'weight_reps', certain: true });
+});
+
+// 'BW' in the Load column beside 'DUMBELL' in the Adjust column is a weighted jump squat. Reading
+// the Load cell on its own there hides the dumbbell and asks somebody to jump empty handed.
+test('the adjust column outranks a bodyweight load when it names an implement', () => {
+  eq(inferLogging({ repsText: '5', loadText: 'BW', adjustText: 'DUMBELL', sets: 5 }),
+     { isLogged: true, logMode: 'weight_reps', certain: true });
+  eq(inferLogging({ repsText: '10', loadText: 'ASSISTED BW', adjustText: 'BAND', sets: 5 }),
+     { isLogged: true, logMode: 'bodyweight_reps', certain: true }, 'a band is not an implement');
+  eq(inferLogging({ repsText: '10', loadText: 'BW', adjustText: 'BOX', sets: 5 }),
+     { isLogged: true, logMode: 'bodyweight_reps', certain: true }, 'nor is a box');
 });
 
 // AMRAP in the Reps column is one exercise taken to failure, so it is a rep count the client
 // discovers. It is not the rounds mode, which is a circuit.
 test('AMRAP is a rep count to discover, not a circuit', () => {
+  // Never certain, whichever way it lands: AMRAP names the reps and says nothing about what is
+  // in the hands, so this is the one inference that always wants a second opinion.
   eq(inferLogging({ repsText: 'AMRAP', loadText: 'BODY WEIGHT', sets: 1 }),
-     { isLogged: true, logMode: 'bodyweight_reps' });
+     { isLogged: true, logMode: 'bodyweight_reps', certain: false });
   eq(inferLogging({ repsText: 'AMRAP', loadText: '1 RIR', sets: 1 }),
-     { isLogged: true, logMode: 'weight_reps' });
+     { isLogged: true, logMode: 'weight_reps', certain: false });
 });
 
 // 1 row. A unilateral count is still a count.

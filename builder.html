@@ -60,6 +60,19 @@
         </details>
       </section>
 
+      <!-- Every other trainer's programs, for the accounts building the app. Read only, and there
+           is no editor behind it: staff hold a select policy on program_templates, template_days
+           and template_items and a write policy on none of them, so a row opens into the same
+           frozen client-facing view the Preview control produces. Offering an editor here would be
+           offering a screen of controls whose every save the database refuses, which is the shape
+           the assign list already declines to offer for the same reason. -->
+      <section id="everyone-view" hidden>
+        <p class="legend">
+          Programs other trainers built. Nothing here can be edited or assigned from this account.
+        </p>
+        <ul class="clientlist" id="everyone-list"></ul>
+      </section>
+
       <!-- Review, between reading the file and writing anything. Nothing exists in the database
            while this is on screen. -->
       <section id="import-view" hidden>

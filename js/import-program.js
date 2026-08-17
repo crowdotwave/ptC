@@ -155,19 +155,22 @@ export function readSheet(rows, sheetName = '') {
       const loadText = cell(row, columns.load);
       const restText = cell(row, columns.rest);
       const setsText = cell(row, columns.sets);
+      const adjustText = cell(row, columns.adjust);
 
       const reps = parseReps(repsText);
       const load = parseLoad(loadText);
       const sets = parseSets(setsText);
       const group = parseGroup(number);
-      let logging = inferLogging({ repsText, loadText, sets });
+      let logging = inferLogging({ repsText, loadText, adjustText, sets });
 
       // A day block with no Load column at all prescribes no load, so a rep count in it is a
       // bodyweight rep count. Structural rather than a guess about wording, and it is a real
       // layout: one workbook's mobility days are two columns, an exercise and a rep count, and
       // without this every one of them would ask a client to put a weight on a stretch.
       if (columns.load === -1 && logging.isLogged && reps.low !== null) {
-        logging = { isLogged: true, logMode: 'bodyweight_reps' };
+        // Certain, and structurally so: there is no Load column on this day for anything to be
+        // ambiguous about.
+        logging = { isLogged: true, logMode: 'bodyweight_reps', certain: true };
       }
 
       // A warning means data was dropped, and nothing else, so that a warning is always worth
@@ -190,11 +193,16 @@ export function readSheet(rows, sheetName = '') {
         restSeconds: parseRest(restText),
         isLogged: logging.isLogged,
         logMode: logging.logMode,
-        // The rows worth a trainer's eye before this becomes somebody's program. Anything not
-        // logged at all, anything whose mode was inferred rather than obvious, and anything with
-        // no set count. Plain sets and reps with a rep range are left unmarked, because marking
-        // everything is the same as marking nothing.
-        needsReview: !logging.isLogged || logging.logMode !== 'weight_reps' || sets === null,
+        // The rows worth a trainer's eye before this becomes somebody's program: the ones where
+        // the two cells did not decide the answer between them, and the ones that will be logged
+        // without a set count.
+        //
+        // This used to read `logMode !== 'weight_reps'`, which marked every hold and every
+        // bodyweight row as needing a decision that had already been made correctly. On one real
+        // workbook that was 21 rows out of 61, and a flag on a third of the table is one nobody
+        // reads. An unlogged row's missing set count is not mentioned either, because a set count
+        // changes nothing about a row that prescribes no sets.
+        needsReview: !logging.certain || (logging.isLogged && sets === null),
         sourceRow: rowIndex + 1,
       });
       return;
