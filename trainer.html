@@ -21,7 +21,42 @@
       </header>
 
       <section id="list-view">
+        <div class="secondary">
+          <button type="button" class="button-secondary" id="new-client">Add a client</button>
+        </div>
+        <p class="import__error" id="client-error" hidden role="status"></p>
         <ul class="clientlist" id="client-list"></ul>
+      </section>
+
+      <!-- Adding somebody, or fixing what was typed. The email is the load bearing field: it is
+           the key ptc.handle_new_auth_user matches on, so a client cannot sign in until it is
+           right, and until this screen existed a typo in it was unfixable from inside the app. -->
+      <section id="client-form-view" hidden>
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="client-form-back">Back to clients</a></p>
+        </div>
+
+        <p class="legend" id="client-form-legend"></p>
+        <p class="import__error" id="client-form-error" hidden role="status"></p>
+
+        <div class="field">
+          <label class="field__label" for="client-name">Name</label>
+          <input class="field__input" id="client-name" type="text" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="client-email">Email</label>
+          <input class="field__input" id="client-email" type="email" autocomplete="off"
+                 inputmode="email" spellcheck="false" />
+        </div>
+
+        <div class="secondary">
+          <button type="button" class="button-secondary" id="client-save">Save</button>
+        </div>
+
+        <!-- Archive and delete, and the sentence saying which one this client can have. -->
+        <div class="secondary" id="client-danger" hidden></div>
+        <p class="legend" id="client-danger-note"></p>
       </section>
 
       <section id="detail-view" hidden>

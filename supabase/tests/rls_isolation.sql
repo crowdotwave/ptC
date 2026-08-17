@@ -580,6 +580,138 @@ begin
   if v_created > now() then raise exception 'created_at on a set log was not stamped by the server'; end if;
 end $$;
 
+-- ================================================================ as staff
+--
+-- 0006 gave the two accounts building the app a select policy on nine tables and a write policy
+-- on none, and the note stored against those rows says why in four words: read everything, write
+-- nothing but their own. 0013 broke that for clients and for clients alone, because there was no
+-- client management screen in the app and every row in that table had been inserted by hand,
+-- which left a typo in clients.email, the binding key, unfixable from inside the product.
+--
+-- So this section is the shape of one exception. Staff may write a client row belonging to
+-- anybody, and staff still may not bind one to a person.
+--
+-- It is also the only section that touches auth.users, which the invite section above avoids on
+-- purpose so the test does not depend on a Supabase internal table. It has no choice: the
+-- deployed ptc.is_staff() resolves the caller by joining auth.users against the address held in
+-- ptc.staff, so a staff caller with no auth.users row is simply not staff.
+--
+-- The fixture also has to cope with two shapes of ptc.staff, because 0006 declares it keyed on
+-- auth_user_id while the deployed table is keyed on email. That drift is real and predates this
+-- test. Reconciling it is a migration nobody has written yet, and until somebody does, the branch
+-- below is what lets this file run against either.
+
+insert into auth.users (id, instance_id, aud, role, email, created_at, updated_at)
+values ('ffffffff-ffff-4fff-8fff-ffffffffffff', '00000000-0000-0000-0000-000000000000',
+        'authenticated', 'authenticated', 'staff.one@example.com', now(), now());
+
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'ptc' and table_name = 'staff' and column_name = 'email') then
+    insert into ptc.staff (email) values ('staff.one@example.com');
+  else
+    insert into ptc.staff (auth_user_id) values ('ffffffff-ffff-4fff-8fff-ffffffffffff');
+  end if;
+end $$;
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"ffffffff-ffff-4fff-8fff-ffffffffffff","role":"authenticated"}', true);
+
+do $$
+declare n bigint; v_email text;
+begin
+  if not ptc.is_staff() then
+    raise exception 'the staff fixture does not read as staff, so nothing below proves anything';
+  end if;
+
+  -- Reading across both trainers, which is 0006 and is the positive control for everything after
+  -- it. Scoped to the two fixture ids, because staff sees real rows too.
+  select count(*) into n from public.clients
+   where id in ('20000000-0000-4000-8000-00000000000a', '20000000-0000-4000-8000-00000000000c');
+  if n <> 2 then raise exception 'staff read % of the 2 fixture clients across both trainers', n; end if;
+
+  -- Writing one that belongs to somebody else, which is 0013 and is the whole point of it. This
+  -- is the Clients screen fixing an address a trainer typed wrong.
+  update public.clients set email = 'fixed.by.staff@example.com'
+   where id = '20000000-0000-4000-8000-00000000000c';
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'staff could not fix another trainers client email'; end if;
+
+  select email into v_email from public.clients where id = '20000000-0000-4000-8000-00000000000c';
+  if v_email <> 'fixed.by.staff@example.com' then raise exception 'the staff edit did not stick'; end if;
+
+  -- Creating one under a trainer who is not them, and removing one nothing points at.
+  insert into public.clients (id, trainer_id, display_name, email, status, weight_unit)
+  values ('2f000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002',
+          'Added By Staff', 'added.by.staff@example.com', 'invited', 'kg');
+
+  delete from public.clients where id = '2f000000-0000-4000-8000-000000000001';
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'staff could not delete a client with no history'; end if;
+end $$;
+
+-- Binding is still the database's job alone. auth_user_id is excluded from both the insert and
+-- the update grant in 0002, so no policy can hand it out and 0013 did not try to. A staff account
+-- can create a row carrying any address and cannot attach it to a person.
+do $$
+declare blocked boolean := false;
+begin
+  begin
+    update public.clients set auth_user_id = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+     where id = '20000000-0000-4000-8000-00000000000c';
+  exception when insufficient_privilege then blocked := true;
+  end;
+  if not blocked then
+    raise exception 'ISOLATION FAILURE: staff bound a client row to an identity by hand';
+  end if;
+end $$;
+
+-- A client who has trained cannot be deleted by anybody, staff included. sessions cascade from
+-- clients and set_logs restricts sessions, so the restrict wins and the whole delete is refused.
+-- This is the rule the Clients screen reads before it decides whether to offer delete at all: it
+-- offers archive instead, because a button that produces this error is worse than no button.
+do $$
+declare blocked boolean := false;
+begin
+  begin
+    delete from public.clients where id = '20000000-0000-4000-8000-00000000000a';
+  exception when foreign_key_violation then blocked := true;
+  end;
+  if not blocked then
+    raise exception 'a client with logged sets was deleted, taking their training with them';
+  end if;
+end $$;
+
+reset role;
+
+-- And the contrast, which is what makes the staff result mean anything: an ordinary trainer still
+-- cannot write another trainer's client. Same statement, different caller.
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}', true);
+
+do $$
+declare n bigint;
+begin
+  if ptc.is_staff() then raise exception 'trainer Two reads as staff, so the contrast is not one'; end if;
+
+  -- Their own client, which must still work. Without this the check below passes on a policy set
+  -- that denies everybody everything.
+  update public.clients set display_name = 'Client C, renamed by their own trainer'
+   where id = '20000000-0000-4000-8000-00000000000c';
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'a trainer could not rename their own client'; end if;
+
+  update public.clients set display_name = 'Hijacked'
+   where id = '20000000-0000-4000-8000-00000000000a';
+  get diagnostics n = row_count;
+  if n <> 0 then
+    raise exception 'ISOLATION FAILURE: a non staff trainer wrote another trainers client';
+  end if;
+end $$;
+
+reset role;
+
 -- ================================================================ as anon
 -- Nobody is logged in. Every read in this product is somebody's private training data.
 
