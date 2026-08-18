@@ -11,13 +11,16 @@
 //
 // Pure, like js/program-view.js and js/session-view.js: it takes plan entries and returns a
 // string, so test.js can check the markup with no DOM. Everything it knows about a session comes
-// from `status` on the entries, which the logging screen owns.
+// from `status` on the entries, which the logging screen owns. It also takes the snapshot day
+// those entries were built from, because the rows carrying no sets are the ones the plan drops and
+// they are still part of what the day asks of somebody.
 //
 // It deliberately does NOT reuse renderProgram. That renderer reads a frozen snapshot and knows
 // nothing about what has been logged, which is most of what this one has to say, and the two
 // answer different questions: one is the program, this is today.
 
 import { targetLine } from './program.js';
+import { sortedItems } from './snapshot.js';
 
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -67,11 +70,26 @@ export function liftRuns(plan) {
  * cursor could not go backwards. Leaving it permanent once the cursor can would be inventing a dead
  * end and putting no undo on it, which is worse than the thing it replaced. The caller puts those
  * sets back to pending when the tap lands.
+ *
+ * `day` is the snapshot day the plan was built from, and passing it is what puts the rows the
+ * trainer marked as not logged back on this list. js/plan.js never sees those items, deliberately:
+ * they own no sets and stepping through them would mean recording a number nobody measured. But a
+ * row that is not in the plan used to be a row that did not exist here either, and the panel is the
+ * client's answer to what this day is. So a cardio interval, a run, or a 6 second iso vanished
+ * between the program and the session, the day quietly lost exercises, and the row beneath the gap
+ * read as though it had taken the missing one's place. Every one of those is real in one of the
+ * programs this app is running: a whole long run day rendered as "No lifts in this day".
+ *
+ * js/program-view.js already settled this and the words there are the argument: marked rather than
+ * hidden, because a client who cannot see the cardio block on their own program is reading a
+ * different program from the one their trainer wrote. That was true of the program tab while this
+ * screen did the hiding anyway. Omitting `day` keeps the old behaviour, which is what a caller
+ * holding a plan and no snapshot has.
  */
-export function overviewRows(plan, cursor = -1) {
+export function overviewRows(plan, cursor = -1, day = null) {
   const current = plan[cursor] ?? null;
 
-  return liftRuns(plan).map((run) => {
+  const lifts = liftRuns(plan).map((run) => {
     const pending = run.entries.filter(isPending);
     const reachable = pending.length
       ? pending
@@ -89,8 +107,35 @@ export function overviewRows(plan, cursor = -1) {
       logged: run.entries.filter((entry) => entry.status === 'logged').length,
       planned: run.entries.length,
       position: isCurrent ? run.entries.indexOf(current) + 1 : null,
+      shown: false,
+      // Where the trainer put it, so the merge below can seat it. `from` is the fallback for a
+      // caller building a plan out of bare items, which the tests do.
+      order: run.item.order_index ?? run.from,
     };
   });
+
+  const shown = sortedItems(day)
+    .filter((item) => item.is_logged === false)
+    .map((item, index) => ({
+      name: item.exercise?.name ?? 'Unnamed lift',
+      variation: item.variation ?? null,
+      group: item.group_label ?? null,
+      target: targetLine(item),
+      notes: item.notes ?? null,
+      // Nowhere to land and nothing to land on. Not a button, for the same reason a finished lift
+      // is not one: the only thing a tap could do here is write something nobody asked for.
+      at: null,
+      isCurrent: false,
+      logged: 0,
+      planned: 0,
+      position: null,
+      shown: true,
+      order: item.order_index ?? index,
+    }));
+
+  if (!shown.length) return lifts;
+  // Stable, so two rows the trainer left on the same number keep the order they were read in.
+  return [...lifts, ...shown].sort((a, b) => a.order - b.order);
 }
 
 /**
@@ -101,8 +146,14 @@ export function overviewRows(plan, cursor = -1) {
  * colour, no badge, no running count of what was missed. Since the row stays on the list and stays
  * one tap away, the difference between the two has also stopped being a difference: both are a
  * lift with sets left and a way to go and do them.
+ *
+ * A row that owns no sets says a different thing entirely, and the wording is the whole point of
+ * separating them. "Not logged yet" on this list means you have not done it, go and do it. The
+ * trainer marking a row as not logged means there is nothing here to record, which is why it is
+ * "Nothing to log": one word apart and the two would be read as the same sentence.
  */
 export function stateLine(row) {
+  if (row.shown) return 'Nothing to log';
   if (row.isCurrent) return `Now, set ${row.position} of ${row.planned}`;
   if (row.logged) return `${row.logged} of ${row.planned} sets logged`;
   return 'Not logged yet';
@@ -114,11 +165,21 @@ export function stateLine(row) {
  * Position, never progress. "Lift 3 of 7" is true whatever has been skipped, whereas any count of
  * lifts done has to decide what a passed over lift is, and every answer to that is either a lie or
  * a scoreboard.
+ *
+ * Counts lifts and not rows. A row with no sets in it is not somewhere the client can be standing,
+ * so folding the instruction rows into this total would make "Lift 2 of 6" name a position nothing
+ * can ever reach. js/program-view.js counts the same two things separately for the same reason, and
+ * this borrows its words for a day that is all instruction: a long run day is not "no lifts", it is
+ * a day whose one row is not a lift.
  */
 export function positionLine(rows) {
-  if (!rows.length) return 'No lifts in this day';
-  const at = rows.findIndex((row) => row.isCurrent) + 1;
-  return at ? `Lift ${at} of ${rows.length}` : `${rows.length} lift${rows.length === 1 ? '' : 's'}`;
+  const lifts = rows.filter((row) => !row.shown);
+  if (!lifts.length) {
+    const shown = rows.length;
+    return shown ? `${shown} not logged` : 'No lifts in this day';
+  }
+  const at = lifts.findIndex((row) => row.isCurrent) + 1;
+  return at ? `Lift ${at} of ${lifts.length}` : `${lifts.length} lift${lifts.length === 1 ? '' : 's'}`;
 }
 
 function renderRow(row) {
@@ -129,13 +190,19 @@ function renderRow(row) {
     (row.variation ? ` <span class="worknav__variation">${esc(row.variation)}</span>` : '') +
     `</span>` +
     (row.target ? `<span class="worknav__target">${esc(row.target)}</span>` : '') +
-    `<span class="worknav__state num">${esc(stateLine(row))}</span>` +
+    // A pill rather than a state line, and it is the same hollow pill the program tab puts on the
+    // same row. What has been done to a lift and the fact that a row is not a lift are different
+    // kinds of statement, and this list already reads at a glance in a gym.
+    (row.shown
+      ? `<span class="worknav__tag">${esc(stateLine(row))}</span>`
+      : `<span class="worknav__state num">${esc(stateLine(row))}</span>`) +
     (row.notes ? `<span class="worknav__note">${esc(row.notes)}</span>` : '') +
     `</span>`;
 
   // Lit means pressable, flat means not, which is the same rule the steppers and the chooser chips
   // follow. A finished lift is a plain slab with a border and no fall of light on it, so the thing
   // that says "you cannot go here" is the same thing that says "this is not a control".
+  if (row.shown) return `<li class="worknav__row is-shown">${inner}</li>`;
   if (row.at === null) return `<li class="worknav__row is-full">${inner}</li>`;
 
   return (

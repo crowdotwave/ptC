@@ -386,7 +386,7 @@ function render() {
 /** The chip top left: which day this is, and where in it the client is standing. */
 function renderHeader() {
   if (!state.day) return;
-  const position = positionLine(overviewRows(state.plan, state.cursor));
+  const position = positionLine(overviewRows(state.plan, state.cursor, state.day));
   ui.dayJump.hidden = false;
   ui.dayJumpLabel.textContent = dayTitle(state.day);
   ui.dayJumpPos.textContent = position;
@@ -413,7 +413,10 @@ function renderOverviewPanel() {
   ui.lastTime.hidden = true;
   ui.prChip.hidden = true;
 
-  const rows = overviewRows(state.plan, state.cursor);
+  // The day as well as the plan, so the rows the trainer marked as not logged are on the list. They
+  // own no sets, so js/plan.js never built them, and until now that meant the panel showed a day
+  // with exercises missing out of the middle of it.
+  const rows = overviewRows(state.plan, state.cursor, state.day);
   ui.overviewTitle.textContent = dayTitle(state.day);
   ui.overviewPos.textContent = positionLine(rows);
   ui.overviewBody.innerHTML = renderOverview(rows);

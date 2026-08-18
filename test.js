@@ -2801,6 +2801,80 @@ test('a day with nothing in it says so rather than rendering an empty list', () 
   ok(renderOverview([]).includes('No lifts in this day'));
 });
 
+// ------------------------------------------------------------------ rows that own no sets
+//
+// A row the trainer marked as not logged. js/plan.js drops it, because it owns no sets and
+// stepping through it would mean recording a number nobody measured, and until now that meant it
+// was missing from this list too. Three of them are in one real program: a 6 second iso, a pair of
+// cardio rows, and a long run day that is nothing else.
+
+const isoItem = namedItem({
+  exercise_id: 'iso',
+  exercise: { id: 'iso', name: 'Leg Extension Iso Hold' },
+  variation: 'SINGLE LEG',
+  group_label: '2',
+  order_index: 1,
+  target_sets: 4,
+  target_reps_low: null,
+  target_reps_text: '6 sec iso',
+  notes: 'Max force into a fixed position.',
+  is_logged: false,
+});
+
+const dayWithIso = {
+  items: [
+    namedItem({ order_index: 0 }),
+    isoItem,
+    namedItem({ ...benchItem, order_index: 2 }),
+  ],
+};
+
+test('a row the trainer marked as not logged is on the list, not missing from it', () => {
+  const rows = overviewRows(dayOf(), 0, dayWithIso);
+  eq(rows.map((row) => row.name), ['Squat', 'Leg Extension Iso Hold', 'Bench press']);
+  eq(rows[1].shown, true, 'and it is seated where the trainer put it, not appended');
+});
+
+test('the day is optional, so a caller holding a plan and no snapshot is unchanged', () => {
+  eq(overviewRows(dayOf(), 0).map((row) => row.name), ['Squat', 'Bench press']);
+});
+
+test('a row with no sets is not a control and does not offer one', () => {
+  const markup = renderOverview(overviewRows(dayOf(), 0, dayWithIso));
+  ok(markup.includes('is-shown'));
+  eq(markup.match(/data-jump/g).length, 2, 'the two lifts, and nothing on the iso');
+});
+
+test('nothing to log and not logged yet are not the same sentence', () => {
+  const rows = overviewRows(dayOf(), 0, dayWithIso);
+  eq(stateLine(rows[1]), 'Nothing to log', 'there is nothing here to record');
+  eq(stateLine(rows[2]), 'Not logged yet', 'you have not done this one');
+});
+
+test('what the trainer typed on a not logged row reaches the list too', () => {
+  const markup = renderOverview(overviewRows(dayOf(), 0, dayWithIso));
+  ok(markup.includes('SINGLE LEG'), 'the variation, which is the whole name of the movement here');
+  ok(markup.includes('6 sec iso'), 'and what was asked for');
+  ok(markup.includes('Max force into a fixed position.'));
+});
+
+test('a row that owns no sets is not a position anybody can be standing in', () => {
+  // Counting it would make "Lift 2 of 3" name a seat the cursor can never take.
+  eq(positionLine(overviewRows(dayOf(), 0, dayWithIso)), 'Lift 1 of 2');
+  eq(positionLine(overviewRows(dayOf(), 2, dayWithIso)), 'Lift 2 of 2');
+});
+
+test('a day that is one long run is not a day with nothing in it', () => {
+  // The failure this fixes outright: B1 of a real program is a single not logged row, so the panel
+  // rendered "No lifts in this day" over an empty list on a day somebody was about to train.
+  const run = { items: [namedItem({ exercise: { id: 'run', name: 'Long Run' }, is_logged: false })] };
+  const rows = overviewRows([], -1, run);
+  eq(rows.length, 1);
+  eq(positionLine(rows), '1 not logged');
+  ok(renderOverview(rows).includes('Long Run'));
+  ok(!renderOverview(rows).includes('No lifts in this day'));
+});
+
 // ------------------------------------------------------------------ throwing a session away
 //
 // js/session.js and js/session-view.js. set_logs cannot be deleted: no delete grant, no delete

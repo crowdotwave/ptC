@@ -1008,6 +1008,16 @@ button.worknav__row:active {
   box-shadow: none;
 }
 
+/* A row the trainer marked as not logged: the run, the interval, the iso nobody records a number
+ * for. Flat for the same reason a finished lift is flat, since neither is a control. It is not
+ * dimmed and not shrunk either, which is the rule the program tab already follows on this same
+ * row: nothing here is a lesser exercise, and the one the client is most likely to skip is the one
+ * the app has the least business making look optional. */
+.worknav__row.is-shown {
+  background: none;
+  box-shadow: none;
+}
+
 /* The lift the client is on, filled, exactly as a selected chooser chip is filled. Fill against
  * no fill is the signal that survives glare and a glance from arm's length, and the word "Now"
  * in the state line carries it a second time.
@@ -1057,6 +1067,7 @@ button.worknav__row:active {
 .worknav__variation,
 .worknav__target,
 .worknav__state,
+.worknav__tag,
 .worknav__note {
   font-size: var(--t-small);
   line-height: 1.4;
@@ -1076,6 +1087,19 @@ button.worknav__row:active {
 /* What has happened to it so far. Separated from the prescription above it by tabular figures
  * and a heavier weight rather than by a hue, the same way the program view separates them. */
 .worknav__state {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* "Nothing to log", where a lift would say what has been done to it. The same hollow pill the
+ * program tab uses on the same row, because a word alone in a quiet colour is a hue signal wearing
+ * a label, and because the two screens saying one thing two ways is how somebody starts wondering
+ * which of them is right. The outline is what survives a glance. */
+.worknav__tag {
+  align-self: start;
+  padding: 2px var(--s-2);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: 999px;
   color: var(--text-secondary);
   font-weight: 600;
 }
