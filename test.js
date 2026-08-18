@@ -29,7 +29,7 @@ import { validate, OUTBOX_STORE } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
-import { smoothPath } from './js/charts.js';
+import { smoothPath, renderRepsAtLoadChart } from './js/charts.js';
 import { planForItem, setCountOf, countOf, nextSteppers } from './js/plan.js';
 import {
   openSession,
@@ -2038,6 +2038,32 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   eq(later.parked.length, 1, 'read off the disk, not off what this push happened to do');
   ok(syncMessage(later).includes('set_logs_reps_check'), 'and it names the reason');
   ok(syncMessage(later).includes('kept on this device'));
+});
+
+// ------------------------------------------------------------------ two labels, one spot
+//
+// Reps at each load draws a weight beside the last point of every load. Ascending sets routinely
+// finish two loads on the same day at the same top set, which put both labels on identical
+// coordinates, and two labels overprinted is not a near miss: it is a word neither of them says.
+
+test('two loads ending on the same day at the same reps do not print on top of each other', () => {
+  const container = document.createElement('div');
+  const sameDay = [{ date: '2026-08-16T12:00:00.000Z', reps: 6 }];
+  renderRepsAtLoadChart(container, {
+    repsAtLoad: {
+      hiddenCount: 0,
+      lines: [
+        { loadKg: 45.359, points: sameDay },
+        { loadKg: 63.503, points: sameDay },
+      ],
+    },
+  });
+
+  const labels = [...container.querySelectorAll('.chart__loadlabel')];
+  eq(labels.length, 2, 'both loads are still named');
+  const ys = labels.map((node) => Number(node.getAttribute('y')));
+  ok(ys.every(Number.isFinite), `label positions are numbers, got ${ys}`);
+  ok(Math.abs(ys[0] - ys[1]) >= 12, `labels are apart, got ${ys}`);
 });
 
 test('a clean sync says nothing at all', () => {

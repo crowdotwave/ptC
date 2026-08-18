@@ -640,7 +640,24 @@ export function renderRepsAtLoadChart(container, progression, { height = 156 } =
   out += gridBlock(ticks, y, { left: pad.left, right: pad.left + plotW });
   out += `<line class="chart__baseline" x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" />`;
 
-  lines.forEach((line, index) => {
+  // Where each load's label wants to sit, before anything is drawn, so they can be moved apart.
+  //
+  // Two loads whose last session was the same day at the same rep count land on identical
+  // coordinates, and two labels overprinted is not a near miss: it is a word neither of them says.
+  // That is not the exotic case it sounds like, it is the ordinary shape of ascending sets. Work
+  // up to a top set of six twice in one session and both loads end on the same day at six.
+  //
+  // The same spread() the volume chart has always used, for the same reason and with the same
+  // stability: top down, order never changes, so a label cannot swap sides of its neighbour
+  // between redraws.
+  const ends = lines.map((line, index) => {
+    const last = line.points[line.points.length - 1];
+    const at = y(last.reps) + 4;
+    return { line, index, last, y: at, labelY: at };
+  });
+  spread(ends, 13, pad.top + 8, pad.top + plotH);
+
+  ends.forEach(({ line, index, last, labelY }) => {
     // The most recent load is the heavy solid one. Older loads thin out and dash, so the
     // ordering survives without relying on the cyan steps being told apart.
     const rank = lines.length - 1 - index;
@@ -654,8 +671,7 @@ export function renderRepsAtLoadChart(container, progression, { height = 156 } =
     for (const p of line.points) {
       out += `<circle class="chart__mark ${cls}" cx="${x(Date.parse(p.date)).toFixed(1)}" cy="${y(p.reps).toFixed(1)}" r="${rank === 0 ? 3.5 : 2.5}" />`;
     }
-    const last = line.points[line.points.length - 1];
-    out += `<text class="chart__loadlabel ${cls}" x="${(x(Date.parse(last.date)) + 6).toFixed(1)}" y="${(y(last.reps) + 4).toFixed(1)}">${weightLabel(line.loadKg)}</text>`;
+    out += `<text class="chart__loadlabel ${cls}" x="${(x(Date.parse(last.date)) + 6).toFixed(1)}" y="${labelY.toFixed(1)}">${weightLabel(line.loadKg)}</text>`;
   });
 
   if (progression.repsAtLoad.hiddenCount > 0) {
