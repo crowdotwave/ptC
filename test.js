@@ -17,7 +17,8 @@ import {
 } from './js/program.js';
 import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
-import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
+import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
+import { syncMessage } from './js/sync-status.js';
 import { createStorage } from './js/storage.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can, staysSignedIn } from './js/boot.js';
@@ -1785,6 +1786,27 @@ function queued(...ids) {
   }));
 }
 
+/** Enough of the IndexedDB driver for the outbox to behave like one. */
+function memoryDriver(rows = []) {
+  let outbox = [...rows];
+  return {
+    async getAll(store) {
+      return store === OUTBOX_STORE ? [...outbox] : [];
+    },
+    async put(store, row) {
+      if (store !== OUTBOX_STORE) return row;
+      outbox = [...outbox.filter((r) => r.id !== row.id), row];
+      return row;
+    },
+    async deleteRows(store, ids) {
+      if (store !== OUTBOX_STORE) return;
+      const gone = new Set(ids);
+      outbox = outbox.filter((r) => !gone.has(r.id));
+    },
+    peek: () => outbox,
+  };
+}
+
 /** A storage over a fake outbox, plus a remote that records what it was asked to do. */
 function harness({ queue = [], push: onPush = null } = {}) {
   let outbox = [...queue];
@@ -1792,6 +1814,16 @@ function harness({ queue = [], push: onPush = null } = {}) {
   const storage = createStorage({
     async getAll(store) {
       return store === OUTBOX_STORE ? [...outbox] : [];
+    },
+    async put(store, row) {
+      if (store !== OUTBOX_STORE) return row;
+      outbox = [...outbox.filter((r) => r.id !== row.id), row];
+      return row;
+    },
+    async deleteRows(store, ids) {
+      if (store !== OUTBOX_STORE) return;
+      const gone = new Set(ids);
+      outbox = outbox.filter((r) => !gone.has(r.id));
     },
   });
   const remote = {
@@ -1891,6 +1923,126 @@ test('two flushes at once do not hand the server the same rows twice', async () 
   await Promise.all([storage.push(), storage.push(), storage.sync()]);
   eq(overlapped, false);
   eq(calls.filter((c) => c === 'push').length, 3, 'each one still ran, one after another');
+});
+
+// A row the server will never take. Modelled on the one that happened: a set_logs insert carrying
+// reps of zero, which fails set_logs_reps_check, at the head of 82 changes including a whole
+// session. Push stops at the first failure to keep the queue causally ordered, so that one row
+// held everything behind it for two days and the logging screen said nothing.
+
+/**
+ * The real js/remote.js over a fake PostgREST, because the isolate path is the part that matters
+ * and a fake remote.push would be testing the fake.
+ */
+function realRemote({ queue = [], refuse = () => null } = {}) {
+  const driver = memoryDriver(queue);
+  const storage = createStorage(driver);
+  const requests = [];
+  const client = {
+    from(table) {
+      return {
+        async upsert(rows) {
+          requests.push(rows.map((row) => row.id));
+          return { error: refuse(rows, table) };
+        },
+        delete: () => ({ async in() { return { error: null }; } }),
+        update: () => ({ eq: () => ({ async select() { return { data: [{}], error: null }; } }) }),
+      };
+    },
+  };
+  storage.setRemote(createRemote({ client, storage }));
+  return { storage, requests, rest: () => driver.peek() };
+}
+
+const repsCheck = {
+  code: '23514',
+  message: 'new row for relation "set_logs" violates check constraint "set_logs_reps_check"',
+};
+
+test('parking one row does not throw away the twenty beside it', async () => {
+  // Batches are every consecutive write to one table, and one session was 21 sets in a single
+  // insert. PostgREST rejects the whole request, so a batch failing says nothing about which row
+  // in it was wrong, and the batch has to be taken apart to find out.
+  const { storage, requests } = realRemote({
+    queue: queued('good-1', 'bad', 'good-2'),
+    refuse: (rows) => (rows.some((row) => row.id === 'bad') ? repsCheck : null),
+  });
+  const result = await storage.push();
+  eq(result.parked.map((entry) => entry.record_id), ['bad']);
+  eq(result.pushed, 2, 'the two good rows still went');
+  eq(requests[0].length, 3, 'asked for the batch first');
+  ok(requests.length > 1, 'then took it apart when the batch came back refused');
+});
+
+test('taking a batch apart stops if the network goes mid way', async () => {
+  // Halfway through isolating, a blip is not a verdict on the rows that have not been tried. They
+  // stay owed rather than being parked alongside the one that is genuinely bad.
+  let seen = 0;
+  const { storage } = realRemote({
+    queue: queued('bad', 'b', 'c'),
+    refuse: (rows) => {
+      if (rows.length > 1) return repsCheck;
+      seen += 1;
+      if (rows[0].id === 'bad') return repsCheck;
+      return { message: 'Failed to fetch' };
+    },
+  });
+  const result = await storage.push();
+  eq(result.parked.map((entry) => entry.record_id), ['bad']);
+  ok(result.error.includes('Failed to fetch'));
+  eq(result.pending, 2, 'b and c are still owed, not written off');
+});
+
+test('a row the server will never take stops being owed', async () => {
+  const { storage, rest } = realRemote({ queue: queued('a'), refuse: () => repsCheck });
+  const result = await storage.push();
+  eq(result.pending, 0, 'the queue is no longer stuck behind it');
+  eq(result.parked.length, 1);
+  eq(rest().length, 1, 'and it is kept, because a set nobody accepted is still a set somebody did');
+});
+
+test('a network failure is not a refusal and still stops the queue', async () => {
+  // The distinction the whole thing turns on. A blip deserves another go; a check violation never
+  // will. Parking on a blip would set aside writes that were perfectly good.
+  const { storage, rest } = realRemote({
+    queue: queued('a', 'b'),
+    refuse: () => ({ message: 'Failed to fetch' }),
+  });
+  const result = await storage.push();
+  eq(result.parked.length, 0);
+  eq(result.pending, 2, 'both are still owed');
+  eq(rest().length, 2);
+});
+
+test('a foreign key failure is ordering, not a bad row', async () => {
+  // The parent is further up the same queue. Parking the child would strand a set whose session
+  // simply had not landed yet.
+  const { storage } = realRemote({
+    queue: queued('a'),
+    refuse: () => ({ code: '23503', message: 'violates foreign key constraint' }),
+  });
+  const result = await storage.push();
+  eq(result.parked.length, 0);
+  eq(result.pending, 1);
+});
+
+test('a parked row keeps saying so long after the sync that parked it', async () => {
+  // The quieter of the queue's two bad endings: everything else went, the depth is zero, and by
+  // every measure the shell had, the sync worked.
+  const { storage } = realRemote({ queue: queued('a'), refuse: () => repsCheck });
+  await storage.push();
+
+  const later = await storage.push();
+  eq(later.pushed, 0);
+  eq(later.pending, 0);
+  eq(later.parked.length, 1, 'read off the disk, not off what this push happened to do');
+  ok(syncMessage(later).includes('set_logs_reps_check'), 'and it names the reason');
+  ok(syncMessage(later).includes('kept on this device'));
+});
+
+test('a clean sync says nothing at all', () => {
+  eq(syncMessage({ pushed: 3, pending: 0, parked: [], error: null }), null);
+  eq(syncMessage(null), null);
 });
 
 test('a flush that fails does not poison the ones after it', async () => {

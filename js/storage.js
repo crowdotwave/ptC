@@ -209,10 +209,32 @@ export function createStorage(driver) {
       await driver.deleteWithOutbox(table, id, outboxEntry('delete', table, id));
     },
 
-    /** Pending local writes waiting for a remote, oldest first. */
+    /**
+     * Local writes still owed to the server, oldest first.
+     *
+     * Parked entries are excluded, because they are not owed: the server has refused them in a way
+     * it will repeat forever, and counting them as pending would mean a queue depth that never
+     * reaches zero and a sync that reports itself as behind for good.
+     */
     async pending() {
       const rows = await driver.getAll(OUTBOX_STORE);
-      return rows.sort((a, b) => compare(a.created_at, b.created_at) || compare(a.id, b.id));
+      return rows
+        .filter((row) => !row.parked_at)
+        .sort((a, b) => compare(a.created_at, b.created_at) || compare(a.id, b.id));
+    },
+
+    /**
+     * Writes the server refused for good, kept rather than dropped.
+     *
+     * They stay on the device with the reason attached. Deleting a row nobody has accepted loses a
+     * client's set silently, and a set that cannot be synced is still a set that was performed:
+     * somebody may yet want to read it, retry it by hand, or find out what wrote it.
+     */
+    async parked() {
+      const rows = await driver.getAll(OUTBOX_STORE);
+      return rows
+        .filter((row) => Boolean(row.parked_at))
+        .sort((a, b) => compare(a.created_at, b.created_at) || compare(a.id, b.id));
     },
 
     /**
@@ -256,7 +278,10 @@ export function createStorage(driver) {
         // Nothing owed. Worth the early return: this runs on every tab hide and every set logged,
         // and the common case by far is a queue that is already empty.
         if (!queue.length) {
-          return { remote: true, pushed: 0, pulled: 0, pending: 0, error: null };
+          // Still reads the parked set. A device with nothing owed and a row the server refused is
+          // not a device with nothing to say, and this is the common shape of that: everything
+          // pushed long ago, one row set aside, and no later sync would mention it again.
+          return { remote: true, pushed: 0, pulled: 0, pending: 0, parked: await storage.parked(), error: null };
         }
         try {
           const { pushed, blocked } = await remote.push(queue);
@@ -265,6 +290,7 @@ export function createStorage(driver) {
             pushed,
             pulled: 0,
             pending: (await storage.pending()).length,
+            parked: await storage.parked(),
             error: blocked ? `${blocked.table}: ${blocked.message}` : null,
           };
         } catch (error) {
@@ -273,6 +299,7 @@ export function createStorage(driver) {
             pushed: 0,
             pulled: 0,
             pending: (await storage.pending()).length,
+            parked: await storage.parked(),
             error: error.message,
           };
         }
@@ -283,7 +310,14 @@ export function createStorage(driver) {
       return serialize(async () => {
         const queue = await storage.pending();
         if (!remote) {
-          return { remote: false, pushed: 0, pulled: 0, pending: queue.length, error: null };
+          return {
+            remote: false,
+            pushed: 0,
+            pulled: 0,
+            pending: queue.length,
+            parked: await storage.parked(),
+            error: null,
+          };
         }
         try {
           const { pushed, blocked } = await remote.push(queue);
@@ -306,6 +340,7 @@ export function createStorage(driver) {
             pushed,
             pulled,
             pending: (await storage.pending()).length,
+            parked: await storage.parked(),
             error: blocked ? `${blocked.table}: ${blocked.message}` : null,
           };
         } catch (error) {
@@ -314,6 +349,7 @@ export function createStorage(driver) {
             pushed: 0,
             pulled: 0,
             pending: (await storage.pending()).length,
+            parked: await storage.parked(),
             error: error.message,
           };
         }
@@ -357,6 +393,24 @@ export function createStorage(driver) {
         attempts: (entry.attempts ?? 0) + 1,
         last_error: message,
         last_attempt_at: now(),
+      });
+    },
+
+    /**
+     * An entry the server will never take, set aside so the queue can get past it.
+     *
+     * Kept, not deleted, for the same reason _outboxFail keeps its entry: a write nobody has
+     * accepted is still the only copy of something somebody did. What changes is that it stops
+     * being owed, so pending() no longer returns it and the writes behind it are no longer stuck
+     * behind it. See PERMANENT_REFUSALS in js/remote.js for what earns this.
+     */
+    async _outboxPark(entry, message) {
+      return driver.put(OUTBOX_STORE, {
+        ...entry,
+        attempts: (entry.attempts ?? 0) + 1,
+        last_error: message,
+        last_attempt_at: now(),
+        parked_at: now(),
       });
     },
 

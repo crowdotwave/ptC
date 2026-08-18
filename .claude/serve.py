@@ -17,6 +17,7 @@
 
 import http.server
 import os
+import sys
 from pathlib import Path
 
 
@@ -32,4 +33,8 @@ if __name__ == '__main__':
     # went on running `python -m http.server` instead: that one takes --directory and this one did
     # not, so the launcher worked and the no-store header never shipped.
     os.chdir(Path(__file__).resolve().parent.parent)
-    http.server.test(HandlerClass=NoStore, port=8123, bind='127.0.0.1')
+    # An optional port, because a browser that has already cached a module keys that cache by URL
+    # and a different port is the one thing guaranteed to be a fresh one. Only needed when this
+    # server is not the one running, which is the situation it exists to prevent.
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8123
+    http.server.test(HandlerClass=NoStore, port=port, bind='127.0.0.1')

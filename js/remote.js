@@ -115,6 +115,46 @@ export function collapseDuplicates(entries) {
  */
 const UPDATE_FIRST = new Set(['clients', 'trainers']);
 
+/**
+ * A refusal the server will repeat forever, however many times it is asked.
+ *
+ * These are Postgres error codes for a row whose data is wrong: it fails a check constraint, it
+ * is missing a not null column, it cannot be parsed into its column's type. Nothing about waiting,
+ * reconnecting or pushing the rest of the queue first changes the answer.
+ *
+ * Everything else is treated as temporary and still stops the queue, which is the right call for
+ * the two cases that look similar and are not. A foreign key violation is usually ordering: the
+ * parent is further up the same queue, so retrying after it lands succeeds. A permission error is
+ * usually an actor that has not resolved yet. Both deserve another go; a check violation never
+ * does.
+ *
+ * Why this distinction has to exist at all: push stops at the first failure to keep the queue
+ * causally ordered, so one row the server will never take parks every write behind it forever. A
+ * real client sat at 82 unsynced changes for two days behind a single set_logs row carrying reps
+ * of zero, and lost nothing only because nobody tapped sign out.
+ */
+const PERMANENT_REFUSALS = new Set([
+  '23514', // check_violation
+  '23502', // not_null_violation
+  '22P02', // invalid_text_representation
+  '22003', // numeric_value_out_of_range
+]);
+
+const isPermanent = (error) => PERMANENT_REFUSALS.has(error?.code);
+
+/**
+ * A PostgREST error as something that can be thrown without losing why it happened.
+ *
+ * The code is the whole point. It used to be dropped on the floor here, so every failure arrived
+ * at the caller as an indistinguishable message string and the only possible response was to stop.
+ */
+function refusal(error) {
+  const thrown = new Error(error.message);
+  thrown.code = error.code;
+  thrown.details = error.details;
+  return thrown;
+}
+
 /** Splits the queue into the longest runs that can go in one request: same op, same table. */
 export function batchQueue(queue) {
   const batches = [];
@@ -153,42 +193,104 @@ export function createRemote({ client, storage }) {
    * that has nothing to do with what is actually wrong. One clear error beats fifty derived
    * ones, and the entry stays in the queue carrying the message.
    */
+  /** One batch, or one entry when a batch is being taken apart to find the row the server hates. */
+  async function send(table, op, entries) {
+    if (op === 'delete') {
+      const ids = [...new Set(entries.map((entry) => entry.record_id))];
+      const { error } = await client.from(table).delete().in('id', ids);
+      if (error) throw refusal(error);
+      return;
+    }
+
+    const rows = collapseDuplicates(entries).map((entry) => toWire(table, entry.payload));
+    if (UPDATE_FIRST.has(table)) {
+      await updateThenInsert(table, rows);
+      return;
+    }
+    // An append only table takes on conflict do nothing, so a replayed insert is a no-op and the
+    // write needs no update privilege anywhere. That is what keeps this path unable to rewrite
+    // history even if something upstream tried to.
+    const options = TABLES[table].appendOnly
+      ? { onConflict: 'id', ignoreDuplicates: true }
+      : { onConflict: 'id' };
+    const { error } = await client.from(table).upsert(rows, options);
+    if (error) throw refusal(error);
+  }
+
+  /**
+   * A batch the server refused for good, sent again one row at a time.
+   *
+   * PostgREST rejects the whole request, so a batch failing says nothing about which row in it was
+   * wrong, and a batch is every consecutive write to one table: one client's session was twenty one
+   * sets in a single insert. Parking the batch would have thrown away twenty of somebody's working
+   * sets to get rid of one bad one, so the batch is taken apart and each row asked for on its own.
+   *
+   * Returns what landed and what is never going to.
+   */
+  async function isolate(table, op, entries) {
+    let pushed = 0;
+    const parked = [];
+
+    for (const entry of entries) {
+      try {
+        await send(table, op, [entry]);
+        await storage._outboxDone([entry.id]);
+        pushed += 1;
+      } catch (error) {
+        if (!isPermanent(error)) {
+          // It went temporary partway through, which means the network went rather than the row
+          // being wrong. Stop here and leave the rest owed: they are still perfectly good writes.
+          await storage._outboxFail(entry, error.message);
+          return { pushed, parked, blocked: { table, op, message: error.message } };
+        }
+        await storage._outboxPark(entry, error.message);
+        parked.push({ table, op, recordId: entry.record_id, message: error.message });
+      }
+    }
+
+    return { pushed, parked, blocked: null };
+  }
+
+  /**
+   * Drains the outbox in order, stopping at the first failure that is worth stopping for.
+   *
+   * Stopping matters. The queue is causally ordered, so a session insert sits ahead of the set
+   * logs that reference it. Skipping a failed entry and carrying on would push children whose
+   * parent is not there yet, and every one of those would fail on a foreign key for a reason
+   * that has nothing to do with what is actually wrong. One clear error beats fifty derived
+   * ones, and the entry stays in the queue carrying the message.
+   *
+   * A row the server will never take is the exception, and it has to be, because that rule above
+   * turns one of them into a queue that is stopped for good. See PERMANENT_REFUSALS. Such a row is
+   * parked rather than dropped: it stays on the device with the reason attached, because throwing
+   * away a set nobody has accepted is the one outcome this whole design exists to prevent. What it
+   * stops being is owed, so everything behind it can go.
+   */
   async function push(queue) {
     let pushed = 0;
+    const parked = [];
 
     for (const batch of batchQueue(queue)) {
       try {
-        if (batch.op === 'delete') {
-          const ids = [...new Set(batch.entries.map((entry) => entry.record_id))];
-          const { error } = await client.from(batch.table).delete().in('id', ids);
-          if (error) throw new Error(error.message);
-        } else {
-          const rows = collapseDuplicates(batch.entries).map((entry) =>
-            toWire(batch.table, entry.payload),
-          );
-          if (UPDATE_FIRST.has(batch.table)) {
-            await updateThenInsert(batch.table, rows);
-          } else {
-            // An append only table takes on conflict do nothing, so a replayed insert is a no-op
-            // and the write needs no update privilege anywhere. That is what keeps this path
-            // unable to rewrite history even if something upstream tried to.
-            const options = TABLES[batch.table].appendOnly
-              ? { onConflict: 'id', ignoreDuplicates: true }
-              : { onConflict: 'id' };
-            const { error } = await client.from(batch.table).upsert(rows, options);
-            if (error) throw new Error(error.message);
-          }
-        }
+        await send(batch.table, batch.op, batch.entries);
       } catch (error) {
-        await storage._outboxFail(batch.entries[0], error.message);
-        return { pushed, blocked: { table: batch.table, op: batch.op, message: error.message } };
+        if (!isPermanent(error)) {
+          await storage._outboxFail(batch.entries[0], error.message);
+          return { pushed, parked, blocked: { table: batch.table, op: batch.op, message: error.message } };
+        }
+
+        const apart = await isolate(batch.table, batch.op, batch.entries);
+        pushed += apart.pushed;
+        parked.push(...apart.parked);
+        if (apart.blocked) return { pushed, parked, blocked: apart.blocked };
+        continue;
       }
 
       await storage._outboxDone(batch.entries.map((entry) => entry.id));
       pushed += batch.entries.length;
     }
 
-    return { pushed, blocked: null };
+    return { pushed, parked, blocked: null };
   }
 
   /**
@@ -206,11 +308,11 @@ export function createRemote({ client, storage }) {
   async function updateThenInsert(table, rows) {
     for (const row of rows) {
       const { data, error } = await client.from(table).update(row).eq('id', row.id).select('id');
-      if (error) throw new Error(error.message);
+      if (error) throw refusal(error);
       if (data && data.length) continue;
 
       const { error: insertError } = await client.from(table).insert(row);
-      if (insertError) throw new Error(insertError.message);
+      if (insertError) throw refusal(insertError);
     }
   }
 

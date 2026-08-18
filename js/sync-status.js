@@ -43,7 +43,23 @@ export function onSync(fn) {
  * case that does not clear itself and that nobody can discover by waiting.
  */
 export function syncMessage(result) {
-  if (!result || !result.error) return null;
-  const n = result.pending;
-  return `${n} change${n === 1 ? '' : 's'} not saved to the server. ${result.error}`;
+  if (!result) return null;
+  if (result.error) {
+    const n = result.pending;
+    return `${n} change${n === 1 ? '' : 's'} not saved to the server. ${result.error}`;
+  }
+
+  // A parked write is the queue's other bad ending, and it is the quieter of the two. Everything
+  // else went, the depth is zero, and by every measure this screen had until now the sync worked.
+  // What actually happened is that a row was set aside because the server will never take it, and
+  // saying nothing would mean a set somebody performed exists on one phone and nowhere else, with
+  // no way for anyone to find out. It stays said on every later sync, because parking is permanent
+  // until a person does something about it.
+  const parked = result.parked ?? [];
+  if (parked.length) {
+    const n = parked.length;
+    return `${n} change${n === 1 ? '' : 's'} the server will not accept, kept on this device. ${parked[0].last_error}`;
+  }
+
+  return null;
 }
