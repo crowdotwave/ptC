@@ -63,6 +63,29 @@ async function alignIdentity(storage, identity) {
   return true;
 }
 
+/**
+ * Whether this device is a signed in one whose library simply did not load.
+ *
+ * Pure, and separated out, because it is the guard on the most expensive path in this file and it
+ * is otherwise reachable only by taking a real phone offline.
+ *
+ * getSupabase() answers null when the CDN cannot be fetched, and reading a session needs the
+ * library, so offline there is no session to find. That is indistinguishable from signed out
+ * unless something on disk is consulted, and two things are: the identity this database was
+ * aligned to, and the actor whoami wrote the last time it worked.
+ *
+ * What it prevents: falling through to the local fallback aligns the database to 'local', and
+ * alignIdentity wipes on a change of person. A client who logged a session in a basement would
+ * open the app, still offline, to somebody else's seeded history with their own sets deleted.
+ * Nothing had reached the server, so deleted is gone. That path could not be reached while the app
+ * needed a network to load at all, and the service worker is what made it reachable.
+ */
+export function staysSignedIn({ client, identity, actor }) {
+  if (client) return false;
+  if (typeof identity !== 'string' || !identity.startsWith('auth:')) return false;
+  return Boolean(actor);
+}
+
 // Where each role belongs when it turns up somewhere it does not. The client logging screen and
 // the trainer view are different products sharing a deploy, not two tabs of one thing.
 const HOME = { trainer: 'trainer.html', client: 'index.html' };
@@ -93,6 +116,10 @@ function misrouted(role, actor) {
 }
 
 export async function boot({ allowLocal = true, role = null } = {}) {
+  // First, and not awaited. Every route out of this function needs the app to have opened, and the
+  // one that installs the thing which makes that possible offline must not be one of them.
+  installWorker();
+
   const storage = await openStorage();
   const client = await getSupabase();
   const session = await currentSession(client);
@@ -100,6 +127,22 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   // No session. Either run on fake data because somebody asked for it, or say so and let the
   // page redirect. Never quietly show a seeded trainer to a person who expected their own data.
   if (!session) {
+    // Checked before anything else, because everything below this either redirects to the sign in
+    // screen or wipes the database, and neither is the right answer for a phone that is merely off
+    // the network. See staysSignedIn: this device knows whose it is without asking the server.
+    const identity = await storage.getMeta(IDENTITY_KEY);
+    const known = await storage.getMeta(ACTOR_KEY);
+    // The explicit flag still wins. Somebody who asked for the seeded data by hand is not somebody
+    // this needs to protect from it, and that is the one case where the wipe is the intent.
+    if (!stickyFlag('local') && staysSignedIn({ client, identity, actor: known })) {
+      if (misrouted(role, known)) {
+        return { mode: 'wrong-role', storage, client: null, session: null, actor: known, error: null };
+      }
+      // No remote is attached, so every write queues and the connectivity listeners are not wired:
+      // there is nothing for them to flush to. The next load that reaches the library syncs.
+      return { mode: 'offline', storage, client: null, session: null, actor: known, error: null };
+    }
+
     const wantsLocal = stickyFlag('local') || !hasConfig() || !client;
     if (!wantsLocal || !allowLocal) {
       return { mode: 'signed-out', storage, client, session: null, actor: null, error: null };
@@ -127,6 +170,10 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   const wiped = await alignIdentity(storage, `auth:${session.user.id}`);
   const remote = createRemote({ client, storage });
   storage.setRemote(remote);
+  // Wired here rather than per page, because leaving the app and coming back online are the shell's
+  // business and every screen in it writes something. Only on the connected path: local mode has no
+  // remote, and a flush there would be three listeners arguing about an empty queue.
+  watchConnectivity(storage);
 
   let actor = null;
   let error = null;
@@ -174,6 +221,57 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   }
 
   return { mode: 'connected', storage, client, session, actor, error };
+}
+
+/**
+ * The two moments outside a page's control that are worth a flush.
+ *
+ * Hiding the page, because on a phone that is what leaving the app looks like, and it is the last
+ * moment the browser reliably runs anything. iOS freezes a backgrounded tab and can discard it
+ * outright, so a queue that is still full here is a queue that waits for the next page load, which
+ * on a phone somebody has put in their pocket can be days. `pagehide` as well as
+ * `visibilitychange`, because the two do not fire in the same situations and neither one covers
+ * the other: a tab put in the background fires only the first, and one being torn down fires only
+ * the second. A flush already in flight makes the extra call a no op.
+ *
+ * Coming back online, because the queue that could not be flushed a moment ago is exactly the one
+ * worth retrying, and until now nothing retried at all: a failed push waited for a page load the
+ * same as an unattempted one, so a set logged in a basement stayed on the phone all the way home.
+ *
+ * push() and not sync(): see js/storage.js. This fires while somebody may be mid set, and a pull
+ * would rewrite the rows the screen is holding.
+ *
+ * Best effort by construction. A flush that the browser kills on the way out loses nothing, the
+ * outbox is on disk and keeps every entry the server did not take.
+ */
+/**
+ * Installs the service worker, whose entire job is making the app open with no network.
+ *
+ * Resolved against this module rather than the page, so it registers the same worker and claims
+ * the same scope from any of the five pages that import this file, and on a deploy under a
+ * subpath rather than a domain root. Registering 'sw.js' relative to the page would work only
+ * while every page sits in one directory.
+ *
+ * Failure is ignored on purpose. No worker means no offline loading, which is exactly where this
+ * app was until now, and there is nothing a person holding a phone could do about it anyway.
+ * file:// has no service workers at all, and neither does a private window in some browsers.
+ */
+function installWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  if (!location.protocol.startsWith('http')) return;
+  navigator.serviceWorker.register(new URL('../sw.js', import.meta.url)).catch(() => {});
+}
+
+function watchConnectivity(storage) {
+  const flush = () => {
+    storage.push().then(publishSync, () => {});
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush();
+  });
+  window.addEventListener('pagehide', flush);
+  window.addEventListener('online', flush);
 }
 
 /**

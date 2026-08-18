@@ -18,12 +18,13 @@ import {
 import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue, collapseDuplicates } from './js/remote.js';
+import { createStorage } from './js/storage.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
-import { can } from './js/boot.js';
+import { can, staysSignedIn } from './js/boot.js';
 import {
   describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
-import { validate } from './js/schema.js';
+import { validate, OUTBOX_STORE } from './js/schema.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
@@ -1763,6 +1764,149 @@ test('rows written once are left exactly as they were queued', () => {
   eq(collapseDuplicates([entry('1'), entry('2'), entry('3')]).map((e) => e.record_id), ['1', '2', '3']);
 });
 
+// ------------------------------------------------------------------ getting a set off the phone
+//
+// storage.push(). The outbox used to be flushed by boot.js and by nothing else, so a set reached
+// the server when a page next loaded and at no other moment: log a session, pocket the phone, and
+// the trainer sees nothing until the app is opened again. These are about what push() must refuse
+// to do as much as what it does, since it runs while somebody is mid set.
+//
+// A fake driver rather than IndexedDB, because createStorage takes the driver as an argument and
+// nothing below reaches past the outbox. The adapter against a real database is dev.html.
+
+function queued(...ids) {
+  return ids.map((id) => ({
+    id,
+    op: 'put',
+    table: 'set_logs',
+    record_id: id,
+    payload: { id },
+    created_at: '2026-08-18T00:00:0' + ids.indexOf(id) + '.000Z',
+  }));
+}
+
+/** A storage over a fake outbox, plus a remote that records what it was asked to do. */
+function harness({ queue = [], push: onPush = null } = {}) {
+  let outbox = [...queue];
+  const calls = [];
+  const storage = createStorage({
+    async getAll(store) {
+      return store === OUTBOX_STORE ? [...outbox] : [];
+    },
+  });
+  const remote = {
+    async push(entries) {
+      calls.push('push');
+      if (onPush) return onPush(entries);
+      // What the real one does through storage._outboxDone: what landed stops being owed.
+      const sent = new Set(entries.map((entry) => entry.id));
+      outbox = outbox.filter((entry) => !sent.has(entry.id));
+      return { pushed: entries.length, blocked: null };
+    },
+    async pull() {
+      calls.push('pull');
+      return 0;
+    },
+  };
+  return { storage, remote, calls, rest: () => outbox };
+}
+
+test('a push sends what is queued and empties it', async () => {
+  const { storage, remote, rest } = harness({ queue: queued('a', 'b') });
+  storage.setRemote(remote);
+  const result = await storage.push();
+  eq(result.pushed, 2);
+  eq(result.pending, 0);
+  eq(result.error, null);
+  eq(rest().length, 0);
+});
+
+test('a push never pulls', async () => {
+  // The whole reason this is a second entry point. A pull rewrites local rows from the server and
+  // removes ones it no longer has, underneath a screen holding the program, the day and the
+  // session in memory.
+  const { storage, remote, calls } = harness({ queue: queued('a') });
+  storage.setRemote(remote);
+  await storage.push();
+  eq(calls, ['push']);
+  await storage.sync();
+  eq(calls, ['push', 'push', 'pull'], 'sync is still both directions');
+});
+
+test('a push with nothing owed does not touch the network', async () => {
+  // This runs on every set logged and every time the tab is hidden. The common case is an empty
+  // queue and the common case must be free.
+  const { storage, remote, calls } = harness();
+  storage.setRemote(remote);
+  const result = await storage.push();
+  eq(calls, []);
+  eq(result.pushed, 0);
+  eq(result.pending, 0);
+});
+
+test('a push with no remote reports the depth and keeps the queue', async () => {
+  const { storage, rest } = harness({ queue: queued('a', 'b') });
+  const result = await storage.push();
+  eq(result.remote, false);
+  eq(result.pending, 2);
+  eq(rest().length, 2, 'nothing is dropped for want of somewhere to send it');
+});
+
+test('a push never throws, because a gym floor is an ordinary place to be offline', async () => {
+  const { storage, remote } = harness({
+    queue: queued('a'),
+    push: () => { throw new Error('Failed to fetch'); },
+  });
+  storage.setRemote(remote);
+  const result = await storage.push();
+  eq(result.error, 'Failed to fetch');
+  eq(result.pending, 1, 'and the set is still owed');
+});
+
+test('a refused row is reported rather than swallowed', async () => {
+  const { storage, remote } = harness({
+    queue: queued('a'),
+    push: () => ({ pushed: 0, blocked: { table: 'clients', message: 'row-level security' } }),
+  });
+  storage.setRemote(remote);
+  eq((await storage.push()).error, 'clients: row-level security');
+});
+
+test('two flushes at once do not hand the server the same rows twice', async () => {
+  // They queue rather than coalesce. A set logged while a flush is in the air is not in the queue
+  // that flush read, so returning the in flight promise would call it sent while it is still here.
+  let inFlight = 0;
+  let overlapped = false;
+  const { storage, remote, calls } = harness({
+    queue: queued('a'),
+    push: async (entries) => {
+      inFlight += 1;
+      if (inFlight > 1) overlapped = true;
+      await Promise.resolve();
+      inFlight -= 1;
+      return { pushed: entries.length, blocked: null };
+    },
+  });
+  storage.setRemote(remote);
+  await Promise.all([storage.push(), storage.push(), storage.sync()]);
+  eq(overlapped, false);
+  eq(calls.filter((c) => c === 'push').length, 3, 'each one still ran, one after another');
+});
+
+test('a flush that fails does not poison the ones after it', async () => {
+  let first = true;
+  const { storage, remote } = harness({
+    queue: queued('a'),
+    push: () => {
+      if (first) { first = false; throw new Error('Failed to fetch'); }
+      return { pushed: 1, blocked: null };
+    },
+  });
+  storage.setRemote(remote);
+  eq((await storage.push()).error, 'Failed to fetch');
+  eq((await storage.push()).error, null, 'the chain survived, so coming back online works');
+});
+
 // ------------------------------------------------------------------ who may be where
 //
 // Capability, not role. A person who coaches and is also coached holds a trainers row and a
@@ -1785,6 +1929,43 @@ test('somebody who is both reaches both', () => {
   const both = { role: 'both', clientId: 'c1', trainerId: 't1', isStaff: true };
   ok(can(both, 'client'));
   ok(can(both, 'trainer'));
+});
+
+// ------------------------------------------------------------------ offline is not signed out
+//
+// staysSignedIn. getSupabase() answers null when the CDN cannot be fetched, and reading a session
+// needs the library, so offline there is no session to find and that looks exactly like signing
+// out. The difference has to come off the disk.
+//
+// What rides on it: the branch below this one aligns the database to 'local', and alignIdentity
+// wipes on a change of person. Getting this wrong shows a real client somebody else's seeded
+// history and deletes the sets they logged in a basement, which by definition never reached the
+// server. It was unreachable until the app could open with no network.
+
+const onDisk = { identity: 'auth:user-1', actor: { role: 'client', clientId: 'c1' } };
+
+test('a signed in device with no library is still signed in', () => {
+  ok(staysSignedIn({ client: null, ...onDisk }));
+});
+
+test('a library that loaded answers for itself', () => {
+  // A real client with a real session gone is a real sign out, and this must not paper over it.
+  ok(!staysSignedIn({ client: {}, ...onDisk }), 'the session it read is the answer, not the disk');
+});
+
+test('a device that has only ever held seeded data is not signed in', () => {
+  ok(!staysSignedIn({ client: null, identity: 'local', actor: onDisk.actor }));
+});
+
+test('a device nobody has signed in on is not signed in', () => {
+  ok(!staysSignedIn({ client: null, identity: null, actor: null }));
+  ok(!staysSignedIn({ client: null, identity: undefined, actor: onDisk.actor }));
+});
+
+test('an identity with nobody attached to it is not enough', () => {
+  // Signed in once, and whoami never landed. There is no actor to hand a screen, so this falls
+  // through to the sign in screen rather than opening on a null.
+  ok(!staysSignedIn({ client: null, identity: 'auth:user-1', actor: null }));
 });
 
 // The regression this replaced. The dev switch used to hand a client their coach's trainer id,

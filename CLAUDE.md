@@ -42,6 +42,22 @@ in the UI. UI-level filtering is a bug, not an implementation.
 - IndexedDB for local-first writes. Every write lands locally first and syncs in the
   background. The app must be fully usable with no network.
 - Deployed as static files. GitHub Pages is fine.
+- `sw.js` is a service worker, and its only job is making the page itself load with no network.
+  Network first, cache as the fallback, nothing precached, so a deploy is picked up on the next
+  load and there is no version constant for anyone to forget to bump. It does **not** sync in the
+  background: the Background Sync API is not implemented in WebKit, so on the phones this app is
+  used on there is no such thing as flushing the outbox while the app is closed. Getting sets off
+  the phone sooner is `push()` and the listeners in `js/boot.js`, which run in the page.
+
+**Offline is not signed out, and getting that wrong deletes somebody's training.** `getSupabase()`
+answers null when the CDN cannot be fetched, and reading a session needs the library, so with no
+network there is no session to find and it looks exactly like a sign out. The branch that used to
+follow aligned the database to `local`, and `alignIdentity` wipes on a change of person: a client
+who logged a session in a basement would open the app, still offline, to somebody else's seeded
+history with their own sets gone, and nothing had reached the server. `staysSignedIn` in
+`js/boot.js` answers it from disk instead, off the stored identity and actor, and returns a mode of
+`offline`. That path was unreachable while the app needed a network to load at all, which is the
+kind of thing adding a service worker does: it makes the offline paths real.
 
 ### Storage adapter
 
@@ -53,8 +69,16 @@ storage.get(table, id)
 storage.query(table, filters)
 storage.put(table, record)        // upsert, idempotent by id
 storage.delete(table, id)
+storage.push()                    // flush local queue to remote, and nothing else
 storage.sync()                    // flush local queue to remote, pull remote changes
 ```
+
+**`push()` is what runs while somebody is training, and `sync()` is not.** A pull reconciles: it
+rewrites local rows from the server and removes rows the server no longer has. Underneath a live
+logging screen that means changing the program, the day, or the session out from under somebody
+mid set, and that screen holds all three in memory and would never notice. Getting this client's
+own sets off the phone needs no pull at all. Both flushes are serialised against each other, since
+they drain one outbox and two in the air at once would send the same entries twice.
 
 ### Offline sync rules
 

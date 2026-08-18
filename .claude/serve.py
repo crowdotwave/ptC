@@ -16,6 +16,8 @@
 # nothing to gain from a conditional request against a local file.
 
 import http.server
+import os
+from pathlib import Path
 
 
 class NoStore(http.server.SimpleHTTPRequestHandler):
@@ -25,5 +27,9 @@ class NoStore(http.server.SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    # Serves the working directory, which is the repo root, exactly as `-m http.server` did.
+    # The repo root, found from this file rather than from the working directory. It used to serve
+    # whatever directory it happened to be started in, which is why .claude/launch.json quietly
+    # went on running `python -m http.server` instead: that one takes --directory and this one did
+    # not, so the launcher worked and the no-store header never shipped.
+    os.chdir(Path(__file__).resolve().parent.parent)
     http.server.test(HandlerClass=NoStore, port=8123, bind='127.0.0.1')

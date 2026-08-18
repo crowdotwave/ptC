@@ -23,6 +23,7 @@ import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from '.
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
+import { publishSync } from './js/sync-status.js';
 import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
 import {
   unit,
@@ -153,6 +154,46 @@ function write(task) {
   writeQueue = writeQueue.then(task).catch((error) => {
     showNotice(`Saved on this device only. ${error.message}`, 'attention');
   });
+}
+
+/**
+ * How long a flush waits for the tap after it. Comfortably inside a rest period, so a set is on
+ * the server before the next one is done, and long enough that undo, adjust, log again is one
+ * push rather than three.
+ */
+const FLUSH_DELAY_MS = 2000;
+let flushTimer = null;
+
+/**
+ * Get what has been logged off this phone, soon, without the screen waiting for it.
+ *
+ * The gap this closes: the outbox used to be flushed by boot.js and by nothing else, so a set
+ * reached the server when a page next loaded and at no other moment. Somebody could log an entire
+ * session, lock the phone and walk out, and their trainer would see nothing until they happened to
+ * open the app again. It worked as well as it did only because the tab bar is real links, so
+ * changing tabs is a page load.
+ *
+ * Behind the write queue, not beside it. The row this is called for is written by a task already
+ * on that queue, and a flush that read the outbox first would push everything except the set that
+ * prompted it, then report a clean queue.
+ *
+ * push() rather than sync(): a pull would rewrite the program, the day and the session while this
+ * screen holds all three in memory. See js/storage.js.
+ *
+ * Failure is silent here, and that is deliberate. The queue keeps whatever did not land, boot.js
+ * and the connectivity listeners will try again, and the one thing this screen owes somebody mid
+ * set is that nothing interrupts them over a network that is coming back on its own. A write the
+ * server actively refused is a different matter and still reaches the shell through publishSync,
+ * which nav.js surfaces quietly and without moving anything.
+ */
+function flushSoon() {
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    writeQueue = writeQueue
+      .then(() => state.storage.push())
+      .then(publishSync, () => {});
+  }, FLUSH_DELAY_MS);
 }
 
 /**
@@ -608,6 +649,9 @@ function saveNote() {
   const note = composeNote(state.feel, state.feelText);
   if (note === (state.sessionRecord.client_note ?? null)) return;
   stampSession({ client_note: note });
+  // Said once, at the end, on a screen somebody is about to close. For a calisthenics block this
+  // is most of what the coach needs, and it is the last thing written before the phone goes away.
+  flushSoon();
 }
 
 function shortDate(iso) {
@@ -775,6 +819,11 @@ function logSet() {
     state.sessionClosed = true;
     stampSession({ completed_at: new Date().toISOString() });
   }
+
+  // Per set rather than per session, because a session that is abandoned rather than ended is the
+  // normal way one finishes: the sets are real and the phone simply goes in a pocket. Waiting for
+  // a close that may never come would leave every one of them here.
+  flushSoon();
 }
 
 /**
@@ -832,6 +881,10 @@ function undoLast() {
     state.sessionClosed = false;
     stampSession({ completed_at: null });
   }
+
+  // A retraction is a row like any other and is owed to the server like any other. Leaving it here
+  // while the set it takes back has already gone means the trainer reads a set that was undone.
+  flushSoon();
 }
 
 /**
@@ -993,6 +1046,9 @@ function endSession() {
   if (!state.sessionRecord) return;
   state.sessionClosed = true;
   stampSession({ completed_at: new Date().toISOString() });
+  // The one moment somebody has said they are finished. Everything logged in this session is on
+  // the queue behind this, and the phone is about to go away.
+  flushSoon();
 }
 
 function showPr(isPr, exerciseName) {

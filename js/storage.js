@@ -5,7 +5,11 @@
 //   storage.query(table, filters, options)
 //   storage.put(table, record)        upsert, idempotent by id
 //   storage.delete(table, id)
+//   storage.push()                    flush local queue to remote, and nothing else
 //   storage.sync()                    flush local queue to remote, pull remote changes
+//
+// push() is the one to reach for while somebody is training. sync() pulls, and a pull rewrites
+// local rows underneath whatever screen is holding them.
 //
 // Local first: every write lands in IndexedDB and in an outbox queue inside one transaction,
 // then returns. Nothing in this file awaits the network. There is no remote backend wired up
@@ -88,6 +92,23 @@ function compare(a, b) {
 
 export function createStorage(driver) {
   let remote = null;
+  // One flush at a time. push() and sync() both drain the same outbox, and two of them in the air
+  // at once would hand the same entries to the server twice and then race to mark them done. They
+  // queue rather than coalesce: a set logged while a flush is in flight is not in the queue that
+  // flush read, so returning the in flight promise would report that set as sent when it is still
+  // on the phone.
+  let flushing = Promise.resolve();
+
+  function serialize(work) {
+    const next = flushing.then(work, work);
+    // The work below never throws, but the chain must survive one that does or every later flush
+    // on this page rejects with an error from a sync somebody has long since walked away from.
+    flushing = next.then(
+      () => {},
+      () => {},
+    );
+    return next;
+  }
 
   function outboxEntry(op, table, record) {
     return {
@@ -206,43 +227,97 @@ export function createStorage(driver) {
      * would surface as a broken screen during a set. The result says what happened and the
      * queue keeps everything that did not land.
      */
-    async sync() {
-      const queue = await storage.pending();
-      if (!remote) {
-        return { remote: false, pushed: 0, pulled: 0, pending: queue.length, error: null };
-      }
-      try {
-        const { pushed, blocked } = await remote.push(queue);
+    /**
+     * Flush the local queue to the remote and stop there. No pull.
+     *
+     * The half of sync() that is safe to run during a workout. Until this existed the only flush
+     * was the one boot.js does, so a set reached the server when a page next loaded and at no
+     * other moment: somebody could log a whole session, lock the phone, and their trainer would
+     * see nothing until they happened to open the app again. It worked at all only because the
+     * tab bar is real links, so changing tabs is a page load.
+     *
+     * Push without pull, deliberately, and that is the reason this is a second entry point rather
+     * than an argument to sync(). A pull reconciles: it rewrites local rows from the server and
+     * removes rows the server no longer has. Doing that underneath a live logging screen would
+     * change the program, the day, or the session out from under somebody mid set, and the screen
+     * holds all of that in memory and would not notice. Getting this client's own sets off the
+     * phone needs none of it.
+     *
+     * Never throws, same as sync(), and reports in the same shape so both can be published to the
+     * one place the shell reads. `pulled` is always 0 rather than absent, because a caller reading
+     * a missing field as undefined would be reading it as a failure.
+     */
+    async push() {
+      return serialize(async () => {
+        const queue = await storage.pending();
+        if (!remote) {
+          return { remote: false, pushed: 0, pulled: 0, pending: queue.length, error: null };
+        }
+        // Nothing owed. Worth the early return: this runs on every tab hide and every set logged,
+        // and the common case by far is a queue that is already empty.
+        if (!queue.length) {
+          return { remote: true, pushed: 0, pulled: 0, pending: 0, error: null };
+        }
+        try {
+          const { pushed, blocked } = await remote.push(queue);
+          return {
+            remote: true,
+            pushed,
+            pulled: 0,
+            pending: (await storage.pending()).length,
+            error: blocked ? `${blocked.table}: ${blocked.message}` : null,
+          };
+        } catch (error) {
+          return {
+            remote: true,
+            pushed: 0,
+            pulled: 0,
+            pending: (await storage.pending()).length,
+            error: error.message,
+          };
+        }
+      });
+    },
 
-        // A blocked push must never stop the pull, and this used to return here.
-        //
-        // The two directions are independent. A write this device cannot get rid of says nothing
-        // about the rows the server is willing to hand over, so starving the pull turns one
-        // refused row into an app that has quietly stopped receiving anything at all. Measured on
-        // a real account: a single rejected preference write blocked every incoming row for three
-        // days, and because a blocked sync still reports its error to nobody in particular, no
-        // screen ever said so. The client list simply went stale and looked fine.
-        //
-        // Pulling anyway is safe. Reconciliation already refuses to delete a row that has an
-        // outbox entry waiting, so local work that has not reached the server survives a pull
-        // that does not know about it yet.
-        const pulled = await remote.pull();
-        return {
-          remote: true,
-          pushed,
-          pulled,
-          pending: (await storage.pending()).length,
-          error: blocked ? `${blocked.table}: ${blocked.message}` : null,
-        };
-      } catch (error) {
-        return {
-          remote: true,
-          pushed: 0,
-          pulled: 0,
-          pending: (await storage.pending()).length,
-          error: error.message,
-        };
-      }
+    async sync() {
+      return serialize(async () => {
+        const queue = await storage.pending();
+        if (!remote) {
+          return { remote: false, pushed: 0, pulled: 0, pending: queue.length, error: null };
+        }
+        try {
+          const { pushed, blocked } = await remote.push(queue);
+
+          // A blocked push must never stop the pull, and this used to return here.
+          //
+          // The two directions are independent. A write this device cannot get rid of says nothing
+          // about the rows the server is willing to hand over, so starving the pull turns one
+          // refused row into an app that has quietly stopped receiving anything at all. Measured on
+          // a real account: a single rejected preference write blocked every incoming row for three
+          // days, and because a blocked sync still reports its error to nobody in particular, no
+          // screen ever said so. The client list simply went stale and looked fine.
+          //
+          // Pulling anyway is safe. Reconciliation already refuses to delete a row that has an
+          // outbox entry waiting, so local work that has not reached the server survives a pull
+          // that does not know about it yet.
+          const pulled = await remote.pull();
+          return {
+            remote: true,
+            pushed,
+            pulled,
+            pending: (await storage.pending()).length,
+            error: blocked ? `${blocked.table}: ${blocked.message}` : null,
+          };
+        } catch (error) {
+          return {
+            remote: true,
+            pushed: 0,
+            pulled: 0,
+            pending: (await storage.pending()).length,
+            error: error.message,
+          };
+        }
+      });
     },
 
     /** Row counts per table. Used by the shell and by the seed to decide if it should run. */
