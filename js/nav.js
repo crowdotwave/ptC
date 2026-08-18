@@ -118,12 +118,55 @@ function wireAccount({ storage, client, session }) {
  * it. That is deliberate and it is the same reason sign out is not there: that screen must never
  * scroll, and a person mid workout can do nothing useful about a sync anyway.
  */
-function wireSyncStatus() {
+const esc = (v) =>
+  String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+/**
+ * What a parked write actually was, for the one person who can do anything about it.
+ *
+ * A parked row is kept on the device with its whole payload, and until now nothing showed more
+ * than the error string it came back with. That is enough to know something is wrong and not
+ * nearly enough to fix it: six rows sat on a phone refused for failing a reps check, and working
+ * out what had written a zero meant reasoning backwards from what was missing on the server,
+ * because the only copy of the answer was in a queue nobody could read.
+ *
+ * Staff only, and that is not about secrecy, it is about who the sentence is for. A client already
+ * has the part that concerns them, which is that a change did not save. A column list is for
+ * whoever is going to go and find the bug.
+ *
+ * Read only by construction. No retry, no delete, no edit: every one of those is a decision about
+ * somebody's training data, and this is a window rather than a workshop.
+ */
+function parkedRows(entries) {
+  return entries
+    .map((entry) => {
+      const fields = Object.entries(entry.payload ?? {})
+        .filter(([, value]) => value !== null && value !== undefined && value !== '')
+        .map(([key, value]) => `${key} ${value}`)
+        .join(' · ');
+      return (
+        `<li class="account__parkedrow">` +
+        `<span class="account__parkedwhat">${esc(entry.table)} ${esc(entry.op)}</span> ` +
+        `<span class="num">${esc(entry.record_id)}</span>` +
+        `<span class="account__parkedwhy">${esc(entry.last_error)}</span>` +
+        `<span class="account__parkedrow num">${esc(fields)}</span>` +
+        `</li>`
+      );
+    })
+    .join('');
+}
+
+function wireSyncStatus(actor) {
   const footers = [...document.querySelectorAll('.account')];
   if (!footers.length) return;
 
   onSync((result) => {
     const message = syncMessage(result);
+    const parked = result?.parked ?? [];
+    // The detail is worth opening only when there is something behind it and somebody who can read
+    // it. Everyone else gets the sentence, which is the whole of what a client needs.
+    const detailed = parked.length > 0 && actor?.isStaff === true;
+
     for (const footer of footers) {
       const existing = footer.querySelector('[data-sync-status]');
       if (!message) {
@@ -138,7 +181,15 @@ function wireSyncStatus() {
         // because of it.
         footer.insertBefore(node, footer.querySelector('[data-signout]'));
       }
-      node.textContent = message;
+
+      if (!detailed) {
+        node.textContent = message;
+        continue;
+      }
+      // Closed to begin with. It is the same quiet line it was, that now opens.
+      node.innerHTML =
+        `<details class="account__parked"><summary>${esc(message)}</summary>` +
+        `<ul class="account__parkedlist">${parkedRows(parked)}</ul></details>`;
     }
   });
 }
@@ -152,7 +203,7 @@ function wireSyncStatus() {
 export function mountShell(booted, current) {
   renderTabs(booted.actor, current);
   wireAccount(booted);
-  wireSyncStatus();
+  wireSyncStatus(booted.actor);
 }
 
 // The old name, still used by pages that only ever wanted the sign out wiring.

@@ -3433,6 +3433,42 @@ button.navlink:disabled {
   color: var(--text-secondary);
 }
 
+/* A parked write, opened. Closed it is the same quiet sentence it has always been, so nothing here
+ * changes what the footer looks like until somebody asks it a question. */
+.account__parked > summary {
+  cursor: pointer;
+}
+
+.account__parkedlist {
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+}
+
+/* The row's own columns wrap rather than scroll: this sits in a footer on a phone, and a horizontal
+ * scroller inside a footer is a thing nobody finds. */
+.account__parkedrow {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: var(--t-small);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.account__parkedwhat {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+/* The reason on its own line, because it is the sentence somebody reads first and the one they
+ * will be pasting to whoever fixes it. */
+.account__parkedwhy {
+  display: block;
+  color: var(--text-primary);
+}
+
 .account__out {
   margin-left: auto;
   min-height: var(--tap);

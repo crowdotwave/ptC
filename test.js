@@ -18,7 +18,8 @@ import {
 import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment } from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
-import { syncMessage } from './js/sync-status.js';
+import { syncMessage, publishSync } from './js/sync-status.js';
+import { mountShell } from './js/nav.js';
 import { createStorage } from './js/storage.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can, staysSignedIn } from './js/boot.js';
@@ -2038,6 +2039,56 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   eq(later.parked.length, 1, 'read off the disk, not off what this push happened to do');
   ok(syncMessage(later).includes('set_logs_reps_check'), 'and it names the reason');
   ok(syncMessage(later).includes('kept on this device'));
+});
+
+// ------------------------------------------------------------------ reading a parked write
+//
+// A parked row is kept with its whole payload and nothing showed more than the error string, so
+// working out what had written a zero meant reasoning backwards from what was missing on the
+// server. The answer was on the phone the entire time.
+
+function footerAfterSync({ isStaff, parked }) {
+  const footer = document.createElement('footer');
+  footer.className = 'account';
+  footer.innerHTML = '<button data-signout hidden></button>';
+  document.body.appendChild(footer);
+  mountShell({ actor: { clientId: 'c1', trainerId: null, isStaff }, storage: null, client: null, session: null }, 'log');
+  publishSync({ remote: true, pushed: 76, pulled: 0, pending: 0, parked, error: null });
+  const out = { details: footer.querySelector('details'), text: footer.textContent };
+  footer.remove();
+  return out;
+}
+
+const parkedSet = [{
+  id: 'o1',
+  op: 'put',
+  table: 'set_logs',
+  record_id: 'row-1',
+  last_error: 'violates check constraint "set_logs_reps_check"',
+  payload: { id: 'row-1', set_index: 4, weight_kg: 0, reps: 0, is_warmup: false },
+}];
+
+test('staff can read what the parked write actually was', () => {
+  const { details, text } = footerAfterSync({ isStaff: true, parked: parkedSet });
+  ok(details, 'it opens');
+  ok(text.includes('set_logs_reps_check'), 'the reason');
+  ok(text.includes('reps 0'), 'and the column that caused it, which is the whole point');
+  ok(text.includes('row-1'), 'named, so it can be found again');
+});
+
+test('a client gets the sentence and not the column list', () => {
+  // Not secrecy, audience. A client already has the part that concerns them, which is that
+  // something did not save. A column list is for whoever goes and finds the bug.
+  const { details, text } = footerAfterSync({ isStaff: false, parked: parkedSet });
+  eq(details, null);
+  ok(text.includes('kept on this device'), 'they are still told');
+  ok(!text.includes('reps 0'));
+});
+
+test('nothing parked leaves the footer as it was', () => {
+  const { details, text } = footerAfterSync({ isStaff: true, parked: [] });
+  eq(details, null);
+  eq(text.trim(), '', 'a sync with nothing to say says nothing');
 });
 
 // ------------------------------------------------------------------ two labels, one spot
