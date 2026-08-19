@@ -462,10 +462,11 @@ function renderOverviewPanel() {
   ui.overviewPos.textContent = positionLine(rows);
   ui.overviewBody.innerHTML = renderOverview(rows);
 
-  // Switching days is only offered before the first set, because a session row is filed under a
-  // day the moment one is logged. Offering a control that answers with a refusal is worse than
-  // not offering it, so the chips leave rather than argue.
-  ui.dayPicker.hidden = state.logged.length > 0;
+  // Always offered. It used to leave once a set was logged, because it could only have answered
+  // with a refusal at that point, and a control that argues is worse than one that is not there.
+  // Now that it works mid session, the moment it used to disappear is the moment it is most
+  // wanted: one or two sets into the wrong day is when somebody notices.
+  ui.dayPicker.hidden = false;
 }
 
 /**
@@ -1180,21 +1181,35 @@ function renderDayPicker(snapshot, sessions) {
 const escapeText = (v) =>
   String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-/** Switching days mid session would orphan what is already logged, so it is only offered
- *  before the first set. */
+/**
+ * Moves this session onto another day, at any point in it.
+ *
+ * It used to refuse once a set was logged, on the grounds that switching would orphan what was
+ * already there. The refusal was the worse end of that trade. Starting the wrong day is an
+ * ordinary mistake, it is usually noticed one or two sets in, and the app's answer was a sentence
+ * telling somebody to finish or end a session they had just said they did not mean to start.
+ *
+ * What that produced, on a real workout: the client undid every set one at a time to get the
+ * picker to open, trained the day he actually wanted, and the session still read as the wrong one
+ * afterwards. Three walls in one workout, and he knows this app better than anybody. Somebody
+ * newer does not improvise around it, they stop logging.
+ *
+ * So the day moves and the sets come with it, because they happened. Anything whose lift is in the
+ * new day gets its seat back. Anything whose lift is not stays in the session and stays in
+ * history, and undo takes it back one tap at a time exactly as it always did. Nothing is deleted
+ * here on somebody's behalf: this screen has no destructive action that runs without being asked
+ * for, and "I picked the wrong day" is not consent to throw away a set.
+ */
 async function chooseDay(dayIndex) {
-  if (state.logged.length) {
-    showNotice('You have already logged a set. Finish or end this session first.');
-    return;
-  }
   const picked = sortedDays(state.assignment.snapshot).find((d) => d.day_index === Number(dayIndex));
   if (!picked || picked.day_index === state.day.day_index) return;
 
+  const carried = state.logged.length;
   state.day = picked;
 
-  // An open session with nothing left in it, because every set was undone. It is still the row
-  // the next set will be written against, so it has to follow the day picker or the session would
-  // file itself under the day the client changed their mind about.
+  // The session follows the picker, or it files itself under the day the client changed their mind
+  // about. This is the row the next set is written against and the row every chart reads the day
+  // from, so it has to move whether it has sets in it or not.
   if (state.sessionRecord) {
     const moved = {
       ...state.sessionRecord,
@@ -1206,22 +1221,73 @@ async function chooseDay(dayIndex) {
   }
 
   const sessions = await loadSessions(state.storage, state.client.id);
-  // Only reachable with nothing logged, so there is nothing to replay. The session row can still
-  // exist, if every set in it was undone, and it stays excluded for the same reason as on load.
-  state.plan = await buildPlan(state.storage, picked, sessions, {
-    exclude: state.sessionRecord ? state.sessionRecord.id : null,
-  });
-  state.cursor = 0;
+  await openDayOn(picked, sessions, state.sessionRecord);
+
   state.returnTo = null;
-  const first = state.plan[0];
-  if (first) {
-    state.weightKg = first.weightKg;
-    state.reps = first.reps;
-  }
   renderDayPicker(state.assignment.snapshot, sessions);
-  clearNotice();
   stopRest();
+  clearNotice();
+
+  // Closed, like tapping a lift closes it. The panel is where a choice is made and the choice has
+  // been made, so the screen goes back to the set that is now next. It also has to close for the
+  // line below to be readable at all: paintNotice drops a neutral message while the panel is up,
+  // deliberately, because the panel is already a full answer to where somebody is.
+  closeOverview({ render: false });
+
+  // Named, and counted. Moving a day changes what every other number on this screen means, and the
+  // sets that came along are not on the new day's list when their lift is not in it, so silence
+  // would leave somebody who tapped a chip by accident unable to tell whether their work survived.
+  if (carried) {
+    showNotice(`Moved to ${dayTitle(picked)}. ${carried} logged ${carried === 1 ? 'set' : 'sets'} came too.`);
+  }
   render();
+}
+
+/**
+ * Opens a day: builds its plan and puts whatever this session already has back on it.
+ *
+ * One function because two callers do this and they used to do it differently. Arriving on a day
+ * after a locked phone replayed the rows onto the plan; arriving on a day by tapping the picker did
+ * not, because the picker refused to work once a set had been logged and therefore never had rows
+ * to put back. Removing that refusal made the difference matter, and a second copy of the replay is
+ * how the two would drift.
+ *
+ * A row whose lift is not in this day at all keeps its seat nowhere and its place in history
+ * everywhere: replaySession leaves it out of the walk and the row itself is untouched. That is the
+ * honest handling of somebody who logged two sets of the wrong day's opener before noticing. The
+ * sets happened. They are simply not part of the day now on screen, and undo still takes them back
+ * one tap at a time for as long as the session is open.
+ */
+async function openDayOn(day, sessions, session) {
+  state.plan = await buildPlan(state.storage, day, sessions, {
+    exclude: session ? session.id : null,
+  });
+
+  const rows = session ? await state.storage.query('set_logs', { session_id: session.id }) : [];
+  if (rows.length) {
+    const replayed = replaySession(state.plan, rows, state.best);
+    state.plan = replayed.plan;
+    state.logged = replayed.logged;
+    state.cursor = replayed.cursor;
+    for (const done of replayed.logged) done.entry.status = 'logged';
+  } else {
+    state.logged = [];
+    state.cursor = 0;
+  }
+
+  // What the steppers read on arrival, through the same rule a tap on Log set goes through, so a
+  // locked phone does not undo an adjustment the way logging a set used to. After a day move the
+  // carry stops on its own: nextSteppers compares the lift, and the lift on the new day is a
+  // different item, so the numbers come from the new day's plan rather than the old day's last set.
+  const first = state.plan[state.cursor];
+  if (!first) return;
+
+  const last = state.logged[state.logged.length - 1];
+  const steppers = last
+    ? nextSteppers(last, last.entry, first)
+    : { weightKg: first.weightKg, reps: first.reps };
+  state.weightKg = steppers.weightKg;
+  state.reps = steppers.reps;
 }
 
 function wire() {
@@ -1416,18 +1482,12 @@ async function main() {
     return;
   }
 
-  state.plan = await buildPlan(storage, state.day, sessions, { exclude: openDay ? open.id : null });
+  // The same function the day picker goes through. A set on disk is a set that was done, wherever
+  // in the day it sits, and both ways of arriving on a day have to put those sets back the same
+  // way or they are two answers to one question.
+  await openDayOn(state.day, sessions, openDay ? open : null);
 
   if (openDay) {
-    const rows = await storage.query('set_logs', { session_id: open.id });
-    const replayed = replaySession(state.plan, rows, state.best);
-    state.plan = replayed.plan;
-    state.logged = replayed.logged;
-    state.cursor = replayed.cursor;
-    // A set on disk is a set that was done, wherever in the day it sits. Nothing marks a lift as
-    // skipped, because a skip writes no row and inventing one from the gaps would turn "not yet"
-    // into "not happening" on the client's behalf.
-    for (const done of replayed.logged) done.entry.status = 'logged';
     state.sessionRecord = open;
     // Already on disk, so the next write must not try to insert it again.
     state.sessionWritten = true;
@@ -1439,20 +1499,6 @@ async function main() {
     state.feel = already.feel;
     state.feelText = already.text;
     state.feelTyping = Boolean(already.text);
-  }
-
-  const first = state.plan[state.cursor];
-  if (first) {
-    // Through the same rule a tap on Log set goes through, so a locked phone does not undo an
-    // adjustment the way logging a set used to. The last row of a resumed session is the set that
-    // would have moved the steppers, and the entry it was logged against is what says whether it
-    // moved them.
-    const last = state.logged[state.logged.length - 1];
-    const steppers = last
-      ? nextSteppers(last, last.entry, first)
-      : { weightKg: first.weightKg, reps: first.reps };
-    state.weightKg = steppers.weightKg;
-    state.reps = steppers.reps;
   }
 
   renderDayPicker(snapshot, sessions);
