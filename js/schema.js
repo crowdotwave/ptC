@@ -69,7 +69,7 @@ export const TABLES = {
       // 2.5 with the smallest pair of plates, a stack moves a whole plate at a time, and a
       // dumbbell rack jumps in whatever the rack was bought in. The stepper reads this, so a
       // global constant would offer the client weights the gym cannot make.
-      increment_kg: { type: NUMERIC },
+      increment_kg: { type: NUMERIC, above: 0 },
     },
   },
 
@@ -120,10 +120,10 @@ export const TABLES = {
       variation: { type: TEXT, nullable: true },
       // Nullable because the sheet says NA on 14 rows of 61: the stair master, the cardio
       // intervals, and every row of a six minute AMRAP.
-      target_sets: { type: INT, nullable: true },
+      target_sets: { type: INT, nullable: true, above: 0 },
       // Nullable for the same reason, plus the 16 rows whose Reps cell is a distance or a
       // duration rather than a count. target_reps_text always carries what the trainer typed.
-      target_reps_low: { type: INT, nullable: true },
+      target_reps_low: { type: INT, nullable: true, above: 0 },
       target_reps_high: { type: INT, nullable: true },
       target_reps_text: { type: TEXT, nullable: true },
       // What the trainer actually prescribes. Across 61 real rows this was RIR on 37 of them
@@ -131,7 +131,7 @@ export const TABLES = {
       // text is what gets shown.
       target_load: { type: TEXT, nullable: true },
       target_rpe: { type: NUMERIC, nullable: true },
-      rest_seconds: { type: INT, nullable: true },
+      rest_seconds: { type: INT, nullable: true, min: 0 },
       notes: { type: TEXT },
       // Whether the client logs this row at all. False for cardio intervals and anything else
       // where a number would be invented rather than measured.
@@ -159,7 +159,7 @@ export const TABLES = {
       // when building the program. Used only when the client has no history for the exercise,
       // and never again after that. Null means the trainer did not say, which is a real answer
       // for a client nobody has seen lift yet. See js/prefill.js for what happens then.
-      starting_weight_kg: { type: NUMERIC, nullable: true },
+      starting_weight_kg: { type: NUMERIC, nullable: true, above: 0 },
     },
   },
 
@@ -210,9 +210,9 @@ export const TABLES = {
     fields: {
       session_id: { type: UUID, ref: 'sessions' },
       exercise_id: { type: UUID, ref: 'exercises' },
-      set_index: { type: INT },
+      set_index: { type: INT, min: 0 },
       // Always kilograms. Pounds are a display conversion only.
-      weight_kg: { type: NUMERIC },
+      weight_kg: { type: NUMERIC, min: 0 },
       // Null on a carry or a sled, where the load is the whole point and there are no reps to
       // count. Anything that computes volume or an estimated 1RM skips these rows rather than
       // inventing a number for them.
@@ -222,12 +222,14 @@ export const TABLES = {
       // argument that beat it is that doubling the taps on the one control used most under
       // fatigue costs more than the information is worth. A partial rep goes in the session
       // note, where it costs nothing to write and nothing to read.
-      reps: { type: INT, nullable: true },
+      // Above zero or absent, never zero: a set of no reps is not a set, and the column is
+      // nullable precisely so a hold has somewhere to say it has no rep count.
+      reps: { type: INT, nullable: true, above: 0 },
       // Rounds completed in an AMRAP block. Null everywhere else.
-      rounds: { type: INT, nullable: true },
+      rounds: { type: INT, nullable: true, above: 0 },
       // How long a hold lasted, in seconds. An L sit and a hollow body have no reps and no
       // load, so this is the whole of what happened. Null everywhere else.
-      hold_seconds: { type: NUMERIC, nullable: true },
+      hold_seconds: { type: NUMERIC, nullable: true, above: 0 },
       rpe: { type: NUMERIC, nullable: true },
       is_warmup: { type: BOOL },
       logged_at: { type: TS },
@@ -338,6 +340,25 @@ export function validate(table, record) {
     }
     if (spec.enum && !spec.enum.includes(value)) {
       throw new Error(`${table}.${name} must be one of ${spec.enum.join(', ')}`);
+    }
+    // The database's own check constraints, said again here.
+    //
+    // Not belt and braces. Until this existed the two disagreed about what a row could be, and a
+    // disagreement in this direction is the expensive one: the local write succeeds, the row is on
+    // disk, it shows in the client's own history, and the server refuses it forever. The queue
+    // stops at the first refusal, so one such row parks every write behind it, and nothing on the
+    // logging screen says a word. That is not the description of a risk, it is what happened: a
+    // set carrying reps of zero held 82 changes on a phone for two days.
+    //
+    // Loud here is the point. A row that cannot be delivered is a bug in whatever wrote it, and
+    // the moment of the write is the only place that still knows what that was. `write()` in
+    // app.js turns this into "Saved on this device only", which is a poor thing to read mid set
+    // and a far better one than losing the set silently a week later.
+    if (spec.above !== undefined && !(value > spec.above)) {
+      throw new Error(`${table}.${name} must be greater than ${spec.above}, got ${value}`);
+    }
+    if (spec.min !== undefined && !(value >= spec.min)) {
+      throw new Error(`${table}.${name} must be at least ${spec.min}, got ${value}`);
     }
     out[name] = value;
   }

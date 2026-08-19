@@ -2041,6 +2041,101 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   ok(syncMessage(later).includes('kept on this device'));
 });
 
+// ------------------------------------------------------------------ what the database will take
+//
+// js/schema.js says the same thing the check constraints say. The two disagreed, and the
+// disagreement ran the expensive way: the local write succeeded, the row sat on disk showing in
+// the client's own history, and the server refused it forever. One such row parked 82 changes on
+// a phone for two days with nothing on screen saying so.
+
+const setRow = (over = {}) => ({
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  created_at: '2026-08-18T00:00:00.000Z',
+  session_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  exercise_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  set_index: 0,
+  weight_kg: 60,
+  reps: 8,
+  rounds: null,
+  hold_seconds: null,
+  rpe: null,
+  is_warmup: false,
+  logged_at: '2026-08-18T00:00:00.000Z',
+  supersedes_id: null,
+  is_void: false,
+  is_extra: false,
+  device_id: 'device',
+  ...over,
+});
+
+const refuses = (record, wanted) => {
+  try {
+    validate('set_logs', record);
+  } catch (error) {
+    ok(error.message.includes(wanted), `expected a message about ${wanted}, got ${error.message}`);
+    return;
+  }
+  throw new Error(`accepted a row the server would refuse: ${wanted}`);
+};
+
+test('a set of zero reps is refused where it is written, not where it is sent', () => {
+  refuses(setRow({ reps: 0 }), 'reps');
+  refuses(setRow({ reps: -1 }), 'reps');
+});
+
+test('a hold with no rep count is still fine, because that is what null is for', () => {
+  eq(validate('set_logs', setRow({ reps: null })).reps, null);
+  eq(validate('set_logs', setRow({ reps: 12 })).reps, 12);
+});
+
+test('the rest of the set_logs constraints are said here too', () => {
+  refuses(setRow({ rounds: 0 }), 'rounds');
+  refuses(setRow({ hold_seconds: 0 }), 'hold_seconds');
+  refuses(setRow({ weight_kg: -0.5 }), 'weight_kg');
+  refuses(setRow({ set_index: -1 }), 'set_index');
+});
+
+test('a bodyweight set at zero load is not the same as a set of zero reps', () => {
+  // weight_kg is >= 0 and reps is > 0, exactly as the database has it. A pushup weighs nothing
+  // and is still a set.
+  eq(validate('set_logs', setRow({ weight_kg: 0 })).weight_kg, 0);
+  eq(validate('set_logs', setRow({ set_index: 0 })).set_index, 0);
+});
+
+test('a program cannot ask for zero sets or zero reps either', () => {
+  const item = {
+    id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    created_at: '2026-08-18T00:00:00.000Z',
+    updated_at: '2026-08-18T00:00:00.000Z',
+    day_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    exercise_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    order_index: 0,
+    group_label: '1A',
+    variation: null,
+    target_sets: 3,
+    target_reps_low: 8,
+    target_reps_high: null,
+    target_reps_text: null,
+    target_rpe: null,
+    target_load: null,
+    rest_seconds: 90,
+    starting_weight_kg: null,
+    notes: '',
+    is_logged: true,
+    log_mode: 'weight_reps',
+  };
+  eq(validate('template_items', item).target_sets, 3, 'a good row still goes through');
+  let refused = 0;
+  for (const bad of [{ target_sets: 0 }, { target_reps_low: 0 }, { rest_seconds: -1 }, { starting_weight_kg: 0 }]) {
+    try {
+      validate('template_items', { ...item, ...bad });
+    } catch {
+      refused += 1;
+    }
+  }
+  eq(refused, 4);
+});
+
 // ------------------------------------------------------------------ the hold that became a zero
 //
 // The whole chain, from a real workout. A2 LOWER opens 1A back extension, 45 second hold, and 1B
