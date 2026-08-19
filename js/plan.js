@@ -17,6 +17,29 @@
 // same as remembered, and the entry says which it is, because "Last time 60 kg for 12" about a set
 // that was never performed is the screen inventing a history it does not have.
 
+/**
+ * The smallest load change a lift can make: the live answer where there is one, the frozen answer
+ * where there is not.
+ *
+ * Live first, and that part is deliberate. The increment describes the equipment in the room
+ * rather than the program, so a gym that swaps a stack should reach an assignment written months
+ * ago. What was missing is the other half: a client who cannot read the exercise row got no
+ * increment at all and every stepper on the screen fell back to 2.5 kg.
+ *
+ * That is not a hypothetical reader. `exercises_select` hands a client the global rows, their own
+ * trainer's rows, and nothing else, so the moment a program is built out of a second trainer's
+ * exercises, the person doing the program cannot see a single one of them. Same for anybody whose
+ * coach changes. The snapshot has carried increment_kg since it was first written, precisely so a
+ * phone is never dependent on reaching the library, and this was the one place still reaching.
+ *
+ * Both callers go through here rather than each writing the fallback, because this file is full of
+ * comments about expressions that existed in several places with different endings, and the load
+ * on the bar and the size of the tap that changes it must never be two different answers.
+ */
+export function incrementOf(item, live) {
+  return live ?? item?.exercise?.increment_kg ?? null;
+}
+
 /** The second number on a set_logs row, whichever of the three columns is carrying it. */
 export function countOf(row) {
   return row?.reps ?? row?.rounds ?? row?.hold_seconds ?? 1;

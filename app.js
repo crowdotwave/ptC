@@ -17,7 +17,7 @@ import { mountShell } from './js/nav.js';
 import { lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
-import { planForItem, nextSteppers } from './js/plan.js';
+import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
@@ -141,7 +141,7 @@ const state = {
 
 /** The smallest load change this lift can make, in whatever unit is being read. */
 function stepSize(entry = currentEntry()) {
-  return snapStep(entry && state.increments.get(entry.item.exercise_id));
+  return snapStep(entry && incrementOf(entry.item, state.increments.get(entry.item.exercise_id)));
 }
 
 // ------------------------------------------------------------------ optimistic writes
@@ -309,7 +309,7 @@ async function buildPlan(storage, day, sessions, { exclude = null } = {}) {
     const opening = openingWeight({
       startingWeightKg: item.starting_weight_kg ?? null,
       equipment: item.exercise?.equipment ?? state.equipment.get(item.exercise_id) ?? null,
-      incrementKg: state.increments.get(item.exercise_id),
+      incrementKg: incrementOf(item, state.increments.get(item.exercise_id)),
     });
 
     plan.push(...planForItem(item, previous, opening));
@@ -1381,7 +1381,10 @@ async function main() {
   }
 
   // Read live rather than from the frozen snapshot: the increment describes the equipment in
-  // the room, not the program, so a rack that changes should reach an old assignment too.
+  // the room, not the program, so a rack that changes should reach an old assignment too. Where
+  // this query returns nothing for a lift, incrementOf falls back to the snapshot, because a
+  // client can only read their own trainer's exercises and a program built from somebody else's
+  // is a program whose whole library is invisible to the person doing it.
   const exercises = await storage.query('exercises', {});
   state.increments = new Map(exercises.map((row) => [row.id, row.increment_kg]));
   state.equipment = new Map(exercises.map((row) => [row.id, row.equipment]));

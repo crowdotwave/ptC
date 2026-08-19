@@ -31,7 +31,7 @@ import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
 import { smoothPath, renderRepsAtLoadChart } from './js/charts.js';
-import { planForItem, setCountOf, countOf, nextSteppers } from './js/plan.js';
+import { planForItem, setCountOf, countOf, nextSteppers, incrementOf } from './js/plan.js';
 import {
   openSession,
   replaySession,
@@ -2039,6 +2039,35 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   eq(later.parked.length, 1, 'read off the disk, not off what this push happened to do');
   ok(syncMessage(later).includes('set_logs_reps_check'), 'and it names the reason');
   ok(syncMessage(later).includes('kept on this device'));
+});
+
+// ------------------------------------------------------------------ the increment, live or frozen
+//
+// The live exercises row is the right answer, because an increment describes the equipment in the
+// room rather than the program. The bug was having no other answer: exercises_select hands a
+// client the global rows and their own trainer's rows and nothing else, so a program built out of
+// a second trainer's exercises is a program whose entire library that person cannot read. Every
+// stepper then fell back to 2.5 kg, which is not what anybody set and is silent about it.
+
+const liftWith = (incrementKg) => ({
+  exercise_id: 'leg-press',
+  exercise: { id: 'leg-press', name: 'Leg Press', increment_kg: incrementKg },
+});
+
+test('the live increment wins, because a gym that swaps a stack should reach an old program', () => {
+  eq(incrementOf(liftWith(2.5), 5), 5);
+});
+
+test('a lift whose exercise row cannot be read falls back to the frozen one', () => {
+  // The whole case: undefined is what a Map lookup returns for a row RLS never handed over.
+  eq(incrementOf(liftWith(5), undefined), 5, 'and not the 2.5 kg default nobody chose');
+  eq(incrementOf(liftWith(20), undefined), 20);
+});
+
+test('a lift with neither says so rather than inventing a number', () => {
+  // Null, so stepSize applies its own documented default instead of this deciding one quietly.
+  eq(incrementOf({ exercise: {} }, undefined), null);
+  eq(incrementOf(undefined, undefined), null);
 });
 
 // ------------------------------------------------------------------ what a pull may not touch
