@@ -2041,6 +2041,72 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   ok(syncMessage(later).includes('kept on this device'));
 });
 
+// ------------------------------------------------------------------ what a pull may not touch
+//
+// A mirror refresh overwrote every local row with the server's copy, including rows whose newer
+// version was sitting in the outbox. The guard that existed only stopped those rows being deleted.
+//
+// What it looked like on a phone: a session moved onto the right day, finished, and answered for,
+// with all three writes stuck behind a blocked queue. Every boot pulled the stale row back over
+// the top, so for two days the app showed the wrong day and an open session while holding the
+// corrected version the whole time.
+
+function pullHarness({ queue = [], parked: parkedRow = null, server = {} } = {}) {
+  const driver = memoryDriver(queue);
+  const storage = createStorage(driver);
+  const local = new Map();
+  // Only sessions matter here, and reaching past the adapter keeps this about pull() rather than
+  // about how many tables the schema happens to have.
+  storage._bulkPut = async (table, rows) => {
+    for (const row of rows) local.set(row.id, row);
+  };
+  storage.query = async () => [...local.values()];
+  storage._mirrorDelete = async (table, ids) => {
+    for (const id of ids) local.delete(id);
+  };
+  storage.parked = async () => (parkedRow ? [parkedRow] : []);
+
+  const client = {
+    from: () => ({
+      select: () => ({
+        order: () => ({
+          range: async () => ({ data: server.rows ?? [], error: null }),
+        }),
+      }),
+    }),
+  };
+  return { storage, client, local, createRemote };
+}
+
+test('a pull does not write over a row whose newer version is still queued', async () => {
+  const { storage, client, local } = pullHarness({
+    queue: [{ id: 'o1', op: 'put', table: 'sessions', record_id: 's1', payload: { id: 's1', day_index: 4 }, created_at: '2026-08-18T00:00:00.000Z' }],
+  });
+  local.set('s1', { id: 's1', day_index: 4, completed_at: '2026-08-17T20:25:29.000Z' });
+
+  const remote = createRemote({ client, storage });
+  // The server still has the version from before the day was corrected.
+  client.from = () => ({ select: () => ({ order: () => ({ range: async () => ({ data: [{ id: 's1', day_index: 1, completed_at: null }], error: null }) }) }) });
+  await remote.pull();
+
+  eq(local.get('s1').day_index, 4, 'the local copy is the newer one and stays');
+  eq(local.get('s1').completed_at, '2026-08-17T20:25:29.000Z');
+});
+
+test('a parked row is not swept away for no longer being owed', async () => {
+  // Parking stops a row being owed, and the sweep deletes anything local the server does not have
+  // and nothing is holding. Dropping parked rows out of that set would delete the only copy of a
+  // set somebody performed while carefully keeping the payload that describes it.
+  const parked = { id: 'o2', op: 'put', table: 'set_logs', record_id: 'r9', payload: { id: 'r9' }, parked_at: '2026-08-18T00:00:00.000Z' };
+  const { storage, client, local } = pullHarness({ parked });
+  local.set('r9', { id: 'r9', reps: 0 });
+
+  const remote = createRemote({ client, storage });
+  await remote.pull();
+
+  ok(local.has('r9'), 'the set the server refused is still on the device');
+});
+
 // ------------------------------------------------------------------ reading a parked write
 //
 // A parked row is kept with its whole payload and nothing showed more than the error string, so

@@ -346,15 +346,34 @@ export function createRemote({ client, storage }) {
    * precisely so that this is rare rather than routine.
    */
   async function pull() {
-    const keep = new Set((await storage.pending()).map((entry) => entry.record_id));
+    // Rows this device is still holding something for. Owed, because the server has not seen the
+    // local version yet. Parked, because it never will: a parked entry stops being owed, and if
+    // that dropped it out of this set the sweep below would delete the only copy of a set somebody
+    // performed. Keeping the payload in the outbox and deleting the row it describes would be the
+    // worst of both.
+    const held = [...(await storage.pending()), ...(await storage.parked())];
+    const keep = new Set(held.map((entry) => entry.record_id));
     let pulled = 0;
 
     for (const table of TABLE_NAMES) {
       const serverRows = await fetchAll(table);
       const mapped = serverRows.map((row) => fromWire(table, row));
-      await storage._bulkPut(table, mapped);
-      pulled += mapped.length;
 
+      // A held row is not refreshed from the server, and this used to be the gap in the rule
+      // above: `keep` guarded against being deleted and not against being overwritten, so a
+      // mirror refresh wrote the server's copy straight over local work every time.
+      //
+      // What that looks like from a phone: a client moved a session onto the right day, finished
+      // it, answered how it went, and every one of those writes sat in a blocked queue. Each boot
+      // pulled the stale row back over the top, so for two days the app showed the wrong day and
+      // an open session while holding the corrected version the whole time, and the app looked
+      // like it had lost the change rather than like it had not sent it yet.
+      const fresh = mapped.filter((row) => !keep.has(row.id));
+      await storage._bulkPut(table, fresh);
+      pulled += fresh.length;
+
+      // Built from everything the server sent, not from what was written. A row held back here is
+      // still a row the server has, and leaving it out would mark it stale and delete it.
       const onServer = new Set(mapped.map((row) => row.id));
       const local = await storage.query(table, {});
       const stale = local
