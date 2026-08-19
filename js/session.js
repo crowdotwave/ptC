@@ -16,6 +16,14 @@
 
 import { activeSetLogs, epley1rm } from './history.js';
 import { makeRecord, getDeviceId } from './storage.js';
+// The one countOf. This file had a private copy with the same name, the same comment, and a
+// different last resort: zero where the shared one says one. A hold writes no reps, so replaying
+// a 45 second hold recorded it as a set of zero reps, nextSteppers read that as a number the
+// client had chosen this session and carried it into the next lift, and three sets went to disk
+// carrying reps of zero. set_logs_reps_check refuses those forever, the queue stops at the first
+// refusal, and a client sat on 82 unsynced changes for two days over a fallback that differed by
+// one character from the one twelve lines of comment in js/plan.js explain.
+import { countOf } from './plan.js';
 
 /**
  * The sessions that still happened.
@@ -203,11 +211,6 @@ function resumeAt(plan, claimed, last) {
   for (let i = from; i < plan.length; i += 1) if (!claimed.has(plan[i])) return i;
   for (let i = 0; i < from; i += 1) if (!claimed.has(plan[i])) return i;
   return plan.length;
-}
-
-/** The second number on a row, whichever of the three columns is carrying it. */
-function countOf(row) {
-  return row.reps ?? row.rounds ?? row.hold_seconds ?? 0;
 }
 
 /**

@@ -2041,6 +2041,88 @@ test('a parked row keeps saying so long after the sync that parked it', async ()
   ok(syncMessage(later).includes('kept on this device'));
 });
 
+// ------------------------------------------------------------------ the hold that became a zero
+//
+// The whole chain, from a real workout. A2 LOWER opens 1A back extension, 45 second hold, and 1B
+// back extension for 12 to 15: one exercise, two rows, which is how every superset in these
+// programs is written. A hold is weight_only and writes no reps at all.
+//
+// Three holds logged over eight minutes, the phone locks somewhere in there, and on resume the
+// replay recorded each hold as a set of ZERO reps, because this file had a second countOf whose
+// last resort was 0 where the shared one says 1. nextSteppers then read that zero as a number the
+// client had chosen this session, and carried it into the next lift, because it decided "same
+// lift" by exercise id and 1A and 1B are the same exercise. Three sets went to disk at reps 0,
+// set_logs_reps_check refuses those forever, push stops at the first refusal, and 82 changes sat
+// on a phone for two days.
+
+const holdOpening = { kg: 2.5, source: 'lightest' };
+
+const holdItem = {
+  exercise_id: 'back-ext',
+  exercise: { id: 'back-ext', name: 'Back Extension', equipment: 'machine', increment_kg: 2.5 },
+  log_mode: 'weight_only',
+  target_sets: 3,
+  target_reps_low: null,
+  target_reps_text: '45 sec hold',
+  group_label: '1A',
+};
+
+const repsItem = { ...holdItem, log_mode: 'weight_reps', target_reps_low: 12, target_reps_high: 15, group_label: '1B' };
+
+const holdRows = [0, 1, 2].map((i) => ({
+  id: 'hold-' + i,
+  exercise_id: 'back-ext',
+  set_index: i,
+  weight_kg: 2.5,
+  reps: null,
+  rounds: null,
+  hold_seconds: null,
+  is_warmup: false,
+  is_void: false,
+  is_extra: false,
+  supersedes_id: null,
+  logged_at: ['2026-08-17T19:02:13.465Z', '2026-08-17T19:06:27.908Z', '2026-08-17T19:10:48.933Z'][i],
+}));
+
+test('a hold has no rep count, and replaying one does not invent a zero', () => {
+  // One countOf, in js/plan.js. A second copy with a different last resort is what this was.
+  const plan = [...planForItem(holdItem, null, holdOpening), ...planForItem(repsItem, null, holdOpening)];
+  const replayed = replaySession(plan, holdRows, new Map());
+  eq(replayed.logged.map((entry) => entry.reps), [1, 1, 1], 'not [0, 0, 0]');
+});
+
+test('the numbers on a hold do not carry into the reps out of it', () => {
+  // Same exercise, two items, which is what a superset is. The carry stops at the lift and the
+  // lift is the item.
+  const plan = [...planForItem(holdItem, null, holdOpening), ...planForItem(repsItem, null, holdOpening)];
+  const lastHold = plan[2];
+  const firstReps = plan[3];
+  const carried = nextSteppers({ weightKg: 2.5, reps: 1 }, lastHold, firstReps);
+  eq(carried.reps, 12, 'the reps the trainer asked for, not whatever the hold was showing');
+});
+
+test('a locked phone mid superset comes back on the prescription', () => {
+  // The exact sequence, end to end: three holds on disk, resume, and read what the steppers say.
+  const plan = [...planForItem(holdItem, null, holdOpening), ...planForItem(repsItem, null, holdOpening)];
+  const replayed = replaySession(plan, holdRows, new Map());
+  const resumingOn = replayed.plan[replayed.cursor];
+  const last = replayed.logged[replayed.logged.length - 1];
+  const steppers = nextSteppers(last, last.entry, resumingOn);
+
+  eq(resumingOn.item.group_label, '1B', 'the holds are done, the reps are next');
+  eq(steppers.reps, 12, 'and this was 0, which the server refuses and always will');
+  ok(steppers.reps > 0, 'anything that fails set_logs_reps_check must not reach a set row');
+});
+
+test('a real adjustment still carries within one lift', () => {
+  // The rule this must not break: a number the client moved beats a number from last session, or
+  // a correction lasts exactly one tap.
+  const plan = planForItem(repsItem, null, holdOpening);
+  const carried = nextSteppers({ weightKg: 40, reps: 8 }, plan[0], plan[1]);
+  eq(carried.reps, 8, 'they chose 8, they keep 8');
+  eq(carried.weightKg, 40);
+});
+
 // ------------------------------------------------------------------ the increment, live or frozen
 //
 // The live exercises row is the right answer, because an increment describes the equipment in the
@@ -2907,8 +2989,14 @@ test('the carried numbers are the ones the screen would have to type otherwise',
 // light fallback: Horizontal Row logged 40 lb, then 5.5, then 5.5, then 5.5. The client corrected
 // set one and the app threw the correction away three times.
 
+// One item object shared by every entry of the lift, which is what a plan actually holds:
+// planForItem hands each of its entries the same item, and replaySession reuses template.item for
+// a set added by hand. Two lookalike objects would say "same lift" only to a comparison by
+// exercise id, and that comparison is exactly what a superset of one exercise breaks.
+const squatLift = { exercise_id: 'squat' };
+
 const stepEntry = (over = {}) => ({
-  item: { exercise_id: 'squat' },
+  item: squatLift,
   isWarmup: false,
   weightKg: 60,
   reps: 10,

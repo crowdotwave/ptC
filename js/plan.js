@@ -67,13 +67,20 @@ export function countOf(row) {
  * The carry stops at the lift, and at the boundary between warmups and working sets. Carrying a
  * warmup's load into the first working set would be the app talking somebody down off their
  * working weight, which is the one direction the prefill rules are careful never to err in.
+ *
+ * The lift is the item, not the exercise. Those are the same thing right up until a trainer
+ * programs one exercise twice in a day, which is how every superset in this app's real programs is
+ * written: 1A a 45 second back extension hold, 1B back extension for 12 to 15, one exercise and
+ * two rows. Comparing exercise ids called those one lift, so the hold's numbers carried into the
+ * reps, and a hold has no rep count to carry. Every other place that asks "same lift" already asks
+ * it by item identity, liftRuns and runOf both, so this was the one left comparing something else.
  */
 export function nextSteppers(logged, from, next) {
   if (!next) return null;
 
   const continues =
     Boolean(from) &&
-    next.item.exercise_id === from.item.exercise_id &&
+    next.item === from.item &&
     next.isWarmup === from.isWarmup;
 
   return {
