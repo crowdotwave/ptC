@@ -30,6 +30,8 @@ import {
   toDisplay,
   fromDisplay,
   formatWeight,
+  loadLabel,
+  loadValue,
   stepSize as snapStep,
   loadUnit,
   mountUnitSwitch,
@@ -410,11 +412,15 @@ function render() {
   // count gets the number it was prefilled from and says where it came from, because there is no
   // row at this index and claiming one would be the screen inventing history. Only a lift with no
   // history at all gets the first time copy.
+  //
+  // Both of the first two name a load through loadLabel, so a set done with nothing on it reads
+  // 'Last time bodyweight for 8' rather than 'Last time 0 lb for 8'. That is the same set either
+  // way: the row carries zero and always did.
   ui.lastTime.textContent =
     entry.lastWeightKg !== null
-      ? `Last time ${formatWeight(entry.lastWeightKg)} ${unit()} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`
+      ? `Last time ${loadLabel(entry.lastWeightKg)} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`
       : entry.carriedFrom
-        ? `Carried from your last set, ${formatWeight(entry.carriedFrom.weightKg)} ${unit()} for ${entry.carriedFrom.reps}.`
+        ? `Carried from your last set, ${loadLabel(entry.carriedFrom.weightKg)} for ${entry.carriedFrom.reps}.`
         : openingCopy(entry.openingSource);
 
   ui.target.hidden = false;
@@ -514,8 +520,14 @@ function renderValues() {
   ui.repsUnit.textContent =
     mode === 'rounds' ? 'rounds' : mode === 'time_hold' ? 'sec' : 'reps';
 
-  ui.weightValue.textContent = formatWeight(state.weightKg);
-  ui.weightUnit.textContent = unit();
+  // Zero on the weight stepper is a real position on the number line and also a state: this lift,
+  // this set, nothing held. So the readout says BW and drops the unit beneath it, because a unit
+  // is what tells you which scale a number is on and there is no number here to put on one. The
+  // typing fallback keeps the digit, since that field is an actual number input and 0 is how you
+  // type your way back to no load.
+  const bare = state.weightKg === 0;
+  ui.weightValue.textContent = loadValue(state.weightKg);
+  ui.weightUnit.textContent = bare ? '' : unit();
   ui.repsValue.textContent = String(state.reps);
   ui.weightInput.value = formatWeight(state.weightKg);
   ui.repsInput.value = String(state.reps);
@@ -530,14 +542,19 @@ function renderValues() {
   // What is about to be written, in the words of the thing being done. A pushup reading
   // "0 kg for 9" is not wrong so much as noise: there is no weight, so naming one asks the
   // reader to check a number that will always be zero.
-  const load = `${formatWeight(state.weightKg)} ${unit()}`;
+  //
+  // The same rule reaches a weighted lift performed with nothing on it, which reads 'Bodyweight
+  // for 8'. This line opens a sentence, so the first character is upper cased, and that only ever
+  // lands on the word: a digit has no case and '15 lb for 8' comes through untouched.
+  const load = loadLabel(state.weightKg);
+  const opens = load.charAt(0).toUpperCase() + load.slice(1);
   ui.logSub.textContent =
     {
-      weight_only: `${load}${suffix}`,
-      rounds: `${load}, ${state.reps} rounds${suffix}`,
+      weight_only: `${opens}${suffix}`,
+      rounds: `${opens}, ${state.reps} rounds${suffix}`,
       bodyweight_reps: `${state.reps} rep${state.reps === 1 ? '' : 's'}${suffix}`,
       time_hold: `${state.reps} second${state.reps === 1 ? '' : 's'}${suffix}`,
-    }[mode] ?? `${load} for ${state.reps}${suffix}`;
+    }[mode] ?? `${opens} for ${state.reps}${suffix}`;
 }
 
 function renderUndo() {
