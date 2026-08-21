@@ -1262,6 +1262,15 @@ button.worknav__row:active {
   color: var(--text-primary);
 }
 
+/* A weight of zero reads BW rather than 0, and a unit says which scale a number is on, so there
+ * is nothing for this to label. Removed in CSS rather than by toggling hidden in app.js, because
+ * the readout is a flex row with a gap: an empty span still earns its gap and would pull the
+ * value off centre, and because the typing fallback un-hides this element on its way out, after
+ * renderValues has already run. :empty answers both without an ordering rule to remember. */
+.stepper__unit:empty {
+  display: none;
+}
+
 /* Keyboard is the fallback, never the default, so it only appears after an explicit tap. */
 .stepper__input {
   width: 100%;

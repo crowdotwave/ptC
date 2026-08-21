@@ -49,6 +49,33 @@ export function formatWeight(kg) {
 export const weightLabel = (kg) => `${formatWeight(kg)} ${state.unit}`;
 
 /**
+ * What is on the bar, or the word for there being nothing on it.
+ *
+ * A lift logged as weight_reps can legitimately be performed with no external load, and that is
+ * not the same thing as the whole lift being bodyweight_reps. A GHD crunch, a dip, a pullup and a
+ * back extension are all done cold and then done holding a plate, often inside one session: the
+ * first real client to hit this logged one set with nothing and two with fifteen pounds. Reaching
+ * for the bodyweight MODE would take the weight stepper off the screen and make those last two
+ * sets unrecordable, so the mode stays and zero becomes a value the screen can say out loud.
+ *
+ * Zero is already reachable on the stepper and already correct in the data: weight_kg is zero, and
+ * js/progression.js drops zero load rows from the strength series rather than charting an Epley of
+ * nothing. The gap was only ever the reading. '0 lb for 8' asks somebody mid set to check a number
+ * that means the absence of a number, which is the same noise the bodyweight mode was given its
+ * own copy to avoid.
+ *
+ * 'BW' rather than 'Bodyweight' where it stands in for the value on a stepper, because that is the
+ * word this app already uses: js/program.js isBodyweightLoad reads BW out of a trainer's Load cell,
+ * so the abbreviation arrives from the spreadsheets rather than from here. Lower case in a
+ * sentence, and callers that open a line with it upper case the first character, which a digit is
+ * immune to.
+ */
+export const loadLabel = (kg) => (kg > 0 ? weightLabel(kg) : 'bodyweight');
+
+/** The same, at the size the stepper reads it, where there is no room for a sentence. */
+export const loadValue = (kg) => (kg > 0 ? formatWeight(kg) : 'BW');
+
+/**
  * The smallest load change, in whatever unit is being read.
  *
  * Stored as increment_kg on the exercise, because a barbell, a dumbbell rack and a machine stack

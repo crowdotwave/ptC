@@ -27,6 +27,7 @@ import {
   describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
 import { validate, OUTBOX_STORE } from './js/schema.js';
+import { loadLabel, loadValue } from './js/units.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
@@ -2585,6 +2586,32 @@ test('a weighted lift stays weighted even once a bodyweight session appears', ()
   eq(p.kind, 'load', 'one unloaded session does not rewrite the history of a loaded lift');
   eq(p.e1rm.series.length, 1, 'only the loaded session has a strength number');
   eq(p.e1rm.series[0].sessionId, 's1');
+});
+
+// A weighted lift performed with nothing on it, which is the reading half of the same problem.
+// A GHD crunch, a dip and a pullup are all done cold and then done holding a plate, and the first
+// real client to hit this logged one set at nothing and two at fifteen pounds inside one session.
+// The mode has to stay weight_reps or those last two sets have no stepper to record them on, so
+// zero is a value the screen has to be able to say.
+test('a set with nothing on it is named, not printed as a weight of zero', () => {
+  eq(loadLabel(0), 'bodyweight');
+  eq(loadValue(0), 'BW', 'the stepper has no room for a sentence');
+});
+
+test('a load that exists still prints as a load', () => {
+  eq(loadLabel(6.8), '6.8 kg');
+  eq(loadValue(6.8), '6.8', 'the stepper carries its unit in the label beneath it');
+});
+
+// The line under Log set opens a sentence, so callers upper case the first character. That must
+// reach the word and never touch a number, which has no case to change.
+test('opening a line with a load leaves a number exactly as it was', () => {
+  const opens = (kg) => {
+    const load = loadLabel(kg);
+    return load.charAt(0).toUpperCase() + load.slice(1);
+  };
+  eq(opens(0), 'Bodyweight');
+  eq(opens(60), '60 kg');
 });
 
 // ------------------------------------------------------------------ eight real workbooks
