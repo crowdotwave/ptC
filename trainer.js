@@ -241,7 +241,24 @@ async function saveClient() {
           // Not 'active'. That word means somebody has actually arrived, per 0010, and typing
           // their address is not arriving.
           status: 'invited',
-          weight_unit: 'kg',
+          // Whatever the person filling this form is reading, because a coach working in pounds
+          // coaches people in pounds, in a gym whose plates are in pounds. Hardcoding kg meant
+          // every client a trainer ever adds opens in the wrong unit and has to find the toggle
+          // before their first set, or logs in one unit while reading another.
+          //
+          // unit() rather than state.trainer.weight_unit, and the difference is not academic. A
+          // trainer who is also a client, which is the shape this whole app is built around, has
+          // their preference on their clients row: js/units.js resolves that row first and writes
+          // only there, so the trainers row keeps whatever it was created with forever. Reading
+          // it here would have inherited a default nobody has ever seen instead of the unit on
+          // screen. Measured on this project: the one real trainer reads pounds and his trainers
+          // row still says kg.
+          //
+          // A starting value, not a resolution, which is what keeps this clear of the rule that
+          // weight_unit belongs to the viewer. Nothing here renders somebody else's number in
+          // somebody else's unit. It seeds a new row with the likeliest answer, and that row is
+          // the client's own the moment they open the app.
+          weight_unit: unit() === 'lb' ? 'lb' : 'kg',
         }),
       );
     }
