@@ -215,7 +215,8 @@ payments
 ### Schema rules that are expensive to get wrong later
 
 - **Weight is always stored in kilograms** as `weight_kg`. Pounds are a display conversion
-  only. Never store a unit alongside a number in the same table. All conversion lives in
+  only, and pounds are what the app SHOWS unless somebody says otherwise: `weight_unit` defaults to
+  `lb` in the column, in `js/units.js` before a viewer row has been read, and in the seed. Never store a unit alongside a number in the same table. All conversion lives in
   `js/units.js` and nothing else may format a weight: the progress and trainer screens each
   hardcoded `kg` for a while, so a client set to pounds read pounds while logging and kilograms
   everywhere else.
@@ -512,26 +513,53 @@ Constraints:
   deliberately: the log action stays far larger and keeps a gap beneath it, and the bar is what
   makes this read as an app rather than a page. The cost is a mis-tap risk between two targets
   of very different size, which is a thing to watch in real use
-- The header's right edge holds the kg/lb switch, not a menu. There was a circular menu button
-  there carrying a name and a sign out link, which did not earn a permanent control on every
-  screen and which overlapped the resume bar, because an absolutely positioned element cannot see
-  a sticky sibling in flow. Sign out now sits in the page footer, in the quietest type on the
-  screen, on the scrolling screens only. The logging screen must never scroll and so has none.
-- The switch sits on the line below the lift name, not beside it. Beside it was tried and
-  measured: the name is 32px at the mid set tier, so a 90px neighbour wraps almost every barbell
-  lift to two lines, which pushed the logging screen to 831 against a viewport of 812 and put the
-  log action under the tab bar. Nothing goes on that row unless it is under about 40px wide.
-- Anything pinned beside a scrolling chooser goes in the row, never floated over it, and a global
-  setting does not go in that row at all. Position absolute against the padded content area
-  cannot account for the resume bar, so a floating control will collide with it again the moment
-  somebody re-adds one.
-- Raised controls are lit, not outlined. Every pressable thing catches light along its top inside
-  edge and drops a shadow from its bottom one, at one of two strengths shared by the whole app
-  (`--edge-lit`, `--edge-lit-strong`, `--shade-drop`), mixed from `--text-primary` and
-  `--surface-base` rather than from raw white and black. Pressed drops the lit edge and takes an
-  inner shadow, so a press reads as physical rather than merely recoloured. A 1px neutral outline
-  around a coloured slab reads as an unfinished border, which is what the steppers looked like
-  with a `--muted` edge on violet.
+- **The header carries nothing but what the screen is about.** There was a circular menu button in
+  the corner once, then the kg/lb switch, and both were wrong in the same way. The menu button
+  carried a name and a sign out link, which did not earn a permanent control on every screen, and
+  it overlapped the resume bar because an absolutely positioned element cannot see a sticky sibling
+  in flow. The unit switch then took that corner and had to be relocated three times to stop
+  colliding with things: pinned to the end of the day picker it split 328px with a five day
+  rotation, so the thing you pick every session and the thing you set once a year competed for the
+  same width; beside the lift name it left a 32px name 241px and wrapped almost every barbell lift
+  to two lines, which pushed the logging screen to 831 against a viewport of 812 and put the log
+  action under the tab bar; on the line below it worked, and was still 90px of every header in the
+  app forever. A control relocated three times is in the wrong band of the screen, not the wrong
+  corner of it. **A setting goes with the settings**, which is the page footer, next to sign out,
+  in the quietest type on the screen, on the scrolling screens only. The logging screen never
+  scrolls and so has neither, which is correct: mid session is not when somebody changes a unit.
+  Weights read in **pounds** by default, everywhere, because everyone this is built for is in a
+  pound gym and a default everybody changes is a chore with an opinion rather than a neutral start.
+- The header's second line still exists and still has a rule: nothing goes on it unless it is under
+  about 40px wide, and anything beside a scrolling chooser goes in the row rather than floated over
+  it. Position absolute against the padded content area cannot account for the resume bar, so a
+  floating control will collide with it again the moment somebody re-adds one.
+- **Mid-set controls are lit. Chrome is flat. That line is the whole lighting model.**
+  A pressable thing that is read at arm's length, under bad lighting, with sweat on the glass,
+  catches light along its top inside edge and drops a shadow from its bottom one, at one of two
+  strengths shared by the whole app (`--edge-lit`, `--edge-lit-strong`, `--shade-drop`), mixed
+  from `--text-primary` and `--surface-base` rather than from raw white and black. Pressed drops
+  the lit edge and takes an inner shadow, so a press reads as physical rather than merely
+  recoloured. That is the steppers, the log action, the rest timer and the record celebration, and
+  it is not negotiable for them: a 1px neutral outline around a coloured slab reads as an
+  unfinished border, which is what the steppers looked like with a `--muted` edge on violet.
+  Everything else is chrome, and chrome is flat: `--chrome-face`, no gradient, no lit edge, no
+  drop, no rest glow. Menus, list rows, cards, headers, secondary buttons, the tab bar.
+  The reason is scale rather than taste. A fall of light is how ONE object reads as liftable from a
+  metre away; it is not how a list of forty is drawn. Applying it per row gave the lift picker
+  eight bordered, gradient filled, glowing slabs stacked with gaps, which read as clutter at a
+  glance even though every row obeyed the rule. Before lighting a new control, ask which side of
+  that line it is on.
+- **A list is one object.** Rows stop being boxes: one card holds them, a hairline `--divider`
+  separates them, nothing but the card is rounded, and the row count stops mattering. Shared as
+  `.row-card`, `.row` and `.row__body` in `styles.css`, and used by the lift picker, the workout
+  panel and the trainer's client list. Where lit-against-flat used to say pressable-against-not,
+  a **chevron** says it now, with the row's own state line saying it a second time in words.
+- **A `<button>` cannot be sized by its own grid or flex children**, and this is a real bug rather
+  than a style preference. A button lays its children out in an anonymous box and its height is not
+  computed from that box's rows: measured on the lift picker, the row was 44.98px tall around 51px
+  of content, so `min-height` won and the second line printed through the bottom border, in both
+  Chromium and WebKit. Every pressable row wraps its content in a real child and puts the layout
+  there.
 - Respect `prefers-reduced-motion`
 - Visible keyboard focus states
 - Responsive down to a 360px viewport, designed mobile first, desktop is the trainer view
@@ -543,8 +571,10 @@ hue discrimination degrades. Every state that carries meaning also carries a sha
 a position, or a word.
 
 **Selected means filled.** Anything that chooses between things, wherever it is drawn, marks the
-selection by FILLING it: unselected is a hollow outline on pitch black, selected is filled with the
-raised surface gradient plus its rim, a 700 weight label, and a glow. Fill against no fill is the
+selection by FILLING it: unselected is a flat chrome face, selected is filled with
+`--surface-raised` plus its rim and a 700 weight label. The selected chip used to throw a glow as
+well, and that went with the rest of the chrome: a row of glowing pills is a lot of light spent
+saying what the fill already says. Fill against no fill is the
 signal that survives colour blindness, glare, and a glance from arm's length, so it is the one
 carrying the state. Colour is reinforcement and never the whole signal. The rule lives once in
 `styles.css` under "chooser chips" and the pickers that are still chip rows take it from there,

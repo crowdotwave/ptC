@@ -110,6 +110,45 @@
   --veil-lit: color-mix(in srgb, var(--text-primary) 9%, transparent);
   --veil-blur: 18px;
 
+  /* ---------------------------------------------------------------- chrome
+   *
+   * The flat half of this app, and the line between the halves is the whole point.
+   *
+   * Everything in here is CHROME: menus, list rows, cards, headers, secondary buttons, the tab
+   * bar. It is read with the phone in the hand, between sets or on the sofa, and it is read a lot,
+   * so its job is to get out of the way. It is flat: no gradient, no inset lit edge, no rest glow.
+   *
+   * What is NOT chrome keeps every bit of the fall of light argued for further up: the weight and
+   * rep steppers, the log action, the rest timer, and the record celebration. Those are read at
+   * arm's length under bad lighting with sweat on the glass, and the lit edge is what makes them
+   * read as objects you can hit rather than as regions of a picture. That argument was always
+   * about those controls specifically, and applying it to a forty row menu is what produced the
+   * screen this replaced: every row its own bordered, gradient filled, glowing slab, stacked with
+   * gaps, which is a great deal of light spent saying nothing except "this is also a box".
+   *
+   * The fix is the one every list based app arrives at. Rows stop being boxes and become rows: one
+   * card holds them, a hairline separates them, and the card is the only edge on screen. That
+   * takes the box count on the lift picker from eight to one.
+   *
+   * --chrome-face is the opaque twin of --veil, and it inherits that family's safety argument
+   * unchanged: mixed over the pitch black base it lands DARKER than --surface-raised, so every
+   * text token keeps at least the ratio it was measured at against --surface-base, and the "on
+   * raised, --text-primary only" rule does not follow it onto a card. It is opaque rather than
+   * translucent because a row that fills on selection has to sit on a known colour, and a
+   * translucent fill over a translucent card is two unknowns. */
+  --chrome-face: color-mix(in srgb, var(--surface-raised) 16%, var(--surface-base));
+  --chrome-face-press: color-mix(in srgb, var(--surface-raised) 26%, var(--surface-base));
+  /* The hairline between rows inside a card, and the only line chrome draws. Deliberately weaker
+   * than --veil-edge: that one is the outline of an object, this one is a fold inside it. */
+  --divider: color-mix(in srgb, var(--surface-raised-rim) 20%, transparent);
+
+  /* Chrome is rounder and roomier than the controls it replaced. A 12px radius on a 44px slab
+   * reads as a button; the same radius on a full width row reads as a box drawn round a sentence.
+   * Rows take the card's radius only at its corners and none in the middle, which is what makes a
+   * stack of them read as one object. */
+  --radius-control: 14px;
+  --radius-sheet: 20px;
+
   /* ON --surface-raised, TEXT IS --text-primary ONLY.
    *
    * That is the bill for widening the surface separation to 2.51. Raising the surface lifted
@@ -384,6 +423,8 @@
   --s-3: 0.75rem;
   --s-4: 1rem;
   --s-5: 1.5rem;
+  /* Chrome breathes where the logging screen cannot afford to. */
+  --s-6: 2rem;
 
   --radius: 12px;
   /* Cards are rounder than controls, so a container never reads as a very large button. */
@@ -646,30 +687,36 @@ button {
  * styled and reads as a browser artefact beside a real button. So "Import a spreadsheet" sat
  * left in a box whose neighbour was centred. Anything wearing this class now centres both ways
  * whatever tag it is. */
+/* Chrome, so flat: no gradient, no lit edge, no drop, no glow. See the --chrome-face block for
+ * where that line is drawn and why the steppers stay on the other side of it.
+ *
+ * What replaces the fall of light as the "this is pressable" signal is fill against no fill, which
+ * is the signal this app already leans on hardest: a secondary button is a filled slab on pitch
+ * black, and nothing that is not pressable is filled. The press is a step up in fill rather than a
+ * recolour, which is what a flat language has instead of a depression.
+ *
+ * --text-secondary is legal on both fills. --chrome-face lands at Y 0.0038 and --chrome-face-press
+ * at 0.0069, so the label measures 10.47 and 9.90, well clear of the 7:1 floor. That is the whole
+ * benefit of an opaque twin of the veil rather than a lifted surface: the "on raised,
+ * --text-primary only" rule does not follow chrome around. */
 .button-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: var(--tap);
   min-width: var(--tap);
-  padding: 0 var(--s-3);
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: var(--radius);
+  padding: 0 var(--s-4);
+  border: 0;
+  border-radius: var(--radius-control);
   color: var(--text-secondary);
   font-size: var(--t-small);
   font-weight: 600;
-  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--chrome-face);
 }
 
-/* Text moves to --text-primary with the surface, per the raised surface rule. Pressed loses the
- * lit edge and takes an inner shadow, the same way the stepper keys do. */
 .button-secondary:active {
-  background: var(--surface-raised);
+  background: var(--chrome-face-press);
   color: var(--text-primary);
-  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
 .button-secondary:disabled {
@@ -700,15 +747,17 @@ button {
  * These rules must stay below .button-secondary. The chips carry both classes and the item
  * selectors tie it on specificity, so source order is what wins the radius and the padding.
  *
- * Selected carries four signals at once, because CLAUDE.md forbids encoding a state in hue
- * alone and a segmented control is the most tempting place there is to break that rule. The
- * chip FILLS, the label steps from 600 to 700 and from --text-secondary to --text-primary, the
- * top edge catches the rim, and the chip throws a glow. Unselected is a hollow outline on pitch
- * black. Filled against not filled is the one signal that survives colour blindness, glare, and
- * a glance from arm's length, so it is the one doing the real work. The rest are reinforcement.
+ * Selected carries three signals at once, because CLAUDE.md forbids encoding a state in hue alone
+ * and a segmented control is the most tempting place there is to break that rule. The chip FILLS,
+ * the label steps from 600 to 700 and from --text-secondary to --text-primary, and the top edge
+ * catches the rim. Unselected is a flat chrome face. Filled against not filled is the one signal
+ * that survives colour blindness, glare, and a glance from arm's length, so it is the one doing
+ * the real work. The rest are reinforcement.
  *
- * The glow is legal here by the hard rule: it sits outside the fill and spreads away from the
- * chip, so it never passes behind the chip's own label. */
+ * There used to be a fourth, a rest glow around the selected chip, and it went with the rest of
+ * the chrome. See the --chrome-face block: a row of glowing pills is a lot of light spent saying
+ * something a fill already says, and the fill is what survives the conditions this palette exists
+ * for. The mid set controls keep theirs. */
 .daypicker {
   display: flex;
   flex-wrap: nowrap;
@@ -759,38 +808,47 @@ button {
  * down the file and takes everything else, including the face luminance, from here. See "how it
  * felt" for why the green stops at the edges of the chip. */
 .feel__item.is-on {
-  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+  background: var(--surface-raised);
   border-color: var(--surface-raised-rim);
   color: var(--text-primary);
   font-weight: 700;
-  box-shadow:
-    inset 0 1px 0 0 var(--surface-raised-rim),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+  box-shadow: inset 0 1px 0 0 var(--surface-raised-rim);
+}
+
+/* Unselected is the flat chrome face rather than a hollow outline on black, which is what the rest
+ * of the chrome does. The fill still carries the state: --surface-raised against --chrome-face is
+ * a separation of about 5, which is twice what the old gradient-against-outline gave. */
+.daypicker__item,
+.sections__item {
+  background: var(--chrome-face);
+}
+
+.daypicker__item:active,
+.sections__item:active {
+  background: var(--chrome-face-press);
 }
 
 /* ---------------------------------------------------------------- header corner row
  *
- * The unit switch, parked at the right edge of the header.
+ * What used to live here was the unit switch, and it is gone from every header in the app. The
+ * history is worth keeping because it is three iterations of the same lesson.
  *
- * It spent one iteration pinned to the end of the chooser row, which fixed the collision it had
- * been moved out of but created a smaller one: on a 360px screen a five day rotation and a 90px
- * control were splitting 328px, so the thing you pick every session and the thing you set once a
- * year were competing for the same width.
+ * It spent one iteration pinned to the end of the chooser row, where on a 360px screen a five day
+ * rotation and a 90px control split 328px between them, so the thing you pick every session and
+ * the thing you set once a year competed for the same width. It then spent one iteration beside
+ * the lift name, which is where "top right" actually points, and that failed on measurement: the
+ * name is 32px at the mid set tier, "Barbell Bench Press" needs about 330px, and a 90px neighbour
+ * left it 241 and wrapped it to two lines, which pushed the logging screen to 831 against a
+ * viewport of 812. It then sat on the line below for a while, which worked and was still 90px of
+ * every header in the app, permanently, for a preference somebody sets once.
  *
- * It then spent one iteration beside the lift name, which is where "top right" actually points.
- * That failed on measurement rather than on taste. The name is 32px at the mid set tier, so
- * "Barbell Bench Press" needs about 330px and a 90px neighbour leaves it 241, which wraps it to
- * two lines. Those 32 extra pixels pushed the logging screen to 831 against a viewport of 812,
- * and CLAUDE.md says that screen never scrolls and the log action keeps a gap beneath it. Both
- * broke at once, and not for an unusual lift name: almost every barbell lift is that long.
+ * A control relocated three times to stop colliding with things is usually in the wrong band of
+ * the screen rather than the wrong corner of it. It is a setting now, and it lives with the other
+ * setting, in the footer. See .unitset below and mountUnitSetting in js/units.js.
  *
- * So it sits on the line below, which is the set counter or the session summary depending on the
- * screen. Those run to about 230px and share the row with room to spare. It is still the top
- * right corner of the header, it is still nowhere near the chooser, and the name gets its full
- * width back.
- *
- * In flow, never absolute. The menu button this replaced was positioned against the padded
+ * The row itself stays, because it is still the row a screen's second line sits on, and the rule
+ * it was carrying stays with it: nothing goes in here unless it is under about 40px wide. In flow,
+ * never absolute. The menu button that preceded all of this was positioned against the padded
  * content area, which cannot see the sticky resume bar, so it painted on top of it. A flex row
  * makes that collision unrepresentable rather than merely fixed. */
 .context__row {
@@ -806,46 +864,41 @@ button {
   min-width: 0;
 }
 
-/* Segmented, not a single button that flips. A lone pill reading KG cannot say whether it means
- * "you are reading kilograms" or "tap for kilograms", and that ambiguity would sit on top of
- * every number on the screen. Both halves visible with one filled is the chooser chip rule from
- * CLAUDE.md applied to the smallest chooser there is.
+/* The unit setting, in the page footer with sign out, in the quietest type on the screen.
  *
- * One joined pill rather than two loose chips, because these are two states of one control and
- * the enclosing border is what says so. */
-.unitswitch {
+ * A statement and then a button, rather than two chips with one filled. The segmented switch
+ * existed to resolve a real ambiguity, that a lone pill reading KG cannot say whether it means
+ * "you are reading kilograms" or "tap for kilograms", and a sentence resolves it more cheaply and
+ * says more: the state is not a control, so it cannot be mistaken for one. */
+.unitset {
   display: flex;
-  flex: 0 0 auto;
-  align-items: stretch;
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: 999px;
-  overflow: hidden;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
 }
 
-.unitswitch[hidden] {
+.unitset[hidden] {
   display: none;
 }
 
-.unitswitch__opt {
-  min-height: var(--tap);
-  min-width: 2.75rem;
-  padding: 0 var(--s-3);
+.unitset__now {
+  color: var(--muted);
+  font-size: var(--t-small);
+}
+
+/* Underlined rather than boxed. It is a link in every way that matters, and a button shape here
+ * would give a once a year setting more weight than sign out has. */
+.unitset__swap {
+  padding: var(--s-1) 0;
   color: var(--text-secondary);
   font-size: var(--t-small);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-/* Same fill, rim and glow as a selected chooser chip, because it is one. --text-primary reads
- * 7.26 on the lit face, which is what the 14px label needs. */
-.unitswitch__opt.is-on {
-  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+.unitset__swap:active {
   color: var(--text-primary);
-  font-weight: 700;
-  box-shadow:
-    inset 0 1px 0 0 var(--surface-raised-rim),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
 }
 
 /* ---------------------------------------------------------------- the day, top left
@@ -871,23 +924,19 @@ button {
   max-width: 100%;
   min-height: var(--tap);
   padding: 0 var(--s-3) 0 var(--s-4);
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border: 0;
   border-radius: 999px;
-  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--chrome-face);
 }
 
 .dayjump:active {
-  background: var(--surface-raised);
-  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--chrome-face-press);
 }
 
-/* Every text token here has to survive the pressed state, which swaps --surface-base-lit for
- * --surface-raised. --text-secondary measures 4.49 there, under the floor, so the pressed rule
- * lifts the whole label rather than leaving the quiet half of it unreadable for the length of a
- * press. */
+/* The pressed fill is --chrome-face-press, where --text-secondary measures 9.90 and is legal, so
+ * this is no longer the contrast rescue it was when pressing swapped in --surface-raised. It is
+ * kept because a press that lifts the whole label reads as one object responding rather than as
+ * half of one. */
 .dayjump:active .dayjump__pos,
 .dayjump:active .dayjump__dot {
   color: var(--text-primary);
@@ -976,85 +1025,86 @@ button {
   padding: var(--s-1) var(--s-4);
 }
 
+/* One card, rows flush inside it, exactly as the lift picker is. See .row-card for the argument:
+ * a fall of light is how one object reads as liftable at arm's length, not how a list of seven is
+ * drawn, and seven lit slabs in a column is clutter arrived at by following a good rule too far.
+ *
+ * This list is the one place the flattening had to buy back a signal rather than only spend one.
+ * Lit against flat used to say pressable against not, and there is no per row surface left to
+ * light, so the chevron in js/workout-view.js does that job now. */
 .worknav__list {
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
   margin: 0;
   padding: 0;
+  border-radius: var(--radius-sheet);
+  background: var(--chrome-face);
+  overflow: hidden;
   list-style: none;
 }
 
-/* The trainer's own numbering keeps a column of its own, so every name starts on one line
- * however long or short the numbering is. Same grid as the program view, because it is the same
- * information read in a different place. */
 .worknav__row {
-  display: grid;
-  grid-template-columns: 2.25rem 1fr;
-  gap: var(--s-2);
-  align-items: start;
+  display: block;
   width: 100%;
-  min-height: var(--tap);
-  padding: var(--s-3);
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: var(--radius);
+  padding: 0;
+  border: 0;
+  background: none;
   text-align: left;
+  color: inherit;
 }
 
-/* Lit means pressable. A lift with sets still owed catches light on its top edge and drops a
- * shadow, exactly like every other control in this app. */
-button.worknav__row {
-  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+.worknav__list > li + li .worknav__row,
+.worknav__list > li + li {
+  box-shadow: inset 0 1px 0 0 var(--divider);
+}
+
+/* The trainer's own numbering keeps a column of its own, so every name starts on one line however
+ * long or short the numbering is. Same grid as the program view, because it is the same
+ * information read in a different place. It sits on this wrapper rather than on the row for the
+ * reason js/workout-view.js states: a button cannot be sized by its own grid rows. */
+.worknav__grid {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr auto;
+  gap: var(--s-2);
+  align-items: start;
+  min-height: var(--tap);
+  padding: var(--s-3) var(--s-4);
 }
 
 button.worknav__row:active {
-  background: var(--surface-raised);
-  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--chrome-face-press);
 }
 
-/* Flat means not pressable. A lift with every set logged is a slab with a border and no fall of
- * light on it, so the signal that it is finished and the signal that it is not a control are the
- * same signal. It is not dimmed: finishing a lift is not a reason to fade it. */
-.worknav__row.is-full {
-  background: none;
-  box-shadow: none;
+/* The chevron, on the rows you can go to and on nothing else. Aligned to the name's line rather
+ * than centred in a row that can run to four lines, so it points at the lift and not at the gap
+ * beneath it. */
+.worknav__go {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--muted);
 }
 
-/* A row the trainer marked as not logged: the run, the interval, the iso nobody records a number
- * for. Flat for the same reason a finished lift is flat, since neither is a control. It is not
- * dimmed and not shrunk either, which is the rule the program tab already follows on this same
- * row: nothing here is a lesser exercise, and the one the client is most likely to skip is the one
- * the app has the least business making look optional. */
-.worknav__row.is-shown {
-  background: none;
-  box-shadow: none;
-}
-
-/* The lift the client is on, filled, exactly as a selected chooser chip is filled. Fill against
- * no fill is the signal that survives glare and a glance from arm's length, and the word "Now"
- * in the state line carries it a second time.
+/* The lift the client is on, filled, exactly as a selected chooser chip is filled. Fill against no
+ * fill is the signal that survives glare and a glance from arm's length, and the word "Now" in the
+ * state line carries it a second time. Flat now, like the rest of this list, so the fill is doing
+ * the whole job rather than sharing it with a gradient and a glow.
  *
  * Everything inside goes to --text-primary, without exception. This is the raised surface, where
- * --text-secondary measures 4.49 and --accent-data 4.70, both under the 7:1 floor these sizes
- * owe. The row is legible because one row on this list gets the fill, not because the tokens got
- * an exemption. */
+ * --text-secondary measures 4.49 and --accent-data 4.70, both under the 7:1 floor these sizes owe.
+ * The row is legible because one row on this list gets the fill, not because the tokens got an
+ * exemption. */
 .worknav__row.is-now {
-  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
-  border-color: var(--surface-raised-rim);
-  box-shadow:
-    inset 0 1px 0 0 var(--surface-raised-rim),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+  background: var(--surface-raised);
+  box-shadow: inset 0 1px 0 0 var(--surface-raised-rim);
 }
 
 .worknav__row.is-now .worknav__num,
 .worknav__row.is-now .worknav__variation,
 .worknav__row.is-now .worknav__target,
 .worknav__row.is-now .worknav__state,
-.worknav__row.is-now .worknav__note {
+.worknav__row.is-now .worknav__note,
+.worknav__row.is-now .worknav__go {
   color: var(--text-primary);
 }
 
@@ -1466,8 +1516,15 @@ button.worknav__row:active {
 
 /* Pill, like every other chooser in the app, and padded tighter because four of these share a
  * 360px screen where the day picker's chips only had to share it with each other. */
+/* The one chip in the app that keeps a real border, because the emerald edge is the whole of how
+ * "recorded" is said here and CLAUDE.md measures why it must stop at the chip's edge rather than
+ * enter its face: --surface-raised is Y 0.0755 against a 7:1 boundary of Y 0.0801, so a 22 percent
+ * mix of --done into the face drops --text-primary to 5.58. .button-secondary went border: 0 with
+ * the rest of the chrome, and a border-color on a zero width border paints nothing, so the width
+ * is restated here rather than left to a rule that no longer sets one. */
 .feel__item {
   padding: 0 var(--s-1);
+  border: 1px solid transparent;
   border-radius: 999px;
   font-size: var(--t-small);
   letter-spacing: 0.01em;
@@ -1963,88 +2020,181 @@ button.worknav__row:active {
   gap: var(--s-5);
 }
 
+/* ---------------------------------------------------------------- rows in a card
+ *
+ * The one list pattern, shared by every menu in the app.
+ *
+ * WHAT THIS REPLACED, because the failure is instructive. Every row used to be its own control:
+ * a border, a gradient, an inset lit edge, a drop shadow and a rest glow, with a gap to the next
+ * one. Eight of those stacked is eight boxes and eight glows saying nothing but "this is also a
+ * box", and it read as clutter at a glance even though every individual row was drawn exactly as
+ * the tactile rules ask. The rules were right and the scale was wrong: a fall of light is how you
+ * make ONE object read as liftable at arm's length, not how you draw a list of forty.
+ *
+ * So a list is one object. The card has the only edge on screen, rows sit flush inside it with a
+ * hairline between them, and nothing but the card is rounded. The row count stops mattering.
+ *
+ * A ROW IS A BUTTON AND A BUTTON CANNOT LAY OUT ITS OWN CHILDREN. This is a real bug and it is
+ * why every row here has an inner element. A <button> puts its children in an anonymous box, and
+ * its own height is not computed from that box's grid rows: measured on the picker, the row was
+ * 44.98px tall around 51px of content, so `min-height` won and the second line printed straight
+ * through the bottom border. Chromium and WebKit both. The grid goes on .row__body, never on the
+ * button, and the button is left as a plain block that wraps it. */
+.row-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sheet);
+  background: var(--chrome-face);
+  /* The card clips, so the first and last rows take its corners without either of them having to
+   * know it is first or last. */
+  overflow: hidden;
+}
+
+.row {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+
+/* The fold inside the object, not an outline round it. On the top edge of every row but the
+ * first, so a group heading between two runs of rows does not inherit a stray line. */
+.row + .row,
+.row-group + .row {
+  box-shadow: inset 0 1px 0 0 var(--divider);
+}
+
+button.row:active {
+  background: var(--chrome-face-press);
+}
+
+/* Selected still means FILLED, per the encoding rules, and this is the one place in chrome that
+ * takes --surface-raised. It reads as a highlighted row rather than as one slab among eight now
+ * that its neighbours are not slabs, which is most of what made the old picker loud.
+ *
+ * On --surface-raised, --text-primary only. Every quiet text token inside a selected row is
+ * lifted below, because --text-secondary measures 4.49 there and is under the floor. */
+.row.is-on {
+  background: var(--surface-raised);
+  box-shadow: inset 0 1px 0 0 var(--surface-raised-rim);
+}
+
+.row.is-on .row__meta,
+.row.is-on .row__mark {
+  color: var(--text-primary);
+}
+
+/* The row's real layout box. Two lines on the left, a mark on the right. Grid rather than flex so
+ * the mark can span both lines without either line having to know about it. */
+.row__body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'name mark'
+    'meta mark';
+  align-items: center;
+  gap: 0 var(--s-3);
+  min-height: 56px;
+  padding: var(--s-3) var(--s-4);
+  line-height: 1.3;
+}
+
+/* A row with nothing under its name is one line, and centring one line inside a two row grid
+ * leaves it looking low. Collapsing the template is what keeps a mixed list even. */
+.row__body.is-single {
+  grid-template-areas: 'name mark';
+}
+
+.row__name {
+  grid-area: name;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 600;
+}
+
+.row.is-on .row__name {
+  font-weight: 700;
+}
+
+.row__meta {
+  grid-area: meta;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 500;
+}
+
+/* The word on the right: "Showing", "Now", "Done". Every state in this app is said as well as
+ * drawn, and in a flat language the word carries more of the load than it used to. */
+.row__mark {
+  grid-area: mark;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* A heading over a run of rows, inside the card. Quiet and small: it is a divider that happens to
+ * have a name, not a title. */
+.row-group {
+  margin: 0;
+  padding: var(--s-4) var(--s-4) var(--s-2);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.row-group + .row {
+  box-shadow: none;
+}
+
 /* ---------------------------------------------------------------- the lift picker
  *
- * Which lift the charts below are about. See js/lift-picker.js for why this stopped being a row
- * of chooser chips: the short version is that a rotation has five options and a lift library has
- * forty, and a scrolling row of forty holds about three of them on a phone.
+ * Which lift the charts below are about. js/lift-picker.js says why this stopped being a row of
+ * chooser chips: a rotation is five options and a lift library is forty, and a scrolling row of
+ * forty holds about three of them on a phone.
  *
- * The shape is the one the logging screen already uses for the same job at a different scale. A
- * lit control naming what you are looking at, a list behind it, in flow rather than over the top:
- * no focus trap, no z-index, no outside click handler. Everything below it moves down while the
- * list is open and comes back when it closes, which is what a disclosure is.
- *
- * The chooser chip rule is not abandoned by this, it moves inside. The row that is selected fills
- * with the raised gradient and its rim, takes the 700 weight and --text-primary, and says
- * "Showing". Fill against no fill is still the signal doing the real work, and the word is the
- * second channel the encoding rules require. */
+ * Chrome, so flat, and built out of .row-card above. It is a state of the screen rather than a
+ * layer over it, exactly as the workout panel on the logging screen is: in flow, no focus trap,
+ * no z-index, no outside click handler, escape to close. */
 .liftpick {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
 }
 
-/* Lit, like the day chip on the logging screen and for the same reason: this is the one pressable
- * thing in a band of text, so it has to catch light along its top edge to read as pressable at
- * all. Full width rather than a pill, because unlike the day chip it has a whole list behind it
- * and the width is what says so. */
+/* One flat control, full width, with the current lift on it. Full width rather than a pill
+ * because unlike the day chip it has a whole list behind it, and the width is what says so. */
 .liftpick__open {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'lead glyph'
-    'count glyph';
-  align-items: center;
-  gap: 0 var(--s-3);
+  display: block;
   width: 100%;
-  min-height: var(--tap);
-  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4);
-  line-height: 1.25;
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: var(--radius);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--chrome-face);
   text-align: left;
-  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
 .liftpick__open:active {
-  background: var(--surface-raised);
-  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--chrome-face-press);
 }
 
-/* The pressed state swaps in --surface-raised, where --text-secondary measures 4.49 and is under
- * the floor. Same fix as the day chip: lift the whole label for the length of the press rather
- * than leave half of it unreadable. */
-.liftpick__open:active .liftpick__count,
-.liftpick__open:active .liftpick__glyph {
-  color: var(--text-primary);
-}
-
-.liftpick__lead {
-  grid-area: lead;
-  color: var(--text-primary);
-  font-size: var(--t-body);
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.liftpick__count {
-  grid-area: count;
-  color: var(--text-secondary);
-  font-size: var(--t-small);
-  font-weight: 600;
-  white-space: nowrap;
+.liftpick__open .row__body {
+  grid-template-areas:
+    'name mark'
+    'meta mark';
+  padding: var(--s-3) var(--s-4);
 }
 
 .liftpick__glyph {
-  grid-area: glyph;
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  grid-area: mark;
+  width: 20px;
+  height: 20px;
   color: var(--text-secondary);
   transition: transform 160ms ease;
 }
@@ -2053,66 +2203,61 @@ button.worknav__row:active {
   transform: rotate(180deg);
 }
 
-/* The list. A veiled card, like everything else that groups things on this screen, and capped
- * rather than left to run: forty lifts in flow would push the charts a screen and a half down and
- * the way back up is a scroll rather than a tap. Its own scroll is contained, so flicking to the
+/* Capped and scrolling rather than left to run: forty lifts in flow would push the charts a screen
+ * and a half down, and the way back is a scroll rather than a tap. Contained, so flicking to the
  * bottom of the list does not carry on into the page. */
-.liftpick__panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  padding: var(--s-3);
-  border: 1px solid var(--veil-edge-low);
-  border-top-color: var(--veil-edge);
-  border-radius: var(--radius-card);
-  background: linear-gradient(180deg, var(--veil) 0%, var(--veil-deep) 58%, transparent 100%);
-}
-
-.liftpick__panel[hidden] {
-  display: none;
-}
-
 .liftpick__scroll {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
   max-height: 52vh;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+.liftpick__panel[hidden] {
+  display: none;
+}
+
 /* Keyboard, and it is the default here rather than the fallback. That rule in CLAUDE.md is about
- * the logging screen, where a keyboard between somebody and their next set is the whole failure
- * it exists to prevent. This is a reading screen and the thing being entered is a name, which is
- * the one input a stepper cannot express. */
+ * the logging screen, where a keyboard between somebody and their next set is the whole failure it
+ * exists to prevent. This is a reading screen and the thing being entered is a name, which is the
+ * one input a stepper cannot express. */
+/* The search field gets its own padded band rather than sitting flush, because a text input is
+ * the one thing in a list that is not a row and must not read as one. */
+.liftpick__find {
+  padding: var(--s-3);
+  box-shadow: inset 0 -1px 0 0 var(--divider);
+}
+
 .liftpick__search {
-  min-height: var(--tap);
-  padding: 0 var(--s-3);
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: var(--radius);
-  background: var(--surface-base);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--s-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--chrome-face-press);
   color: var(--text-primary);
   font-family: var(--font);
   font-size: var(--t-body);
 }
 
 .liftpick__search::placeholder {
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .liftpick__search:focus {
-  border-color: var(--focus);
   outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 /* Which day's lifts these are, when the calendar above has one focused. The narrowing is stated
- * rather than left to be noticed, and the way out of it is in the same row. */
+ * rather than left to be noticed, and the way out of it sits in the same row. */
 .liftpick__scope {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s-2);
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  box-shadow: inset 0 -1px 0 0 var(--divider);
 }
 
 .liftpick__scopeday {
@@ -2121,96 +2266,9 @@ button.worknav__row:active {
   font-weight: 700;
 }
 
-.liftpick__all {
-  flex: 0 0 auto;
-}
-
-.liftpick__group {
-  margin: var(--s-2) 0 0;
-  color: var(--text-secondary);
-  font-size: var(--t-small);
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.liftpick__group:first-child {
-  margin-top: 0;
-}
-
-/* One row per lift. Hollow on pitch black until it is the one being read, which is the chooser
- * chip rule at list width: the fill is the signal and the word is the second channel. */
-.liftpick__row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'name showing'
-    'meta showing';
-  align-items: center;
-  gap: 0 var(--s-3);
-  width: 100%;
-  min-height: var(--tap);
-  padding: var(--s-3);
-  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
-  border-radius: var(--radius);
-  line-height: 1.25;
-  text-align: left;
-  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
-}
-
-.liftpick__row:active {
-  background: var(--surface-raised);
-  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
-}
-
-.liftpick__row.is-on {
-  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
-  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
-  border-color: var(--surface-raised-rim);
-  box-shadow:
-    inset 0 1px 0 0 var(--surface-raised-rim),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
-}
-
-.liftpick__name {
-  grid-area: name;
-  color: var(--text-primary);
-  font-size: var(--t-body);
-  font-weight: 600;
-}
-
-.liftpick__row.is-on .liftpick__name {
-  font-weight: 700;
-}
-
-.liftpick__meta {
-  grid-area: meta;
-  color: var(--text-secondary);
-  font-size: var(--t-small);
-  font-weight: 600;
-}
-
-/* On --surface-raised, --text-primary only. --text-secondary measures 4.49 there and this row is
- * filled with exactly that surface, so the quiet half of a selected row is lifted rather than
- * left under the floor. */
-.liftpick__row.is-on .liftpick__meta {
-  color: var(--text-primary);
-}
-
-.liftpick__showing {
-  grid-area: showing;
-  color: var(--text-primary);
-  font-size: var(--t-small);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .liftpick__none {
   margin: 0;
-  padding: var(--s-3) 0;
+  padding: var(--s-5) var(--s-4);
   color: var(--text-secondary);
   font-size: var(--t-body);
 }
@@ -2689,15 +2747,24 @@ button.worknav__row:active {
   color: var(--muted);
 }
 
-/* Reserved, so tapping a day does not shift the grid out from under the finger that tapped it.
- * Sunk into the card as its own well, so the line reads as an answer to the tap rather than as a
- * paragraph that happened to appear under the grid. */
+/* Sunk into the card as its own well, so what a tap opens reads as an answer to it rather than as
+ * something that happened to appear under the grid.
+ *
+ * The height used to be reserved at 3em so tapping a day could not shift the grid out from under
+ * the finger that tapped it. That reservation bought nothing once the tap started opening a whole
+ * readout: three lines of held space against a card several hundred pixels tall is not the
+ * difference between shifting and not, and the grid sits above this in flow and never moved
+ * anyway. What it did buy was an empty band under every untapped calendar, on the screen somebody
+ * opens most. */
 .cal__detail {
-  min-height: 3em;
   margin-top: 0;
   padding: var(--s-2) var(--s-3);
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--surface-base) 55%, transparent);
+}
+
+.cal__detail:empty {
+  padding: 0;
 }
 
 /* The height stays reserved and the well does not. An empty sunken box under the grid reads as a
@@ -2973,30 +3040,56 @@ button.navlink:disabled {
   max-width: 60rem;
 }
 
+/* The trainer's own menu, and the same card of rows every other list in this app is now. See
+ * .row-card: one object with a hairline between rows, rather than one bordered box per client. */
 .clientlist {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--s-2);
+  border-radius: var(--radius-sheet);
+  background: var(--chrome-face);
+  overflow: hidden;
+}
+
+.clientlist__row + .clientlist__row {
+  box-shadow: inset 0 1px 0 0 var(--divider);
 }
 
 .clientlist__button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--s-3);
   width: 100%;
-  min-height: var(--tap);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  padding: var(--s-3);
-  border: 1px solid var(--surface-raised);
-  border-radius: var(--radius);
-  background: var(--surface-base);
+  padding: 0;
+  border: 0;
+  background: none;
   text-align: left;
 }
 
-.clientlist__button:hover {
-  border-color: var(--accent-data);
+/* The grid above is on the button and this is the box its content actually stacks in, for the
+ * reason trainer.js states where it writes it: a button's height does not follow its own flex or
+ * grid children. Two columns of one element each is safe, the column of five inside is not. */
+.clientlist__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+  min-height: var(--tap);
+  padding: var(--s-3) 0 var(--s-3) var(--s-4);
+}
+
+.clientlist__go {
+  width: 18px;
+  height: 18px;
+  margin-right: var(--s-4);
+  color: var(--muted);
+}
+
+.clientlist__button:active {
+  background: var(--chrome-face-press);
 }
 
 .clientlist__name {
@@ -3781,7 +3874,7 @@ button.navlink:disabled {
   gap: var(--s-3);
   min-height: var(--tap);
   padding: var(--s-2) 0;
-  border-bottom: 1px solid var(--surface-raised);
+  border-bottom: 1px solid var(--divider);
 }
 
 .history__what {

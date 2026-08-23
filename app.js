@@ -34,7 +34,7 @@ import {
   loadValue,
   stepSize as snapStep,
   loadUnit,
-  mountUnitSwitch,
+  mountUnitSetting,
   onUnitChange,
 } from './js/units.js';
 
@@ -1524,7 +1524,7 @@ async function main() {
   // Flipping mid session is safe: state.weightKg is kilograms and stays put, so the number on the
   // stepper changes and the load on the bar does not. The step changes with it, which is the
   // point, because 2.5 kg is not a thing a pound gym can add.
-  mountUnitSwitch(el('unit-switch'));
+  mountUnitSetting(el('unit-setting'));
   onUnitChange(() => {
     ui.weightInput.step = unit() === 'lb' ? '5' : '2.5';
     render();

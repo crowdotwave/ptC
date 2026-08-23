@@ -13,7 +13,7 @@ import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/
 import { loadSessions } from './js/session.js';
 import { currentAssignment } from './js/snapshot.js';
 import { renderLiftPicker, groupLifts, liftSummaries } from './js/lift-picker.js';
-import { unit, toDisplay, weightLabel, loadUnit, mountUnitSwitch, onUnitChange } from './js/units.js';
+import { unit, toDisplay, weightLabel, loadUnit, mountUnitSetting, onUnitChange } from './js/units.js';
 
 const el = (id) => document.getElementById(id);
 const state = {
@@ -90,12 +90,21 @@ function renderList() {
 
       return (
         `<li class="clientlist__row"><button type="button" class="clientlist__button" data-client="${c.id}">` +
+        // Everything inside a wrapper, because a button is not sized by its own flex or grid
+        // children: they sit in an anonymous box the button's height ignores. See .row-card in
+        // styles.css for where that was measured.
+        `<span class="clientlist__inner">` +
         `<span class="clientlist__name">${esc(c.display_name)}</span>` +
         (standing ? `<span class="clientlist__facts num">${esc(standing)}</span>` : '') +
         `<span class="clientlist__facts num">${esc(last)}</span>` +
         `<span class="clientlist__facts num">${c.sessionCount} session${c.sessionCount === 1 ? '' : 's'}, ` +
         `${c.recentCount} in the last 4 weeks</span>` +
         `<span class="clientlist__facts num">${c.blockCount} block${c.blockCount === 1 ? '' : 's'}</span>` +
+        `</span>` +
+        // The shape that says a row opens something, same as the workout panel's.
+        `<svg class="clientlist__go" viewBox="0 0 20 20" aria-hidden="true" fill="none" ` +
+        `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="M7.5 4l6 6-6 6" /></svg>` +
         `</button>` +
         `<div class="archived__actions">` +
         `<button type="button" class="button-secondary" data-edit="${c.id}">Edit</button>` +
@@ -511,7 +520,7 @@ async function main() {
   // The trainer's own preference, read from their own row, which is also the only row a tap here
   // will ever write. Nothing a trainer does on this screen reaches a client's phone.
   await loadUnit(storage, actor);
-  mountUnitSwitch(el('unit-switch'));
+  mountUnitSetting(el('unit-setting'));
   onUnitChange(() => {
     if (state.data) renderDetail();
   });

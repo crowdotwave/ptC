@@ -42,7 +42,6 @@
              two lines and pushes this screen into scrolling, which it must never do. -->
         <div class="context__row">
           <p class="context__set num" id="set-position">&nbsp;</p>
-          <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
         <p class="context__target" id="target">&nbsp;</p>
         <p class="context__last num" id="last-time">&nbsp;</p>
@@ -52,7 +51,10 @@
              but bound to nobody, or no client, where the controls are already gone and getting
              out is the only thing left to do. -->
         <footer class="account" id="account" hidden>
-          <button class="account__out" type="button" data-signout hidden>Sign out</button>
+          <!-- Set once, so it lives here rather than in the corner of every screen. See
+             mountUnitSetting in js/units.js. -->
+        <div class="unitset" id="unit-setting" hidden></div>
+        <button class="account__out" type="button" data-signout hidden>Sign out</button>
         </footer>
       </header>
 

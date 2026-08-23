@@ -21,7 +21,6 @@
              goes on the title row unless it is under about 40px wide. -->
         <div class="context__row">
           <p class="context__target" id="view-note">&nbsp;</p>
-          <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
       </header>
 
@@ -158,6 +157,9 @@
       <!-- Who you are signed in as, and the way out. Quietest type on the page. -->
       <footer class="account">
         <span class="account__who" id="viewer-name"></span>
+        <!-- Set once, so it lives here rather than in the corner of every screen. See
+             mountUnitSetting in js/units.js. -->
+        <div class="unitset" id="unit-setting" hidden></div>
         <button class="account__out" type="button" data-signout hidden>Sign out</button>
       </footer>
     </main>
