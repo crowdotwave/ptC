@@ -165,6 +165,37 @@ function widthOf(container, fallback = 328) {
   return w > 40 ? w : fallback;
 }
 
+/**
+ * The reader's own selection, drawn on top of a series.
+ *
+ * A day tapped on the consistency grid focuses the session it holds, on every chart at once. That
+ * is not a filter: the charts keep drawing the whole history, because a single session on its own
+ * is one dot with nothing to compare it against, and comparing is the entire reason somebody
+ * tapped a day.
+ *
+ * WHY THIS IS WHITE AND NOT A COLOUR. Every hue in this file encodes something about the training:
+ * cyan is the series, --pr is a record, --deload is a planned back off week, the slot faces are
+ * which program day. A selection is not a fact about the training at all, it is a fact about what
+ * the person holding the phone is looking at, so it gets the ink the numbers are written in rather
+ * than a fifth meaning added to a palette CLAUDE.md says to measure before extending.
+ *
+ * It also has to be told apart from the record ring, which is the one other ring on these charts.
+ * Three things separate them and none of them is hue alone: this ring is larger (9 against 6.5),
+ * it is empty where the record has a filled dot inside it, and it drops a hairline to the baseline
+ * that nothing else in this file draws. The dropline is what makes it survive a glance: a ring at
+ * the top of a chart is small, and a full height rule at one x position is not.
+ */
+function focusMark(cx, cy, base, { radius = 9 } = {}) {
+  return (
+    `<line class="chart__focusdrop" x1="${cx.toFixed(1)}" y1="${(cy + radius).toFixed(1)}" ` +
+    `x2="${cx.toFixed(1)}" y2="${base.toFixed(1)}" />` +
+    `<circle class="chart__focus" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${radius}" />`
+  );
+}
+
+/** Whether a point belongs to the focused day. Tolerant of no focus, which is the usual case. */
+const focused = (ids, sessionId) => Boolean(ids && sessionId && ids.has(sessionId));
+
 // ------------------------------------------------------------------ strength
 
 /**
@@ -219,7 +250,7 @@ export function renderHoldChart(container, progression, options = {}) {
 function renderSeriesChart(
   container,
   progression,
-  { height = 180, series, value, title, scale = (v) => v, integer = false },
+  { height = 180, series, value, title, scale = (v) => v, integer = false, focus = null },
 ) {
   container.innerHTML = '';
   if (!series.length) return;
@@ -281,6 +312,11 @@ function renderSeriesChart(
     } else {
       out += `<circle class="chart__mark is-current" cx="${cx}" cy="${cy}" r="2.5" />`;
     }
+  }
+
+  // The focused session last of the points, so its ring is never half under the next mark drawn.
+  for (const p of series) {
+    if (focused(focus, p.sessionId)) out += focusMark(px(p), y(at(p)), pad.top + plotH);
   }
 
   // Deloads say so in words, so the dash is never the only signal.
@@ -408,7 +444,7 @@ let gradientSeq = 0;
  * the ink of one that was twice the work. The fill is what makes four overlapping series legible,
  * so the axis pays for it rather than the other way round.
  */
-export function renderSessionVolumeChart(container, built, { height = 208, scale = toDisplay } = {}) {
+export function renderSessionVolumeChart(container, built, { height = 208, scale = toDisplay, focus = null } = {}) {
   container.innerHTML = '';
   const lines = built.lines.filter((line) => line.points.length);
   if (!lines.length) return;
@@ -497,6 +533,16 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
     }
   });
 
+  // A point here can be several sessions of one program day summed into one visit, so any of its
+  // ids matching is a hit. After every line, for the same reason as everywhere else.
+  for (const line of lines) {
+    for (const point of line.points) {
+      if ((point.sessionIds ?? []).some((id) => focused(focus, id))) {
+        out += focusMark(x(Date.parse(point.date)), y(at(point)), base);
+      }
+    }
+  }
+
   // The glyph at the end of each line, which is the same two letters the grid puts in the cell.
   // In --text-primary rather than in the slot's own rim: a rim is a lit edge at about 3.5 against
   // black, which is a fine stroke and an illegal colour for 12px text.
@@ -549,7 +595,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
  * has to be legible, and because stacking is what stops an added set from inflating the number
  * that carries the claim.
  */
-export function renderVolumeChart(container, progression, { height = 164 } = {}) {
+export function renderVolumeChart(container, progression, { height = 164, focus = null } = {}) {
   container.innerHTML = '';
   const segments = progression.volume.segments.filter((s) => s.points.length);
   if (!segments.length) return;
@@ -592,6 +638,16 @@ export function renderVolumeChart(container, progression, { height = 164 } = {})
         const top = y(total(p));
         out += `<rect class="chart__bar is-extra" x="${left}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, y(prescribed) - top).toFixed(1)}" rx="3" />`;
       }
+
+      // A ring makes no sense on a bar, so the focus is the bar's own outline, held off the fill
+      // so it reads as something drawn around the bar rather than as a border on it. No dropline
+      // either: the bar already reaches the baseline, which is what the dropline exists to do.
+      if (focused(focus, p.sessionId)) {
+        const top = y(total(p));
+        out +=
+          `<rect class="chart__focusbar" x="${(cx - barW / 2 - 3).toFixed(1)}" y="${(top - 3).toFixed(1)}" ` +
+          `width="${(barW + 6).toFixed(1)}" height="${Math.max(6, base - top + 6).toFixed(1)}" rx="5" />`;
+      }
     });
     i += segment.points.length;
 
@@ -619,7 +675,7 @@ export function renderVolumeChart(container, progression, { height = 164 } = {})
  * degenerate case: the bar did not move for months and the reps went from five to seven, which
  * is not visible anywhere else in the app.
  */
-export function renderRepsAtLoadChart(container, progression, { height = 156 } = {}) {
+export function renderRepsAtLoadChart(container, progression, { height = 156, focus = null } = {}) {
   container.innerHTML = '';
   const lines = progression.repsAtLoad.lines.filter((l) => l.points.length);
   if (!lines.length) return;
@@ -656,6 +712,18 @@ export function renderRepsAtLoadChart(container, progression, { height = 156 } =
     return { line, index, last, y: at, labelY: at };
   });
   spread(ends, 13, pad.top + 8, pad.top + plotH);
+
+  // BEFORE the lines here, which is the opposite of every other chart in this file, and the
+  // exception is measured rather than stylistic. This is the one chart that prints a word at its
+  // last point: the load label sits six pixels right of it, which is inside a ring of radius nine.
+  // Drawn after, the ring crosses the numerals and "92.5 kg" stops being readable, and the number
+  // is the thing somebody came to this chart for. Drawn first, the label paints over the arc it
+  // crosses and both survive. One session can hold several loads, so this can mark more than one.
+  for (const line of lines) {
+    for (const p of line.points) {
+      if (focused(focus, p.sessionId)) out += focusMark(x(Date.parse(p.date)), y(p.reps), pad.top + plotH);
+    }
+  }
 
   ends.forEach(({ line, index, last, labelY }) => {
     // The most recent load is the heavy solid one. Older loads thin out and dash, so the

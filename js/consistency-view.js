@@ -35,7 +35,8 @@ const WEEKDAYS = [
   ['Su', 'Sunday'],
 ];
 
-const longDay = (day) =>
+/** A whole date in words, for the readout under the grid and for a cell's own label. */
+export const longDay = (day) =>
   new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -173,31 +174,16 @@ export function renderConsistency(built) {
   return (
     `<div class="cal__scroller" id="cal-scroller">${built.months.map(renderMonth).join('')}</div>` +
     // Height is reserved in CSS so tapping a day does not shift the grid out from under the
-    // finger that just tapped it.
-    `<p class="cal__detail" id="cal-detail" aria-live="polite"></p>`
+    // finger that just tapped it. A div rather than a p: what goes in here is a whole readout of
+    // the day, built by js/session-readout.js, and a workout is not a paragraph.
+    `<div class="cal__detail" id="cal-detail" aria-live="polite"></div>`
   );
 }
 
-/**
- * The line under the grid, for one tapped day.
- *
- * Named lifts and a set count, no weights. That keeps this out of the unit switch's business: a
- * kg/lb toggle redraws the charts and must not have to redraw the calendar to stay honest. If a
- * weight ever belongs here it goes through units.js weightLabel and nothing else formats it.
- */
-export function renderDetail({ day, sessions }) {
-  if (!sessions.length) return '';
-
-  const parts = sessions.map((session) => {
-    const lifts = session.lifts.length ? session.lifts.join(', ') : 'no lifts logged';
-    const sets = session.setCount === 1 ? '1 set' : `${session.setCount} sets`;
-    return `${esc(session.label)}: ${esc(lifts)}. ${sets}.`;
-  });
-
-  // parts are already escaped piece by piece above. Escaping the joined string again would print
-  // the entities rather than the apostrophes a trainer typed.
-  return `<b class="cal__detailday">${esc(longDay(day))}</b> ${parts.join(' ')}`;
-}
+// What a tapped day opens is no longer a line here. It is js/session-readout.js, which draws the
+// whole workout set by set, and the charts below take the same tap as a focus. The line this
+// replaced named the lifts and counted the sets, which answered "did I train" for a second time
+// on a screen where the cell above had already answered it.
 
 /** The name a session's day had, for the detail line. Exported so progress.js does not guess. */
 export function sessionLabel(assignment, dayIndex) {

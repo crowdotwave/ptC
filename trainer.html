@@ -73,7 +73,13 @@
              Without it the notes were reachable only by typing a URL. -->
         <p class="backlink"><a href="#" id="see-sessions">See every session</a></p>
 
-        <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+        <!-- Which lift these charts are, named. It used to be readable only off whichever chip
+             in the scroller happened to be filled, which is a heading carried by a control. -->
+        <h2 class="context__exercise" id="exercise-name">&nbsp;</h2>
+
+        <!-- Same control as the progress screen, from the same module. A coach reading a
+             client with a forty lift history had the worst version of the old scroller. -->
+        <div class="liftpick" id="lift-picker"></div>
 
         <p class="suggest" id="deload-suggest" hidden></p>
 

@@ -542,18 +542,34 @@ Constraints:
 hue discrimination degrades. Every state that carries meaning also carries a shape, a weight,
 a position, or a word.
 
-**Selected means filled.** Any row that chooses between things, the day picker and the lift
-picker today, is a row of pill chips: unselected is a hollow outline on pitch black, selected
-is filled with the raised surface gradient plus its rim, a 700 weight label, and a glow. Fill
-against no fill is the signal that survives colour blindness, glare, and a glance from arm's
-length, so it is the one carrying the state. Colour is reinforcement and never the whole
-signal. The workout panel is the same rule at a different size: the lift being done fills with
-the same gradient and rim while the rest are hollow, and the word "Now" carries it a second time.
+**Selected means filled.** Anything that chooses between things, wherever it is drawn, marks the
+selection by FILLING it: unselected is a hollow outline on pitch black, selected is filled with the
+raised surface gradient plus its rim, a 700 weight label, and a glow. Fill against no fill is the
+signal that survives colour blindness, glare, and a glance from arm's length, so it is the one
+carrying the state. Colour is reinforcement and never the whole signal. The rule lives once in
+`styles.css` under "chooser chips" and the pickers that are still chip rows take it from there,
+which is the day picker and the builder's section picker: they were previously styled apart, and
+one shipped with no visible selected state at all while the other encoded it in two colours and
+nothing else. The workout panel is the same rule at a different size, the lift being done filled
+with the same gradient and rim while the rest are hollow, with the word "Now" carrying it a second
+time. The lift picker's list rows are the same rule again at list width, with the word "Showing".
 Filling is also what separates pressable from not there, since a lift with every set logged has
-nowhere to go and so gets no fall of light at all. Both chip rows share one rule in `styles.css`
-under "chooser chips" so they cannot drift:
-they were previously styled apart, and one of them shipped with no visible selected state at
-all while the other encoded it in two colours and nothing else.
+nowhere to go and so gets no fall of light at all.
+
+**A chip row is a chooser for a handful of options, and never for a library.** The lift picker on
+the progress screen and the trainer's client view was one, and it could not survive the number of
+lifts a real client accumulates: measured on the seeded client, eight lifts is 1,344px of row
+against 390px of phone, so 71 percent of the options were off screen behind a sliced chip, and a
+seven day calisthenics split is three or four times that. That is the same failure the chip rule
+exists to prevent, arrived at from the other side. So it is now what every training app converges
+on for this, because it is the only shape that holds forty options on a phone: one lit control
+saying what it does, and behind it a list you can search, grouped by the day of the program each
+lift sits on, each row carrying its session count and when it was last trained. It is a state of
+the screen and not a layer over it, exactly as the workout panel is: in flow, no focus trap, no
+z-index, no outside click handler, escape to close. `js/lift-picker.js` owns it and both screens
+render from that one module. The day picker stays a chip row, because a rotation is five options
+and the half visible chip at the edge is a useful affordance when there is almost nothing behind
+it.
 
 **No intensity-only encoding either.** This one is measured, not assumed. The data axis is
 cyan, and cyan clusters at high luminance in sRGB, so an intensity ladder in it has very
@@ -673,6 +689,28 @@ behind the first. The trap is that it is invisible at any size you would mock th
 12 percent clears the radius comfortably on a 300px cell. Two fixes, because one of them is a
 percentage and percentages follow whatever the cell size becomes next: the positions are pulled
 into the flat run, and `.cal__day` clips its own overflow.
+
+**Tapping a day focuses that session everywhere, and focusing is not filtering.** A cell answers
+whether somebody trained. What they actually did is the question the tap asks, and until now the
+answer was one line naming the lifts and counting the sets, which is the cell's own answer given
+twice. So a tap now does four things at once: the cell takes a white ring, the whole workout opens
+under the grid set by set through `js/session-readout.js`, every chart below rings that session,
+and the lift picker narrows to the lifts that day held. Tapping the same day again clears all four.
+
+The charts keep drawing the entire history while one session is ringed, and that is the load
+bearing part. Redrawing them from that session alone gives one dot per chart with nothing around
+it, and comparing is the whole reason somebody tapped a day. The ring is `--text-primary` and never
+a hue: every colour in those charts encodes something about the training, and where the reader is
+looking is not a fact about the training. It is told from the record ring by size, by being hollow
+where that one has a filled dot, and by a hairline dropped to the baseline that nothing else draws.
+`focusMark` in `js/charts.js` owns it.
+
+The readout carries weights, which the line it replaced deliberately did not, and that cost is
+paid rather than hidden: it formats nothing itself, the caller hands it `weightLabel`, and the
+progress screen redraws it on a unit toggle alongside the charts. A readout of a workout that
+cannot say what was on the bar is not a readout of a workout. It carries no total, no score and no
+comparison to the session before it: the charts above already hold the comparison, and a grade
+under a list of sets is the guilt messaging below arriving through the back door.
 
 **The no-streak rule survives this and is not softened by it.** A consistency grid is not
 permission to add a streak. There is no streak count, no adherence ratio, no missed day count, and

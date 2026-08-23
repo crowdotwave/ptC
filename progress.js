@@ -10,11 +10,14 @@ import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';
-import { renderConsistency, renderMonthNav, renderDetail, sessionLabel } from './js/consistency-view.js';
+import { renderConsistency, renderMonthNav, longDay, sessionLabel } from './js/consistency-view.js';
+import { renderSessionReadout } from './js/session-readout.js';
+import { renderLiftPicker, groupLifts, liftSummaries } from './js/lift-picker.js';
 import { activeSetLogs } from './js/history.js';
 import { openSession, loadSessions, summarise, discardSession } from './js/session.js';
 import { renderHistory, discardedMessage } from './js/session-view.js';
 import { isoDate, localDayOf } from './js/dates.js';
+import { currentAssignment } from './js/snapshot.js';
 import {
   unit,
   toDisplay,
@@ -52,6 +55,20 @@ const state = {
   assignments: new Map(),
   sessionsByDay: new Map(),
   logsBySession: new Map(),
+  // The lift picker. `liftList` is every lift this client has done and `liftSnapshot` is the
+  // program they are on now, which is what the list is grouped by. The two below are the control's
+  // own state, whether the list is open and what has been typed into it, held here rather than
+  // read back off the DOM so a redraw cannot lose either one.
+  liftList: [],
+  liftSnapshot: null,
+  pickerOpen: false,
+  pickerQuery: '',
+  // The day tapped on the consistency grid, and the sessions it holds. Null means no day is
+  // focused, which is the state this screen opens in and the state tapping the same day again
+  // returns it to. Everything focus does is additive: the charts still draw the whole history,
+  // because a session with nothing around it is a dot rather than a comparison.
+  focusDay: null,
+  focusSessionIds: null,
   // The session history list. `armed` is the session whose Discard has been tapped once, held
   // here rather than in the markup so a redraw cannot lose or invent it.
   history: [],
@@ -126,15 +143,66 @@ function captionFor(kind, progression) {
   }
 }
 
-function renderLiftPicker(items) {
-  el('lift-picker').innerHTML = items
-    .map(
-      (ex) =>
-        `<button type="button" class="button-secondary lifts__item${
-          ex.id === state.exerciseId ? ' is-on' : ''
-        }" data-exercise="${ex.id}"${ex.id === state.exerciseId ? ' aria-current="true"' : ''}>${ex.name}</button>`,
-    )
-    .join('');
+/**
+ * Which lifts the picker is offering right now.
+ *
+ * The whole list, unless a day is focused on the grid, in which case it is the lifts that day
+ * held. That narrowing is the point of tapping a day: somebody looking at the sixteenth wants the
+ * charts for what they did on the sixteenth, and scrolling past thirty lifts they did not touch to
+ * reach one they did is the work the tap was meant to save.
+ *
+ * Never empty when a day is focused, because the grid only makes a day tappable when it holds live
+ * sets, and those sets are what this reads.
+ */
+function pickerLifts() {
+  if (!state.focusSessionIds) return state.liftList;
+  const inDay = new Set();
+  for (const id of state.focusSessionIds) {
+    for (const row of state.logsBySession.get(id) ?? []) {
+      if (!row.is_warmup) inDay.add(row.exercise_id);
+    }
+  }
+  const narrowed = state.liftList.filter((lift) => inDay.has(lift.id));
+  return narrowed.length ? narrowed : state.liftList;
+}
+
+/**
+ * The lift picker, redrawn whole.
+ *
+ * innerHTML rather than patching, because the control is small and the alternative is a second
+ * copy of what it looks like that has to be kept in step with the first. The one thing a redraw
+ * must not throw away is the caret in the search field, so the caller is expected to say when it
+ * is a keystroke driving this: see the input listener.
+ */
+function drawPicker() {
+  // Nothing logged, so there is nothing to choose between. An empty control is worse than none:
+  // it says a choice exists and then offers no options.
+  if (!state.liftList.length) {
+    el('lift-picker').innerHTML = '';
+    return;
+  }
+  const lifts = pickerLifts();
+  el('lift-picker').innerHTML = renderLiftPicker({
+    lifts,
+    groups: groupLifts(lifts, state.liftSnapshot),
+    selectedId: state.exerciseId,
+    open: state.pickerOpen,
+    query: state.pickerQuery,
+    scope: state.focusDay ? longDay(state.focusDay) : null,
+  });
+}
+
+/** Open or close the list, and put the caret in the search field when there is one. */
+function setPickerOpen(open) {
+  state.pickerOpen = open;
+  // Typing survives a close and reopen only for as long as the panel is a single visit. Coming
+  // back to a list still filtered by something typed a minute ago is a chooser hiding most of its
+  // options with no visible reason, which is the failure this control was built to end.
+  if (!open) state.pickerQuery = '';
+  drawPicker();
+  if (!open) return;
+  const search = el('liftpick-search');
+  if (search) search.focus();
 }
 
 /**
@@ -162,6 +230,10 @@ function render() {
   const exercise = state.exercises.get(state.exerciseId);
   el('exercise-name').textContent = exercise ? exercise.name : '';
 
+  // The session a tapped day holds, marked on every chart below rather than filtered to. See
+  // focusMark in js/charts.js for why marking and not filtering.
+  const focus = state.focusSessionIds;
+
   const last = data.points[data.points.length - 1];
   el('headline').textContent = last
     ? `${data.totalSessions} session${data.totalSessions === 1 ? '' : 's'}, last on ${new Date(
@@ -178,12 +250,16 @@ function render() {
     : leadFor(data);
   setCopy('lead-title', lead.title);
   setCopy('lead-value', lead.view.change ? lead.format(lead.view.change.last) : '');
-  lead.render(el('lead-plot'), data);
+  lead.render(el('lead-plot'), data, { focus });
   const extraTotal = data.points.reduce((t, p) => t + p.extra, 0);
   setCopy(
     'lead-caption',
     captionFor(lead.key ?? data.leadView, data) +
-      (loaded && extraTotal > 0 ? ` Plus ${volumeLabel(extraTotal)} you added beyond the plan.` : ''),
+      // Naming the band as well as the number. The bar is stacked, prescribed under added, and
+      // the pale top segment is the only thing on this card with no label of its own.
+      (loaded && extraTotal > 0
+        ? ` Plus ${volumeLabel(extraTotal)} you added beyond the plan, drawn as the pale band on each bar.`
+        : ''),
   );
 
   // Reps at load and estimated 1RM are both load only. Without load, volume computes to a row
@@ -198,13 +274,13 @@ function render() {
   // so it answers a question about months rather than about today.
   setCopy('second-title', 'Estimated 1RM');
   setCopy('second-value', data.e1rm.change ? weightLabel(data.e1rm.change.last) : '');
-  renderE1rmChart(el('second-plot'), data);
+  renderE1rmChart(el('second-plot'), data, { focus });
   setCopy('second-caption', captionFor('e1rm', data));
 
   // Reps at load. Always visible for a loaded lift, because for an intermediate this is the only
   // place a block of real progress shows up at all. Hidden without load, where every value would
   // be one line labelled 0 kg repeating what the lead chart already said.
-  renderRepsAtLoadChart(el('reps-plot'), data);
+  renderRepsAtLoadChart(el('reps-plot'), data, { focus });
   const lines = data.repsAtLoad.lines;
   setCopy('reps-value', lines.length ? weightLabel(lines[lines.length - 1].loadKg) : '');
   setCopy(
@@ -266,7 +342,7 @@ function drawWork() {
   }
   card.hidden = false;
   setCopy('work-value', built.latest ? volumeLabel(built.latest.volumeKg) : '');
-  renderSessionVolumeChart(el('work-plot'), built);
+  renderSessionVolumeChart(el('work-plot'), built, { focus: state.focusSessionIds });
   setCopy('work-caption', workCaption(built));
 }
 
@@ -279,6 +355,12 @@ function drawWork() {
  */
 function redraw() {
   drawWork();
+  // The readout under the grid carries weights now, so it is in the unit switch's business in a
+  // way the line it replaced deliberately was not. That is the cost of saying what was on the bar,
+  // and it is paid here rather than by leaving a card reading kilograms under a screen set to
+  // pounds. The grid itself is still not redrawn: it holds a scroll position and carries no
+  // weights, so a unit toggle has nothing to say to it.
+  drawReadout();
   if (state.data) render();
 }
 
@@ -389,22 +471,89 @@ function openOn(scroller, index) {
   place();
 }
 
-/** What one day held, composed when it is tapped rather than for all 42 cells up front. */
-function detailFor(day) {
-  const sessions = (state.sessionsByDay.get(day) ?? []).map((session) => {
-    const rows = state.logsBySession.get(session.id) ?? [];
-    const names = [];
-    for (const row of rows) {
-      const name = state.exercises.get(row.exercise_id)?.name;
-      if (name && !names.includes(name)) names.push(name);
-    }
-    return {
-      label: sessionLabel(state.assignments.get(session.assignment_id), session.day_index),
-      lifts: names,
-      setCount: rows.length,
-    };
-  });
-  return renderDetail({ day, sessions });
+/**
+ * What one day held, set by set, composed when it is tapped rather than for all 42 cells up front.
+ *
+ * The rows come from `logsBySession`, which is already filtered through activeSetLogs, so a
+ * correction shows the corrected numbers and a retracted set is not here at all. They are grouped
+ * into lifts by walking them in log order rather than by bucketing on exercise id: a client who
+ * came back to a lift later in the session did that lift twice, and one block claiming eight sets
+ * would be the same lie the workout panel's liftRuns exists to avoid.
+ */
+function readoutFor(day) {
+  const sessions = (state.sessionsByDay.get(day) ?? [])
+    .slice()
+    .sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)))
+    .map((session) => {
+      const rows = (state.logsBySession.get(session.id) ?? [])
+        .slice()
+        .sort((a, b) => String(a.logged_at).localeCompare(String(b.logged_at)));
+
+      const lifts = [];
+      for (const row of rows) {
+        const name = state.exercises.get(row.exercise_id)?.name;
+        if (!name) continue;
+        const open = lifts[lifts.length - 1];
+        if (open && open.exerciseId === row.exercise_id) open.sets.push(row);
+        else lifts.push({ exerciseId: row.exercise_id, name, sets: [row] });
+      }
+
+      return {
+        label: sessionLabel(state.assignments.get(session.assignment_id), session.day_index),
+        time: session.started_at
+          ? new Date(session.started_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+          : '',
+        note: session.client_note ?? '',
+        isOpen: !session.completed_at,
+        lifts,
+      };
+    });
+
+  return renderSessionReadout(
+    { day, dayLabel: longDay(day), sessions },
+    // The one formatter, per CLAUDE.md. Nothing in the readout module knows what a kilogram is.
+    { weight: weightLabel },
+  );
+}
+
+/**
+ * The readout under the grid, for whichever day is focused.
+ *
+ * Nothing when no day is focused, which is what leaves the reserved well empty rather than sunken
+ * and waiting. Redrawn on a unit toggle, because it carries weights.
+ */
+function drawReadout() {
+  const node = el('cal-detail');
+  if (!node) return;
+  node.innerHTML = state.focusDay ? readoutFor(state.focusDay) : '';
+}
+
+/**
+ * Focus a day, or clear it.
+ *
+ * One call site for the whole thing, because focusing a day touches four separate parts of this
+ * screen and doing it in the click handler meant four chances to forget one. It marks the sessions
+ * on every chart, narrows the lift picker to the lifts that day held, opens the readout, and moves
+ * the selection when the lift currently on screen is not one of them: leaving somebody on a squat
+ * chart after they tapped a pull day is answering a question they did not ask.
+ */
+async function showDay(day) {
+  const sessions = day ? (state.sessionsByDay.get(day) ?? []) : [];
+  state.focusDay = sessions.length ? day : null;
+  state.focusSessionIds = sessions.length ? new Set(sessions.map((session) => session.id)) : null;
+  // A narrowed list is a different list, so anything typed against the old one is stale.
+  state.pickerQuery = '';
+
+  drawReadout();
+
+  const offered = pickerLifts();
+  if (offered.length && !offered.some((lift) => lift.id === state.exerciseId)) {
+    // selectExercise redraws the picker and the charts, so there is nothing to do after it.
+    await selectExercise(offered[0].id);
+    return;
+  }
+  drawPicker();
+  if (state.data) render();
 }
 
 function mountConsistency(sessions, logs) {
@@ -455,19 +604,78 @@ function mountConsistency(sessions, logs) {
 
   el('consistency-body').addEventListener('click', (event) => {
     const cell = event.target.closest('[data-day]');
-    if (cell) {
-      const chosen = cell.getAttribute('aria-pressed') === 'true';
-      for (const other of scroller.querySelectorAll('[aria-pressed]')) other.removeAttribute('aria-pressed');
-      // Tapping the open day closes it, so the line is never stuck open on a day you left.
-      if (chosen) {
-        el('cal-detail').innerHTML = '';
-        return;
+    if (!cell) return;
+    const chosen = cell.getAttribute('aria-pressed') === 'true';
+    for (const other of scroller.querySelectorAll('[aria-pressed]')) other.removeAttribute('aria-pressed');
+    // Tapping the open day closes it, so the screen is never stuck focused on a day you left.
+    if (chosen) {
+      showDay(null);
+      return;
+    }
+    cell.setAttribute('aria-pressed', 'true');
+    showDay(cell.dataset.day);
+  });
+}
+
+// ------------------------------------------------------------------ the lift picker
+//
+// One listener on the container, because the control redraws itself whole and a listener bound to
+// a button inside it would go with the button.
+
+function mountLiftPicker() {
+  const host = el('lift-picker');
+
+  host.addEventListener('click', (event) => {
+    if (event.target.closest('[data-clear-scope]')) {
+      // The way out of a narrowed list. It clears the day on the grid as well, since a ringed
+      // session on the charts and a full list under it would be two answers to one question.
+      for (const cell of document.querySelectorAll('.cal__day[aria-pressed]')) {
+        cell.removeAttribute('aria-pressed');
       }
-      cell.setAttribute('aria-pressed', 'true');
-      el('cal-detail').innerHTML = detailFor(cell.dataset.day);
+      showDay(null);
+      return;
+    }
+    const row = event.target.closest('[data-exercise]');
+    if (row) {
+      // Closed on choosing. A list that stays open after a pick is a list you have to dismiss to
+      // see what you picked.
+      state.pickerOpen = false;
+      state.pickerQuery = '';
+      selectExercise(row.dataset.exercise);
+      return;
+    }
+    if (event.target.closest('#liftpick-open')) setPickerOpen(!state.pickerOpen);
+  });
+
+  // The rows are rebuilt on every keystroke, so the caret has to be put back where it was. Reading
+  // it off the field and restoring it beats re-rendering only the list, which would be a second
+  // copy of what the control looks like living here rather than in js/lift-picker.js.
+  host.addEventListener('input', (event) => {
+    const field = event.target.closest('#liftpick-search');
+    if (!field) return;
+    const at = field.selectionStart;
+    state.pickerQuery = field.value;
+    drawPicker();
+    const redrawn = el('liftpick-search');
+    if (!redrawn) return;
+    redrawn.focus();
+    try {
+      redrawn.setSelectionRange(at, at);
+    } catch {
+      // Some browsers refuse a selection range on type=search. The text is right either way, and
+      // the caret lands at the end, which is where somebody typing forwards wants it anyway.
     }
   });
 
+  // Escape closes it. A keyboard affordance rather than a modal one: there is no focus trap here
+  // and nothing to escape FROM, but a panel that has taken the caret needs a way back out that is
+  // not a mouse.
+  host.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.pickerOpen) return;
+    setPickerOpen(false);
+    const open = el('liftpick-open');
+    if (open) open.focus();
+  });
 }
 
 // ------------------------------------------------------------------ session history
@@ -586,7 +794,7 @@ async function selectExercise(exerciseId) {
   const assignments = await state.storage.query('assignments', { client_id: state.client.id });
   const setLogs = await state.storage.query('set_logs', { exercise_id: exerciseId });
   state.data = buildProgression({ setLogs, sessions, assignments, exerciseId });
-  renderLiftPicker(state.liftList);
+  drawPicker();
   render();
 }
 
@@ -653,13 +861,7 @@ async function main() {
 
   // Only lifts this client has actually done. An empty picker entry is a dead end.
   const sessions = await loadSessions(storage, state.client.id);
-  const sessionIds = new Set(sessions.map((s) => s.id));
   const logs = await storage.query('set_logs', {});
-  const done = new Map();
-  for (const row of logs) {
-    if (!sessionIds.has(row.session_id) || row.is_warmup) continue;
-    done.set(row.exercise_id, (done.get(row.exercise_id) ?? 0) + 1);
-  }
 
   // Before the lift picker's early return, deliberately. A brand new client and a client whose
   // only rows are warmups both fall out below, and they are exactly who this grid is for: it is
@@ -679,15 +881,14 @@ async function main() {
   // exactly the person most likely to want to throw one away.
   mountHistory(sessions, logs);
 
-  state.liftList = [...done.keys()]
-    .map((id) => state.exercises.get(id))
-    .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Through liftSummaries rather than counted here, so the count under each name is sessions of
+  // live work rather than rows: a lift corrected three times in one session used to read as three.
+  state.liftList = liftSummaries({ exercises: state.exercises, sessions, setLogs: logs });
+  // Grouped by the day of the program the client is on now. The current assignment and never the
+  // union of every one they have had: an old block names days that no longer exist.
+  state.liftSnapshot = (await currentAssignment(storage, state.client.id))?.snapshot ?? null;
 
-  el('lift-picker').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-exercise]');
-    if (button) selectExercise(button.dataset.exercise);
-  });
+  mountLiftPicker();
 
   if (!state.liftList.length) {
     el('exercise-name').textContent = 'Nothing logged yet';

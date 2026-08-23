@@ -680,17 +680,22 @@ button {
 /* ---------------------------------------------------------------- chooser chips
  *
  * One pattern for one job: a horizontal row picking which of several things you are looking at.
- * Two places use it, the day picker on the logging screen and the lift picker on the progress
+ * Two places used it, the day picker on the logging screen and the lift picker on the progress
  * screen, and they used to disagree. The day picker had NO selected state at all: .is-on carried
  * an aria-current and nothing a sighted person could see. A chooser where every option looks
  * identical is worse than no chooser, because it implies a choice was already made and then
  * hides which one. The lift picker had a selected state built from a border colour and a text
  * colour, which is two signals that are both colour, so it failed the encoding rule from a
- * different direction. Both now resolve here.
+ * different direction. Both resolved here.
  *
- * Four rows use it now: those two, the builder's section picker, and the feelings on the summary
- * card. Only the last one re-tints anything, and it re-tints the edges rather than the face, for
- * a reason that is measured under "how it felt".
+ * The lift picker has since left the row entirely, and the reason bounds what this pattern is
+ * for. A row like this can only hold as many options as fit across a phone, so it works for a
+ * rotation of days and fails for a library of lifts: see .liftpick and js/lift-picker.js. What
+ * carries over is the SELECTED state, which the picker's list rows reuse verbatim.
+ *
+ * Three rows use it now: the day picker, the builder's section picker, and the feelings on the
+ * summary card. Only the last one re-tints anything, and it re-tints the edges rather than the
+ * face, for a reason that is measured under "how it felt".
  *
  * These rules must stay below .button-secondary. The chips carry both classes and the item
  * selectors tie it on specificity, so source order is what wins the radius and the padding.
@@ -709,10 +714,22 @@ button {
   flex-wrap: nowrap;
   gap: var(--s-2);
   overflow-x: auto;
+  /* One axis, stated. `overflow-x: auto` alone leaves overflow-y at its initial `visible`, which
+   * the spec then computes to `auto` because the other axis is not visible, so every horizontal
+   * scroller in this file was silently a scroll container in BOTH directions. It never scrolled
+   * far, since nothing here overflows vertically by more than a rounding error, but a scroll port
+   * with a rounding error in it still swallows a vertical drag that started on a chip rather than
+   * passing it to the page, which reads as a row that sticks to the thumb. Pinned to hidden, which
+   * clips exactly as `auto` already did and removes the port. */
+  overflow-y: hidden;
+  /* And a horizontal fling stops at the end of the row rather than becoming the browser's own
+   * back gesture, which on a row of chips is one flick away at all times. */
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
-  /* Bleeds to the screen edge so a half visible chip says there is more, the same affordance
-   * the lift scroller on the progress screen uses. A rotation can be five days long and this
-   * band must not grow a second row: it sits in the top third, which is read, not reached. */
+  /* Bleeds to the screen edge so a half visible chip says there is more. A rotation can be five
+   * days long and this band must not grow a second row: it sits in the top third, which is read,
+   * not reached. That affordance is why this is still a row and the lift picker is not, since a
+   * half visible chip only says "there is more" where there is not much more. */
   margin: var(--s-1) calc(var(--s-4) * -1) 0;
   padding: var(--s-1) var(--s-4);
   scroll-snap-type: x proximity;
@@ -727,7 +744,6 @@ button {
  * row reads as a chooser before a single word of it is read, which is what earns it a place in
  * a band the thumb never reaches. */
 .daypicker__item,
-.lifts__item,
 .sections__item {
   flex: 0 0 auto;
   scroll-snap-align: start;
@@ -738,7 +754,6 @@ button {
 }
 
 .daypicker__item.is-on,
-.lifts__item.is-on,
 .sections__item.is-on,
 /* The fourth chip row, on the summary card. It re-tints the border, the rim and the glow further
  * down the file and takes everything else, including the face luminance, from here. See "how it
@@ -1870,6 +1885,37 @@ button.worknav__row:active {
   filter: none;
 }
 
+/* ---------------------------------------------------------------- the focused session
+ *
+ * A day tapped on the consistency grid, marked wherever that session appears. The argument for
+ * white rather than a colour is at focusMark in js/charts.js: every hue in these charts encodes
+ * something about the training, and where the reader is looking is not one of those things.
+ *
+ * Three signals, per the encoding rules, and none of them is hue: the ring is larger than the
+ * record ring and hollow where that one has a dot in it, and a hairline drops from it to the
+ * baseline, which nothing else in this file draws. No glow. Glow is light spreading into its
+ * surroundings and this sits over the rules and the numbers, which is the one place the hard
+ * rule forbids it.
+ */
+.chart__focus {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+}
+
+.chart__focusdrop {
+  stroke: color-mix(in srgb, var(--text-primary) 34%, transparent);
+  stroke-width: 1;
+}
+
+/* The bar chart's version. Held 3px off the bar on every side, so it reads as something drawn
+ * around the bar rather than as a border the bar grew. */
+.chart__focusbar {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+}
+
 /* What the latest point is worth, printed at the point. --text-primary rather than --accent-data,
  * because it sits within a few pixels of a glowing cyan stroke and a cyan numeral there would read
  * as part of the line rather than as a reading off it. No glow, per the hard rule: this is text. */
@@ -1917,27 +1963,256 @@ button.worknav__row:active {
   gap: var(--s-5);
 }
 
-/* One row that scrolls, rather than a block that wraps.
+/* ---------------------------------------------------------------- the lift picker
  *
- * Wrapping cost four rows of a phone screen for seven lifts, which pushed the first chart below
- * the fold on the one page whose entire job is showing a chart. Scrolling trades a little
- * discoverability for that height, and the trade is worth it because the lift you want is
- * almost always the one you were just on, which is the one already in view. */
-.lifts {
+ * Which lift the charts below are about. See js/lift-picker.js for why this stopped being a row
+ * of chooser chips: the short version is that a rotation has five options and a lift library has
+ * forty, and a scrolling row of forty holds about three of them on a phone.
+ *
+ * The shape is the one the logging screen already uses for the same job at a different scale. A
+ * lit control naming what you are looking at, a list behind it, in flow rather than over the top:
+ * no focus trap, no z-index, no outside click handler. Everything below it moves down while the
+ * list is open and comes back when it closes, which is what a disclosure is.
+ *
+ * The chooser chip rule is not abandoned by this, it moves inside. The row that is selected fills
+ * with the raised gradient and its rim, takes the 700 weight and --text-primary, and says
+ * "Showing". Fill against no fill is still the signal doing the real work, and the word is the
+ * second channel the encoding rules require. */
+.liftpick {
   display: flex;
-  flex-wrap: nowrap;
+  flex-direction: column;
   gap: var(--s-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-  /* Bleeds to the screen edge so a half visible chip says there is more, which is the only
-   * affordance a scroller of this kind gets. */
-  margin: 0 calc(var(--s-4) * -1);
-  padding: var(--s-1) var(--s-4);
-  scroll-snap-type: x proximity;
 }
 
-.lifts::-webkit-scrollbar {
+/* Lit, like the day chip on the logging screen and for the same reason: this is the one pressable
+ * thing in a band of text, so it has to catch light along its top edge to read as pressable at
+ * all. Full width rather than a pill, because unlike the day chip it has a whole list behind it
+ * and the width is what says so. */
+.liftpick__open {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'lead glyph'
+    'count glyph';
+  align-items: center;
+  gap: 0 var(--s-3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4);
+  line-height: 1.25;
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: var(--radius);
+  text-align: left;
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+.liftpick__open:active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+/* The pressed state swaps in --surface-raised, where --text-secondary measures 4.49 and is under
+ * the floor. Same fix as the day chip: lift the whole label for the length of the press rather
+ * than leave half of it unreadable. */
+.liftpick__open:active .liftpick__count,
+.liftpick__open:active .liftpick__glyph {
+  color: var(--text-primary);
+}
+
+.liftpick__lead {
+  grid-area: lead;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liftpick__count {
+  grid-area: count;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.liftpick__glyph {
+  grid-area: glyph;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+  transition: transform 160ms ease;
+}
+
+.liftpick__open[aria-expanded='true'] .liftpick__glyph {
+  transform: rotate(180deg);
+}
+
+/* The list. A veiled card, like everything else that groups things on this screen, and capped
+ * rather than left to run: forty lifts in flow would push the charts a screen and a half down and
+ * the way back up is a scroll rather than a tap. Its own scroll is contained, so flicking to the
+ * bottom of the list does not carry on into the page. */
+.liftpick__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--veil-edge-low);
+  border-top-color: var(--veil-edge);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, var(--veil) 0%, var(--veil-deep) 58%, transparent 100%);
+}
+
+.liftpick__panel[hidden] {
   display: none;
+}
+
+.liftpick__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-height: 52vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Keyboard, and it is the default here rather than the fallback. That rule in CLAUDE.md is about
+ * the logging screen, where a keyboard between somebody and their next set is the whole failure
+ * it exists to prevent. This is a reading screen and the thing being entered is a name, which is
+ * the one input a stepper cannot express. */
+.liftpick__search {
+  min-height: var(--tap);
+  padding: 0 var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--t-body);
+}
+
+.liftpick__search::placeholder {
+  color: var(--text-secondary);
+}
+
+.liftpick__search:focus {
+  border-color: var(--focus);
+  outline: none;
+}
+
+/* Which day's lifts these are, when the calendar above has one focused. The narrowing is stated
+ * rather than left to be noticed, and the way out of it is in the same row. */
+.liftpick__scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.liftpick__scopeday {
+  color: var(--accent-data);
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+
+.liftpick__all {
+  flex: 0 0 auto;
+}
+
+.liftpick__group {
+  margin: var(--s-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.liftpick__group:first-child {
+  margin-top: 0;
+}
+
+/* One row per lift. Hollow on pitch black until it is the one being read, which is the chooser
+ * chip rule at list width: the fill is the signal and the word is the second channel. */
+.liftpick__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'name showing'
+    'meta showing';
+  align-items: center;
+  gap: 0 var(--s-3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--s-3);
+  border: 1px solid color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent);
+  border-radius: var(--radius);
+  line-height: 1.25;
+  text-align: left;
+  background: linear-gradient(180deg, var(--surface-base-lit) 0%, var(--surface-base) 100%);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+.liftpick__row:active {
+  background: var(--surface-raised);
+  box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+.liftpick__row.is-on {
+  --glow-tint: color-mix(in srgb, var(--surface-raised-rim) var(--glow-strength-rest), transparent);
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface-raised-shade) 100%);
+  border-color: var(--surface-raised-rim);
+  box-shadow:
+    inset 0 1px 0 0 var(--surface-raised-rim),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
+.liftpick__name {
+  grid-area: name;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 600;
+}
+
+.liftpick__row.is-on .liftpick__name {
+  font-weight: 700;
+}
+
+.liftpick__meta {
+  grid-area: meta;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+
+/* On --surface-raised, --text-primary only. --text-secondary measures 4.49 there and this row is
+ * filled with exactly that surface, so the quiet half of a selected row is lifted rather than
+ * left under the floor. */
+.liftpick__row.is-on .liftpick__meta {
+  color: var(--text-primary);
+}
+
+.liftpick__showing {
+  grid-area: showing;
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.liftpick__none {
+  margin: 0;
+  padding: var(--s-3) 0;
+  color: var(--text-secondary);
+  font-size: var(--t-body);
 }
 
 /* ---------------------------------------------------------------- consistency grid
@@ -2078,6 +2353,10 @@ button.worknav__row:active {
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
+  /* Both stated rather than left to compute. See .daypicker for why an unstated overflow-y is a
+   * vertical scroll port nobody asked for. */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   margin: 0 calc(var(--s-4) * -1);
   padding: var(--s-1) 0;
@@ -2183,6 +2462,8 @@ button.worknav__row:active {
   border-radius: 11px;
 }
 
+
+
 .cal__empty {
   border: 1px solid color-mix(in srgb, var(--surface-raised) 42%, transparent);
   color: var(--muted);
@@ -2282,7 +2563,11 @@ button.worknav__row:active {
  * inward keeps the same two bands in the same order, --surface-base then --focus, and makes them
  * unclippable. It is legible here because a cell is 44px of flat fill carrying two short strings,
  * which is not true of the controls the outward ring was designed for. */
-.cal__day:focus-visible {
+/* The selection rule above is one specificity point heavier than a bare :focus-visible, so the
+ * selected state would otherwise swallow the focus ring on the one cell most likely to have it:
+ * the one somebody just selected with the keyboard. Named here so focus outranks selection. */
+.cal__day:focus-visible,
+.cal__day[aria-pressed='true']:focus-visible {
   outline: none;
   box-shadow:
     inset 0 0 0 2px var(--surface-base),
@@ -2296,6 +2581,34 @@ button.worknav__row:active {
   background: var(--cal-shade);
   box-shadow: inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
   transform: translateY(1px);
+}
+
+/* The day being READ, which is now a mode of this whole screen rather than a state of one cell:
+ * the charts below have that session ringed and the lift picker is narrowed to what it held.
+ *
+ * The depressed slab above was the whole of the selected state while a tap only opened a line of
+ * text under the grid, and it was already thin: held down and selected are the same picture, so a
+ * cell that stayed selected read as a cell somebody was still touching. Now that the tap changes
+ * four things further down the page it needs to be unmistakable from a metre away, so it takes the
+ * same white ring the charts draw and for the same reason. Where somebody is looking is not a fact
+ * about their training, so it gets the ink the numerals are written in rather than a fifth meaning
+ * added to a palette CLAUDE.md says to measure before extending, and white is the one colour on
+ * this grid that no slot face and no --pr ring can be mistaken for.
+ *
+ * Inset rather than outside. The scroller clips at its own padding box, which is why the focus
+ * ring on these cells already faces inward, and an outward ring in the Monday or Sunday column
+ * would be sliced down the middle. Two bands in the same order and at the same widths the focus
+ * ring uses, so selected and focused read as the same kind of mark rather than as two unrelated
+ * outlines that happen to share a grid.
+ *
+ * It keeps the depressed background from the rule above and replaces only the shadow, which is why
+ * the inner shadow is restated here: box-shadow is a single property and dropping it would take
+ * the depression with it. */
+.cal__day[aria-pressed='true'] {
+  box-shadow:
+    inset 0 0 0 2px var(--surface-base),
+    inset 0 0 0 5px var(--text-primary),
+    inset 0 2px 5px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
 }
 
 /* Today. The numeral carries it, not a ring: a second ring beside the record ring, differing only
@@ -2398,6 +2711,135 @@ button.worknav__row:active {
   font-weight: 650;
 }
 
+/* ---------------------------------------------------------------- the day's readout
+ *
+ * What a tapped cell opens: the workout itself, set by set. js/session-readout.js builds it.
+ *
+ * It sits in the well the one line detail used to, which is why the well is sunken rather than
+ * raised: this is an answer to a tap, drawn INTO the card, not another card stacked on it. The
+ * three cards on this screen are all veiled and lifted; a fourth one here would make the grid look
+ * like it had grown a shelf.
+ *
+ * It is capped and scrolls, because a seven lift session at four sets a lift is thirty rows, and
+ * thirty rows between the grid and the charts is a screen and a half of scrolling to get back to
+ * the thing the tap was meant to explain. The charts are the other half of this answer and they
+ * have to stay reachable.
+ *
+ * No colour carries meaning anywhere in here. The chart above has the session ringed and the grid
+ * has the cell filled; this is the plain record underneath both, and it takes the same treatment
+ * the session history list takes and for the same reason: a maintenance view that competes with
+ * the centrepiece is in the wrong place. */
+.readout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-height: 46vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.readout__day {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+.readout__session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.readout__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin: 0;
+}
+
+.readout__label {
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.readout__time,
+.readout__open {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+
+/* What the client said about it, in their words. The only thing in this readout that did not come
+ * out of a number, which is exactly why it is worth the line. */
+.readout__note {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  line-height: 1.45;
+}
+
+.readout__lift {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.readout__liftname {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-weight: 650;
+}
+
+.readout__sets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The set number keeps a column of its own so every value starts on one line, the same grid the
+ * workout panel and the program view use for the trainer's own numbering. */
+.readout__set {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+
+.readout__setno {
+  color: var(--muted);
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-align: right;
+}
+
+.readout__setval {
+  color: var(--text-primary);
+  font-size: var(--t-small);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Warmup and Added, in a word rather than a colour. A set beyond the plan is not a transgression
+ * and a warmup is not a lesser set, so neither gets a tint: they are said and left alone. */
+.readout__tag {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+
+.readout__none {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
 .cal__legend {
   display: flex;
   flex-wrap: wrap;
@@ -2437,9 +2879,6 @@ button.worknav__row:active {
   font-weight: 700;
 }
 
-/* .lifts__item and .lifts__item.is-on are styled with the day picker, under chooser chips, so
- * the two rows that do the same job cannot drift apart again. Nothing belongs here. */
-
 /* The third row that does that job: which half of the Programs screen you are reading. Same
  * scroller, same chips, and it sits under the page header rather than beside it, because the
  * unit switch is 90px and a chooser is not allowed to share its row with a global setting. */
@@ -2448,6 +2887,10 @@ button.worknav__row:active {
   flex-wrap: nowrap;
   gap: var(--s-2);
   overflow-x: auto;
+  /* Both stated rather than left to compute. See .daypicker for why an unstated overflow-y is a
+   * vertical scroll port nobody asked for. */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   margin: 0 calc(var(--s-4) * -1);
   padding: var(--s-1) var(--s-4);

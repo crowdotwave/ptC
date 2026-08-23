@@ -345,7 +345,11 @@ function buildRepsAtLoad(blockPoints) {
       // The top set of that load in that session, which is what a progression reads.
       const existing = perSession.get(point.sessionId);
       if (!existing || row.reps > existing.reps) {
-        perSession.set(point.sessionId, { day: point.day, date: point.date, reps: row.reps });
+        // The session id rides along on the point rather than staying only the map key, so a
+        // caller can mark the session a reader has focused on this chart as well as the others.
+        perSession.set(point.sessionId, {
+          sessionId: point.sessionId, day: point.day, date: point.date, reps: row.reps,
+        });
       }
     }
   }
