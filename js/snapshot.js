@@ -104,7 +104,26 @@ export function buildSnapshot({ template, days, items, exercises }) {
  * been to the server and back is byte for byte different from the identical object built locally,
  * and a naive compare would mark every synced client stale forever, which is worse than the bug it
  * replaced. `undefined` normalises to null for the same reason: it is what a round trip does to it.
+ *
+ * `created_at` and `updated_at` are skipped wherever they appear, and that is measured rather than
+ * tidy. buildSnapshot spreads a whole `template_items` row into each item, so both columns ride
+ * along inside every snapshot, and both move for reasons that are not edits to anybody's training:
+ *
+ *   - `updated_at` bumps on any write to the row, a save that changed nothing included. Checked
+ *     against the live database, one program's assignment differed from its template in this
+ *     column and in nothing else, on two items, which would have read as a changed prescription
+ *     on a program nobody had touched.
+ *   - Both cross the wire in two spellings that are the same instant and different text. A row
+ *     written on this device carries toISOString, '2026-08-23T20:25:30.059Z'; the same row pulled
+ *     back carries what Postgres renders, '2026-08-23T20:25:30.059974+00:00', because fromWire
+ *     passes these two through untouched. So a cache refresh alone could flip every client to
+ *     stale, with no edit anywhere.
+ *
+ * Neither is part of what a client was told to do. A rest time is; when the row was last saved is
+ * not, and a screen that says "on an older version" has to mean the prescription.
  */
+const BOOKKEEPING = new Set(['created_at', 'updated_at']);
+
 export function sameSnapshot(a, b) {
   return canonical(a) === canonical(b);
 }
@@ -114,6 +133,7 @@ function canonical(value) {
   if (typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   return `{${Object.keys(value)
+    .filter((key) => !BOOKKEEPING.has(key))
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
     .join(',')}}`;

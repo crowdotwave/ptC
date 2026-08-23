@@ -1356,6 +1356,33 @@ test('a missing field and an explicit null are the same snapshot', () => {
   ok(sameSnapshot(null, undefined), 'and neither of them being there does not throw');
 });
 
+// Both of these are taken from the live database rather than imagined. buildSnapshot spreads a
+// whole template_items row into every item, so these two columns ride along inside each snapshot,
+// and both move without anybody editing a prescription.
+test('a row saved again with nothing changed is not a new version of the program', () => {
+  const item = (updatedAt) => ({
+    days: [{ items: [{ id: 'i1', rest_seconds: 60, updated_at: updatedAt, created_at: '2026-08-23T20:25:30.059Z' }] }],
+  });
+  ok(
+    sameSnapshot(item('2026-08-23T20:25:30.715549+00:00'), item('2026-08-23T22:12:55.738044+00:00')),
+    'updated_at bumps on any write, and a write is not an edit',
+  );
+});
+
+test('the same instant in the two spellings that cross the wire is the same program', () => {
+  // fromWire passes created_at and updated_at through untouched, so a row written here and the
+  // same row pulled back carry different text. A cache refresh must not flip a client to stale.
+  const local = { days: [{ items: [{ id: 'i1', created_at: '2026-08-23T20:25:30.059Z', rest_seconds: 60 }] }] };
+  const synced = { days: [{ items: [{ id: 'i1', created_at: '2026-08-23T20:25:30.059974+00:00', rest_seconds: 60 }] }] };
+  ok(sameSnapshot(local, synced));
+});
+
+test('ignoring the stamps does not blind the compare to a real edit beside them', () => {
+  const a = { days: [{ items: [{ id: 'i1', rest_seconds: 60, updated_at: 'x' }] }] };
+  const b = { days: [{ items: [{ id: 'i1', rest_seconds: 0, updated_at: 'x' }] }] };
+  ok(!sameSnapshot(a, b), 'the rest time is the whole point');
+});
+
 test('a nested edit is not hidden by a matching parent', () => {
   const deep = (rpe) => ({ days: [{ items: [{ exercise: { id: 'e1' }, target_rpe: rpe }] }] });
   ok(!sameSnapshot(deep(8), deep(9)));
