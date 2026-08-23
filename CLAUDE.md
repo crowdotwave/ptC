@@ -549,6 +549,32 @@ Constraints:
   eight bordered, gradient filled, glowing slabs stacked with gaps, which read as clutter at a
   glance even though every row obeyed the rule. Before lighting a new control, ask which side of
   that line it is on.
+- **A dimmed screen, not a badly lit gym, is what breaks a control.** This corrects a claim made
+  throughout this file. Bad lighting means glare, which is ambient light on the glass ADDING a
+  constant to everything: that is the 0.05 flare term in the contrast formula and it is why the
+  reading tiers are pinned at 7:1. A phone turned down is the opposite shape of problem. It scales
+  every emitted luminance while the flare stays put, so the flare comes to dominate and all ratios
+  collapse toward 1. Measured against `--surface-base`:
+
+  | | 100% | 40% | 15% |
+  | --- | --- | --- | --- |
+  | chrome fill | 1.08 | 1.03 | 1.01 |
+  | the old lit edge | 1.50 | 1.20 | 1.07 |
+  | a `--text-secondary` label | 11.26 | 5.10 | 2.54 |
+
+  At fifteen percent the only thing left on a secondary button is the word on it, which is what it
+  looked like in use: the buttons stopped reading as buttons. So: **a dark fill cannot carry an
+  affordance, at any value.** Lifting the chrome fill nearly fourfold still only reaches 1.08 at
+  fifteen percent. Only bright pixels survive dimming, so what says "this is a control" is a LIGHT
+  hairline, `--chrome-edge`, which holds 3.09 at full brightness and 1.31 at fifteen. The fill
+  gives the control a body and is what a press moves; it is not the signal. The same reasoning
+  lifted `--divider`, which was a dark line on a dark card and therefore no line at all on a
+  dimmed phone.
+- **A chrome control is as big as its label needs and no bigger, and the tap target is written
+  down separately.** A 44px slab around a 14px word is wasted band on the one screen that must
+  never scroll. The ink is about 38px; the 44px minimum is kept by a transparent `::after` centred
+  on the button. Tightening how a control looks must never tighten what a thumb has to hit, and
+  those two only stay in step if the second one exists in the CSS.
 - **A list is one object.** Rows stop being boxes: one card holds them, a hairline `--divider`
   separates them, nothing but the card is rounded, and the row count stops mattering. Shared as
   `.row-card`, `.row` and `.row__body` in `styles.css`, and used by the lift picker, the workout

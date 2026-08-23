@@ -136,11 +136,46 @@
    * raised, --text-primary only" rule does not follow it onto a card. It is opaque rather than
    * translucent because a row that fills on selection has to sit on a known colour, and a
    * translucent fill over a translucent card is two unknowns. */
-  --chrome-face: color-mix(in srgb, var(--surface-raised) 16%, var(--surface-base));
-  --chrome-face-press: color-mix(in srgb, var(--surface-raised) 26%, var(--surface-base));
-  /* The hairline between rows inside a card, and the only line chrome draws. Deliberately weaker
-   * than --veil-edge: that one is the outline of an object, this one is a fold inside it. */
-  --divider: color-mix(in srgb, var(--surface-raised-rim) 20%, transparent);
+  --chrome-face: color-mix(in srgb, var(--surface-raised) 30%, var(--surface-base));
+  --chrome-face-press: color-mix(in srgb, var(--surface-raised) 52%, var(--surface-base));
+
+  /* ---------------------------------------------------------------- the dimmed screen
+   *
+   * THE FAILURE THIS PALETTE HAS TO SURVIVE IS A PHONE TURNED DOWN, not a badly lit gym. That is
+   * a correction to a claim made all over this file, and it changes which tokens can carry a
+   * signal, so it is worth the arithmetic.
+   *
+   * Bad lighting means glare: ambient light falling on the glass, which ADDS a constant to
+   * everything on screen. That is the 0.05 flare term in the WCAG contrast formula, and it is why
+   * the reading tiers are pinned at 7:1. A dimmed screen is a different thing entirely. It scales
+   * every emitted luminance down while the flare stays where it is, so the flare comes to dominate
+   * and every ratio collapses toward 1. Measured against --surface-base at a few brightnesses:
+   *
+   *                            100%    40%    15%
+   *     chrome fill at 16%     1.08   1.03   1.01
+   *     the old lit edge       1.50   1.20   1.07
+   *     a --text-secondary     11.26  5.10   2.54
+   *     label
+   *
+   * At fifteen percent the only thing left on a secondary button is the word on it, which is
+   * exactly what it looked like: the buttons stopped reading as buttons and read as text.
+   *
+   * The consequence is a rule. A DARK FILL CANNOT CARRY AN AFFORDANCE, at any value: lifting the
+   * chrome fill nearly fourfold still only reaches 1.08 at fifteen percent, because the whole
+   * family is down in the noise the flare floods. Only bright pixels survive dimming, so the thing
+   * that says "this is a control" has to be a LIGHT hairline. --chrome-edge measures 3.09 at full
+   * brightness and still holds 1.31 at fifteen, which is the difference between an outline and
+   * nothing.
+   *
+   * The fill still earns its place: it gives the control a body at full brightness and it is what
+   * a press changes. It is simply not the signal. */
+  --chrome-edge: color-mix(in srgb, var(--text-primary) 38%, transparent);
+
+  /* The fold between rows inside a card. Lighter than it was, and for the reason above rather than
+   * for looks: it was --surface-raised-rim at 20 percent, which is a dark line on a dark card and
+   * therefore not a line at all on a dimmed phone. Weaker than --chrome-edge, because that is the
+   * outline of an object and this is a crease inside one. */
+  --divider: color-mix(in srgb, var(--text-primary) 15%, transparent);
 
   /* Chrome is rounder and roomier than the controls it replaced. A 12px radius on a 44px slab
    * reads as a button; the same radius on a full width row reads as a box drawn round a sentence.
@@ -700,23 +735,41 @@ button {
  * benefit of an opaque twin of the veil rather than a lifted surface: the "on raised,
  * --text-primary only" rule does not follow chrome around. */
 .button-secondary {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--tap);
-  min-width: var(--tap);
-  padding: 0 var(--s-4);
-  border: 0;
+  /* As tall as the label needs and a little headroom, rather than a 44px slab around a 14px word.
+   * The 44px TAP target is kept, and kept honestly: see the ::after below. */
+  min-height: 2.375rem;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--chrome-edge);
   border-radius: var(--radius-control);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--t-small);
   font-weight: 600;
   background: var(--chrome-face);
 }
 
+/* The tap target, which is not the same thing as the button. The ink is what the label needs; this
+ * is the 44px the thumb is owed, transparent and centred on it. Tightening how a control LOOKS
+ * must not tighten what a thumb has to hit, and the two only stay in step if the second one is
+ * written down. */
+.button-secondary::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--tap);
+  transform: translateY(-50%);
+}
+
+/* The press moves the fill, because the fill is the half of this control that has room to move.
+ * The edge stays put: it is the part still doing the work on a dimmed screen, and a press that
+ * dropped it would make the button hardest to see at the moment of being used. */
 .button-secondary:active {
   background: var(--chrome-face-press);
-  color: var(--text-primary);
 }
 
 .button-secondary:disabled {
@@ -918,15 +971,27 @@ button {
  * than it was and gained a control and the name of the day. */
 .dayjump {
   align-self: flex-start;
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--s-2);
   max-width: 100%;
-  min-height: var(--tap);
-  padding: 0 var(--s-3) 0 var(--s-4);
-  border: 0;
+  min-height: 2.375rem;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border: 1px solid var(--chrome-edge);
   border-radius: 999px;
   background: var(--chrome-face);
+}
+
+/* Same tap target as every other chrome control, extended past the ink. */
+.dayjump::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--tap);
+  transform: translateY(-50%);
 }
 
 .dayjump:active {
@@ -1039,6 +1104,7 @@ button {
   padding: 0;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
+  border: 1px solid var(--chrome-edge);
   overflow: hidden;
   list-style: none;
 }
@@ -2045,6 +2111,7 @@ button.worknav__row:active {
   flex-direction: column;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
+  border: 1px solid var(--chrome-edge);
   /* The card clips, so the first and last rows take its corners without either of them having to
    * know it is first or last. */
   overflow: hidden;
@@ -2174,7 +2241,7 @@ button.row:active {
   display: block;
   width: 100%;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--chrome-edge);
   border-radius: var(--radius-control);
   background: var(--chrome-face);
   text-align: left;
@@ -3050,6 +3117,7 @@ button.navlink:disabled {
   flex-direction: column;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
+  border: 1px solid var(--chrome-edge);
   overflow: hidden;
 }
 
