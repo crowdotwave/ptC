@@ -239,6 +239,19 @@ payments
   was enforced and unexplained: the builder warned that edits reach new assignments only and said
   nothing about assigning again being the mechanism, so a fix looked applied and the client's phone
   went on showing the old number.
+  **"On this program" and "on the version of this program I am looking at" are different facts, and
+  a screen that offers to assign has to say which.** The assign list read `template_id` alone, so a
+  trainer correcting a rest time was told "Already on this program" before the fix reached anybody
+  and "Already on this program" after: the one question they opened the screen to answer was the one
+  it would not answer, and pressing Assign changed no word on it. The row now compares the client's
+  frozen snapshot against the one the editor currently holds, the button says what the press will do
+  (`Assign`, `Send update`, `Assign again`) and a line above the list names who was just sent what.
+  `sameSnapshot` in `js/snapshot.js` owns the comparison, and it sorts keys rather than comparing
+  text. That is not tidiness. `snapshot` is jsonb, which parses what it is given and re-renders keys
+  in its own order, so a byte compare marks every synced client permanently stale, which is a worse
+  lie than the one it replaced. Assigning from that list carries `deload_weeks` forward exactly as
+  the button in the editor does, and only within the same program: week 5 of a block somebody is
+  leaving means nothing in the block they are joining.
 - **`payments.client_name_text` is denormalized on purpose.** Tax records must survive a
   client being deleted.
 - Money is `amount_cents` as an integer. Never floats.

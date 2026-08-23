@@ -90,6 +90,36 @@ export function buildSnapshot({ template, days, items, exercises }) {
 }
 
 /**
+ * Whether two snapshots say the same thing, so a screen can tell a stale assignment from a
+ * current one.
+ *
+ * The builder needs this because "is this client on this program" and "is this client on the
+ * version of it I am looking at" are different questions, and only the first was ever asked.
+ * A trainer who fixed a rest time and assigned again was told "Already on this program" both
+ * before and after, which is the same sentence for the two states the trainer came to tell apart.
+ *
+ * Key order is sorted rather than trusted, and that is the whole reason this is not a
+ * JSON.stringify comparison. `assignments.snapshot` is jsonb, and jsonb does not store the text it
+ * was given: it parses to a value and re-renders keys in its own order. So a snapshot that has
+ * been to the server and back is byte for byte different from the identical object built locally,
+ * and a naive compare would mark every synced client stale forever, which is worse than the bug it
+ * replaced. `undefined` normalises to null for the same reason: it is what a round trip does to it.
+ */
+export function sameSnapshot(a, b) {
+  return canonical(a) === canonical(b);
+}
+
+function canonical(value) {
+  if (value === undefined || value === null) return 'null';
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
+    .join(',')}}`;
+}
+
+/**
  * The assignment a client is on right now.
  *
  * Takes the adapter as an argument rather than importing it, so this module stays a description

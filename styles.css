@@ -3740,6 +3740,30 @@ button.navlink:disabled {
   color: var(--text-secondary);
 }
 
+/* The app confirming a write it just made, on a reading screen.
+ *
+ * Chrome, so flat: no gradient, no lit edge, no glow. It is read at a desk with both hands, which
+ * is the far side of the line the lighting model draws, and it is not pressable.
+ *
+ * No green, and that is the fence rather than an aesthetic. `--done` marks a finished session in
+ * exactly three places and a fourth meaning of "this worked" would take the app's one green from a
+ * fact about training to a general purpose success colour. What says this worked is that a
+ * sentence naming a person is on screen where a moment ago there was nothing. The edge is
+ * `--chrome-edge` for the reason every chrome control takes it: a dark fill cannot carry an
+ * affordance on a dimmed phone, and a light hairline can. */
+.said {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3);
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-small);
+}
+
+.said[hidden] {
+  display: none;
+}
+
 .legend__swatch {
   color: var(--accent-data);
   font-weight: 700;

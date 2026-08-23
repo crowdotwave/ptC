@@ -15,7 +15,7 @@ import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } from './js/program.js';
-import { buildSnapshot, currentAssignment, pickDay, sortedDays, sortedItems } from './js/snapshot.js';
+import { buildSnapshot, currentAssignment, pickDay, sameSnapshot, sortedDays, sortedItems } from './js/snapshot.js';
 import { mountProgramView, repaintProgramView, WARMUP_KINDS, NO_PROGRAM_YET } from './js/program-view.js';
 import { topSet } from './js/history.js';
 import { loadSessions } from './js/session.js';
@@ -507,12 +507,35 @@ async function openReadOnly(templateId) {
 
 // ------------------------------------------------------------------ assigning
 
-/** What this client is on right now, said the way a trainer would say it out loud. */
-function standingLine(assignment, templateId) {
-  if (!assignment) return 'No program yet';
+/**
+ * Where this client stands against the program on screen, and what pressing the button will do
+ * about it.
+ *
+ * Four states rather than three, and the fourth is the whole point. "On this program" and "on the
+ * version of this program I am looking at" are different facts, and this screen used to collapse
+ * them: a trainer who corrected a rest time on a live program read "Already on this program"
+ * before the fix reached the client and "Already on this program" after, so the one thing they
+ * came here to find out was the one thing the row would not say.
+ *
+ * The button label carries it a second time, per the no-hue-only rule read at list width: a word
+ * saying what the press does, not a fixed label over four different meanings.
+ */
+function standing(assignment, templateId, current) {
+  if (!assignment) return { line: 'No program yet', act: 'Assign' };
+
   const since = `since ${dayLabel(assignment.starts_on)}`;
-  if (assignment.template_id === templateId) return `Already on this program, ${since}`;
-  return `On ${assignment.snapshot?.template?.name ?? 'another program'}, ${since}`;
+  if (assignment.template_id !== templateId) {
+    return { line: `On ${assignment.snapshot?.template?.name ?? 'another program'}, ${since}`, act: 'Assign' };
+  }
+
+  // A program that will not freeze has no current version to compare against, so the honest
+  // answer is the old one: on it, since then, and nothing claimed about which version.
+  if (!current) return { line: `On this program, ${since}`, act: 'Assign' };
+
+  if (sameSnapshot(assignment.snapshot, current)) {
+    return { line: `On this program, up to date, ${since}`, act: 'Assign again' };
+  }
+  return { line: `On an older version of this program, ${since}`, act: 'Send update' };
 }
 
 function renderAssignList() {
@@ -522,15 +545,27 @@ function renderAssignList() {
   }
 
   el('assign-list').innerHTML = state.assignClients
-    .map(
-      (client) =>
+    .map((client) => {
+      const where = standing(client.standing, state.template.id, state.assignSnapshot);
+      return (
         `<li class="assignrow"><div class="assignrow__who">` +
         `<span class="clientlist__name">${esc(client.display_name)}</span>` +
-        `<span class="clientlist__facts num">${esc(standingLine(client.standing, state.template.id))}</span>` +
+        `<span class="clientlist__facts num">${esc(where.line)}</span>` +
         `</div>` +
-        `<button type="button" class="button-secondary" data-assign="${client.id}">Assign</button></li>`,
-    )
+        `<button type="button" class="button-secondary" data-assign="${client.id}">${esc(where.act)}</button></li>`
+      );
+    })
     .join('');
+}
+
+/** What just happened, to whom, in the words a trainer would use for it. */
+function sayAssigned(name, before) {
+  const said = el('assign-said');
+  said.hidden = false;
+  said.textContent = before
+    ? `Sent to ${name}. Their next session uses this program. Sessions they have already logged ` +
+      `stay on the version they trained.`
+    : `Assigned to ${name}, starting ${dayLabel(el('assign-start').value)}.`;
 }
 
 async function loadAssignClients(storage) {
@@ -565,6 +600,10 @@ async function showAssign() {
   el('view-note').textContent = state.assignSnapshot ? 'Who is doing this?' : 'This program cannot be assigned yet.';
   el('assign-start').value = isoDate(new Date());
   el('assign-list').innerHTML = '';
+  // Cleared on arrival, never carried in. It names a write that happened in this sitting, and a
+  // stale one would have the screen reporting an assignment the list below it no longer shows.
+  el('assign-said').hidden = true;
+  el('assign-said').textContent = '';
 
   if (!state.assignSnapshot) return;
   state.assignClients = await loadAssignClients(state.storage);
@@ -575,12 +614,27 @@ async function showAssign() {
  * One row in assignments, carrying its own frozen copy of the program.
  *
  * No confirmation. This is reversible by assigning something else, the way archiving is
- * reversible by restoring, and the row rewrites itself to say what the client is now on, which is
- * the feedback a dialog would have been standing in for.
+ * reversible by restoring.
+ *
+ * It does need an answer, though, and the row rewriting itself is not reliably one. That was the
+ * claim this comment used to make, and it holds only for a client changing programs. Re-sending a
+ * program somebody is already on is the common case the moment a trainer edits a live block, and
+ * there the row before and the row after said the same sentence: the press looked like it had
+ * done nothing. So the row says which version they are on, and a line above the list names who was
+ * just sent what. A word appearing where there was none is the feedback, not a dialog.
+ *
+ * deload_weeks carries over from whatever they were on before, for the reason pushEdits gives:
+ * a back off week is marked from the client's own chart months later, and dropping it because a
+ * rest time was corrected is a silent edit to somebody's training. It is only carried within the
+ * same program. Moving a client onto a different block is a different block, and week 5 of the old
+ * one means nothing in it.
  */
 async function assignTo(clientId, button) {
   if (!state.assignSnapshot) return;
   const startsOn = el('assign-start').value || isoDate(new Date());
+  const client = state.assignClients.find((c) => c.id === clientId);
+  const previous = client?.standing;
+  const resend = previous?.template_id === state.template.id;
 
   button.disabled = true;
   await state.storage.put(
@@ -591,14 +645,13 @@ async function assignTo(clientId, button) {
       snapshot: state.assignSnapshot,
       starts_on: startsOn,
       ends_on: null,
-      // Never set at assign time. A back off week is marked from the client's chart, months
-      // later if that is when the trainer notices. See suggestDeloadWeeks.
-      deload_weeks: [],
+      deload_weeks: resend && Array.isArray(previous.deload_weeks) ? [...previous.deload_weeks] : [],
     }),
   );
 
   state.assignClients = await loadAssignClients(state.storage);
   renderAssignList();
+  if (client) sayAssigned(client.display_name, resend);
 }
 
 function showEdit() {

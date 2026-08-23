@@ -15,7 +15,9 @@ import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
   isBodyweightLoad, prescribesLoad,
 } from './js/program.js';
-import { buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment } from './js/snapshot.js';
+import {
+  buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment, sameSnapshot,
+} from './js/snapshot.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
 import { syncMessage, publishSync } from './js/sync-status.js';
@@ -1317,6 +1319,47 @@ test('a synced timestamp and a local one are compared as instants, not as text',
 
 test('a client with no blocks is on nothing, and it does not throw', async () => {
   eq(await currentAssignment(fakeStore([]), 'c1'), null);
+});
+
+// ------------------------------------------------------------ stale block or current one
+//
+// "On this program" and "on the version of this program I am looking at" are different facts, and
+// the assign list collapsed them: a trainer who corrected a rest time on a live program read
+// "Already on this program" both before the fix reached the client and after. Telling them apart
+// is a comparison of two snapshots, and the trap in that comparison is that one of them has been
+// to the server. snapshot is jsonb, and jsonb re-renders keys in its own order rather than storing
+// the text it was handed, so a byte compare marks every synced client permanently stale.
+
+test('a snapshot that has been through jsonb still matches the one it was built from', () => {
+  const built = { template: { id: 't1', name: 'Emma Brown 2', notes: '' }, days: [{ day_index: 0, id: 'd1' }] };
+  // The same value with every object's keys in a different order, which is what comes back.
+  const returned = { days: [{ id: 'd1', day_index: 0 }], template: { notes: '', name: 'Emma Brown 2', id: 't1' } };
+
+  ok(JSON.stringify(built) !== JSON.stringify(returned), 'as text these differ, which is the trap');
+  ok(sameSnapshot(built, returned), 'as values they are the same program');
+});
+
+test('an edited rest time makes the assigned snapshot stale', () => {
+  const before = { days: [{ items: [{ id: 'i1', rest_seconds: 60 }] }] };
+  const after = { days: [{ items: [{ id: 'i1', rest_seconds: 90 }] }] };
+  ok(!sameSnapshot(before, after), 'the one edit a trainer makes has to register');
+});
+
+test('array order is a real difference and key order is not', () => {
+  const a = { days: [{ id: 'd1' }, { id: 'd2' }] };
+  ok(!sameSnapshot(a, { days: [{ id: 'd2' }, { id: 'd1' }] }), 'reordering days reorders the program');
+});
+
+test('a missing field and an explicit null are the same snapshot', () => {
+  // What a round trip does to undefined, so treating them apart would report a phantom edit.
+  ok(sameSnapshot({ template: { notes: undefined } }, { template: { notes: null } }));
+  ok(sameSnapshot(null, undefined), 'and neither of them being there does not throw');
+});
+
+test('a nested edit is not hidden by a matching parent', () => {
+  const deep = (rpe) => ({ days: [{ items: [{ exercise: { id: 'e1' }, target_rpe: rpe }] }] });
+  ok(!sameSnapshot(deep(8), deep(9)));
+  ok(sameSnapshot(deep(8), deep(8)));
 });
 
 // ------------------------------------------------------------------ dates that are not times
