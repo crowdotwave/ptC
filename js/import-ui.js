@@ -11,7 +11,7 @@
 
 import { readWorkbook, canReadWorkbooks } from './xlsx.js';
 import { readWorkbookProgram, summarise } from './import-program.js';
-import { targetLine } from './program.js';
+import { targetLine, parseSets, parseReps, parseLoad, parseRest, parseGroup, inferLogging } from './program.js';
 
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -100,16 +100,23 @@ export function renderDraft(draft) {
             target_load: item.targetLoad,
             rest_seconds: item.restSeconds,
           });
+          const cell = (col, value, extra = '') =>
+            `<td><input class="cell${extra}" data-day="${dayIndex}" data-item="${itemIndex}" ` +
+            `data-col="${col}" value="${esc(value ?? '')}" ` +
+            `aria-label="${esc(col)} for ${esc(item.exerciseName)}" /></td>`;
+
           return (
-            `<tr${item.needsReview ? ' class="import__row--review"' : ''}>` +
-            `<td>${esc(item.groupLabel ?? '')}</td>` +
-            `<td>${esc(item.exerciseName)}</td>` +
-            `<td>${esc(item.variation ?? '')}</td>` +
-            `<td class="num">${esc(item.targetSets ?? '')}</td>` +
-            `<td>${esc(item.targetRepsText ?? '')}</td>` +
-            `<td>${esc(item.targetLoad ?? '')}</td>` +
-            `<td class="num">${item.restSeconds === null ? '' : `${item.restSeconds}s`}</td>` +
-            `<td class="import__target">${esc(target) || '<span class="import__none">nothing to show</span>'}</td>` +
+            `<tr${item.needsReview ? ' class="import__row--review"' : ''} ` +
+            `data-row="${dayIndex}-${itemIndex}">` +
+            cell('group', item.groupLabel, ' cell--narrow') +
+            cell('exercise', item.exerciseName) +
+            cell('variation', item.variation) +
+            cell('sets', item.targetSets, ' cell--narrow') +
+            cell('reps', item.targetRepsText) +
+            cell('load', item.targetLoad) +
+            cell('rest', item.restSeconds === null ? '' : `${item.restSeconds} SEC`, ' cell--narrow') +
+            `<td class="import__target" data-target="${dayIndex}-${itemIndex}">` +
+            `${esc(target) || '<span class="import__none">nothing to show</span>'}</td>` +
             `<td>${modeSelect(dayIndex, itemIndex, item)}</td>` +
             `</tr>`
           );
@@ -152,6 +159,71 @@ export function setMode(draft, dayIndex, itemIndex, value) {
     item.logMode = value;
   }
   item.needsReview = false;
+  // Remembered, so editing Reps or Load afterwards does not re-guess over the top of a decision
+  // somebody has already made. Same rule the builder follows on the same two columns.
+  item.modeTouched = true;
+}
+
+/**
+ * Applies an edit to one cell of the draft.
+ *
+ * THE REVIEW SCREEN USED TO BE READ ONLY except for the Log column, and that was a real gap rather
+ * than a simplification. It is the moment a trainer is looking straight at a wrong rest time, with
+ * the spreadsheet's own words next to it, and the only thing they could do about it was create the
+ * program anyway and go and find the row again in the builder. The fields existed one screen later
+ * the whole time.
+ *
+ * Parsed through the same functions the builder uses, so "60 SEC" and "8-12" and "2 RIR" mean here
+ * exactly what they mean there and what they meant in the sheet. Nothing is written: this edits the
+ * draft, and createProgram is still the only thing that writes.
+ *
+ * Returns the row's new client sentence so the caller can refresh that one cell in place. Redrawing
+ * the table on a keystroke would throw the caret to the end of the field, which on a rest time is
+ * how "60" becomes "660".
+ */
+export function setField(draft, dayIndex, itemIndex, col, raw) {
+  const item = draft.days[dayIndex]?.items[itemIndex];
+  if (!item) return null;
+  const value = String(raw ?? '').trim();
+
+  if (col === 'group') item.groupLabel = parseGroup(value).label;
+  else if (col === 'exercise') item.exerciseName = value;
+  else if (col === 'variation') item.variation = value || null;
+  else if (col === 'sets') item.targetSets = parseSets(value);
+  else if (col === 'rest') item.restSeconds = parseRest(value);
+  else if (col === 'reps') {
+    const parsed = parseReps(value);
+    item.targetRepsLow = parsed.low;
+    item.targetRepsHigh = parsed.high;
+    item.targetRepsText = parsed.text;
+  } else if (col === 'load') {
+    const parsed = parseLoad(value);
+    item.targetLoad = parsed.text;
+    item.targetRpe = parsed.rpe;
+  } else {
+    return null;
+  }
+
+  // Reps or Load changing re-guesses how the row is logged, but only while nobody has chosen.
+  if ((col === 'reps' || col === 'load') && !item.modeTouched) {
+    const guess = inferLogging({
+      repsText: item.targetRepsText,
+      loadText: item.targetLoad,
+      sets: item.targetSets,
+    });
+    item.isLogged = guess.isLogged;
+    item.logMode = guess.logMode;
+  }
+
+  return {
+    target: targetLine({
+      target_sets: item.targetSets,
+      target_reps_text: item.targetRepsText,
+      target_load: item.targetLoad,
+      rest_seconds: item.restSeconds,
+    }),
+    mode: item.isLogged ? item.logMode : 'none',
+  };
 }
 
 /**

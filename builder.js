@@ -22,7 +22,7 @@ import { loadSessions } from './js/session.js';
 import { weekIndexOf } from './js/progression.js';
 import { isoDate } from './js/dates.js';
 import { loadUnit, mountUnitSetting, onUnitChange, viewerName } from './js/units.js';
-import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
+import { readFile, renderDraft, setMode, setField, createProgram } from './js/import-ui.js';
 
 const el = (id) => document.getElementById(id);
 const state = {
@@ -39,6 +39,9 @@ const state = {
   // The frozen program the assign screen is handing out, and the clients it is offering it to,
   // each carrying whatever they are on right now.
   assignSnapshot: null,
+  // Every assignment row pointing at the template currently open, so the live warning can say
+  // who is on it and the push can reach them.
+  liveAssignments: [],
   assignClients: [],
   // Which half of the screen is on: 'mine', 'build' or 'everyone'. Held here so that coming back
   // from a program returns to the half you left.
@@ -702,19 +705,107 @@ async function openTemplate(templateId) {
   showEdit();
   el('program-name').value = state.template.name;
 
-  // The snapshot rule, made visible. A trainer who does not know this will edit a program
-  // expecting a client's next session to change, and be wrong.
+  state.liveAssignments = assignments;
+  renderLiveWarning();
+  renderDays();
+}
+
+/**
+ * Who is on this program, and the way to give them the edits.
+ *
+ * THE SNAPSHOT RULE, MADE VISIBLE AND THEN MADE ACTIONABLE. assignments.snapshot is a frozen copy
+ * taken at assign time, so editing a template never rewrites what somebody was already told to do.
+ * That rule is right and it stays: it is what keeps a client's logged history honest about the
+ * program it was logged against.
+ *
+ * What was missing is what a trainer does about it. The warning said "editing here changes new
+ * assignments only" and stopped there, so a coach who fixed a rest time had no way to get that fix
+ * to the client short of knowing that assigning again is the mechanism. Nothing said so. The fix
+ * looked like it had worked and the client's phone went on showing the old number.
+ *
+ * So the way through is a button rather than folklore. It writes a new assignment per client,
+ * carrying the current snapshot, which is exactly what assigning again does by hand.
+ */
+function renderLiveWarning() {
   const warn = el('live-warning');
-  if (assignments.length) {
-    warn.hidden = false;
-    warn.innerHTML =
-      `<span>${assignments.length} client${assignments.length === 1 ? ' is' : 's are'} on this program. ` +
-      `Editing here changes new assignments only, never what somebody was already told to do.</span>`;
-  } else {
+  const assignments = state.liveAssignments ?? [];
+  if (!assignments.length) {
     warn.hidden = true;
+    return;
   }
 
-  renderDays();
+  const who = assignments.length === 1 ? '1 client is' : `${assignments.length} clients are`;
+  warn.hidden = false;
+  warn.innerHTML =
+    `<span>${who} on this program. Editing here changes new assignments only, never what ` +
+    `somebody was already told to do. Send the edits when you are ready.</span>` +
+    `<button type="button" class="button-secondary" id="push-edits">` +
+    `Update ${assignments.length === 1 ? 'them' : 'all of them'}</button>`;
+}
+
+/**
+ * Gives every client on this program a fresh snapshot of it as it stands now.
+ *
+ * A new assignment row each rather than an edit to the existing one, because the existing one is
+ * what their logged sessions point at: sessions carry assignment_id, so rewriting a snapshot in
+ * place would retroactively change the program that history claims to have been logged against.
+ * The new row starts today, currentAssignment picks it up, and everything already logged stays
+ * attached to the block it was actually done under.
+ *
+ * deload_weeks carries over. A back off week is marked from the client's own chart, often months
+ * after the program was assigned, and losing it as a side effect of fixing a rest time would be a
+ * silent edit to somebody's training rather than to their program.
+ */
+async function pushEdits(button) {
+  const assignments = state.liveAssignments ?? [];
+  if (!assignments.length) return;
+
+  let snapshot;
+  try {
+    snapshot = freezeCurrent();
+  } catch (failure) {
+    // The same failure the preview screen reports, in the same words, rather than a silent no-op.
+    el('live-warning').querySelector('span').textContent = failure.message;
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = 'Sending';
+
+  // The newest row per client, so a client assigned twice carries their latest deload marks
+  // forward rather than whichever row the query happened to return first.
+  const latest = new Map();
+  for (const row of assignments) {
+    const held = latest.get(row.client_id);
+    if (!held || String(row.starts_on) > String(held.starts_on)) latest.set(row.client_id, row);
+  }
+
+  const startsOn = isoDate(new Date());
+  for (const [clientId, previous] of latest) {
+    await state.storage.put(
+      'assignments',
+      makeRecord('assignments', {
+        client_id: clientId,
+        template_id: state.template.id,
+        snapshot,
+        starts_on: startsOn,
+        ends_on: null,
+        deload_weeks: Array.isArray(previous.deload_weeks) ? [...previous.deload_weeks] : [],
+      }),
+    );
+  }
+
+  state.liveAssignments = await state.storage.query('assignments', {
+    template_id: state.template.id,
+  });
+  renderLiveWarning();
+  const said = el('live-warning').querySelector('span');
+  const count = latest.size;
+  if (said) {
+    said.textContent =
+      `Sent to ${count} client${count === 1 ? '' : 's'}. Their next session uses this program. ` +
+      `Sessions they have already logged stay on the version they trained.`;
+  }
 }
 
 function renderDays() {
@@ -1149,12 +1240,42 @@ function wire() {
 
   el('import-create').addEventListener('click', commitImport);
 
-  // The Log column is the one thing on the review screen that edits the draft.
+  // The review screen edits the draft in place. Every cell is a real field now, not just the Log
+  // column: this is the moment somebody is looking straight at a wrong rest time, and sending them
+  // to find the row again in the builder after creating the program was the long way round.
   el('import-draft').addEventListener('change', (event) => {
     const select = event.target.closest('.import__mode');
     if (!select || !state.draft) return;
     setMode(state.draft, Number(select.dataset.day), Number(select.dataset.item), select.value);
     select.closest('tr')?.classList.remove('import__row--review');
+  });
+
+  // On input rather than on change, so the client sentence follows the typing. Only the derived
+  // cells are touched: rebuilding the table on a keystroke throws the caret to the end of the
+  // field, which on a rest time is how 60 becomes 660.
+  el('import-draft').addEventListener('input', (event) => {
+    const field = event.target.closest('input[data-col]');
+    if (!field || !state.draft) return;
+    const dayIndex = Number(field.dataset.day);
+    const itemIndex = Number(field.dataset.item);
+    const derived = setField(state.draft, dayIndex, itemIndex, field.dataset.col, field.value);
+    if (!derived) return;
+
+    const key = `${dayIndex}-${itemIndex}`;
+    const line = el('import-draft').querySelector(`[data-target="${key}"]`);
+    if (line) {
+      line.textContent = derived.target;
+      if (!derived.target) line.innerHTML = '<span class="import__none">nothing to show</span>';
+    }
+    const row = el('import-draft').querySelector(`[data-row="${key}"]`);
+    const select = row?.querySelector('.import__mode');
+    if (select && document.activeElement !== select) select.value = derived.mode;
+  });
+
+  // Inside the warning band, which is redrawn whole, so the listener sits on a parent.
+  el('live-warning').addEventListener('click', (event) => {
+    const button = event.target.closest('#push-edits');
+    if (button) pushEdits(button);
   });
 
   el('add-day').addEventListener('click', addDay);

@@ -229,6 +229,16 @@ payments
 - **`assignments.snapshot` is mandatory.** When a trainer edits a template, it must not
   retroactively rewrite what a client was already told to do. The snapshot freezes the
   program as assigned. History stays truthful.
+  **The way through it is a new row, never an edit to the old one.** A trainer who fixes a rest time
+  on a live program can send it, and what that does is write a fresh assignment per client carrying
+  the current snapshot, starting today. Sessions already logged keep pointing at the assignment they
+  were logged under, so history stays attached to the program it was actually done against, and
+  `currentAssignment` picks the new row up for the next session. `deload_weeks` carries forward,
+  because a back off week is marked from the client's chart months later and losing it as a side
+  effect of a rest time edit would be a silent change to somebody's training. Before this the rule
+  was enforced and unexplained: the builder warned that edits reach new assignments only and said
+  nothing about assigning again being the mechanism, so a fix looked applied and the client's phone
+  went on showing the old number.
 - **`payments.client_name_text` is denormalized on purpose.** Tax records must survive a
   client being deleted.
 - Money is `amount_cents` as an integer. Never floats.
@@ -394,6 +404,16 @@ Requirements:
   anywhere in it by design.
 - No confirmation dialogs anywhere in the logging flow. That includes skip and end session:
   both are reachable by undo or by simply training again, so neither is worth a dialog.
+- **Finishing is a submit, and it has an answer.** The summary card carries a Done button. How it
+  felt and the note are held in memory until it is pressed, so ending a session is a deliberate act
+  the app confirms rather than something that quietly happened while chips were tapped. The chips
+  used to write on every tap, which meant there was no moment of completion to confirm; the loss
+  that holding reintroduces is answered by keeping the unsent answer in `sessionStorage`, so a
+  reload during the summary comes back with it. **The SETS are never held this way.** They are
+  written the instant they are logged and always have been: a phone that dies between the last set
+  and the Done button costs an unsent note and never a workout, and that ordering is why `set_logs`
+  is append only in the first place. A submit that gated the sets would put a whole session behind
+  a button somebody might not reach.
 - **How it felt is asked once, at the end, and never per set.** `sessions.client_note` was in the
   schema from 0001 and nothing wrote to it for months: the objective half of a workout was recorded
   to the rep and the subjective half was not recorded at all. For a calisthenics block that is most

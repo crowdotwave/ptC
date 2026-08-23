@@ -43,6 +43,7 @@ import {
   retractionOf,
 } from './js/session.js';
 import { renderHistory, summaryLine, discardedMessage } from './js/session-view.js';
+import { renderDraft, setField, setMode } from './js/import-ui.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import {
   isPending,
@@ -4407,6 +4408,90 @@ test('nothing in the readout formats a weight its own way', () => {
   const html = readout();
   ok(html.includes('100 kg × 5'), 'the caller formatter is what ran');
   ok(!html.includes('100kg'), 'and no second opinion about how a weight looks');
+});
+
+
+// ------------------------------------------------------------------ the import review screen
+//
+// js/import-ui.js. The review step used to be read only except for the Log column, so a trainer
+// looking straight at a wrong rest time had to create the program anyway and go and find the row
+// again in the builder. Every cell is a field now, parsed through the same functions the builder
+// uses, and nothing is written until createProgram runs.
+
+const draftItem = (over = {}) => ({
+  groupLabel: '1', exerciseName: 'BARBELL BACK SQUAT', variation: 'BARBELL',
+  targetSets: 4, targetRepsLow: 8, targetRepsHigh: null, targetRepsText: '8',
+  targetLoad: '2 RIR', targetRpe: null, restSeconds: 60,
+  isLogged: true, logMode: 'weight_reps', needsReview: false, ...over,
+});
+const draftOf = (...items) => ({
+  fileName: 'Emma.xlsx', warnings: [],
+  days: [{ name: 'GLUTE DAY', dayType: 'STRENGTH', split: 'GLUTE DAY', sheet: 'Sheet2',
+           warmup: { mobility: [], general: [], specific: [] }, comments: [], items }],
+});
+
+test('a rest time can be fixed where it is noticed, in the sheet\'s own words', () => {
+  const draft = draftOf(draftItem());
+  const out = setField(draft, 0, 0, 'rest', '150 SEC');
+  eq(draft.days[0].items[0].restSeconds, 150, 'parsed the same way the builder parses it');
+  ok(out.target.includes('150s rest'), out.target);
+});
+
+test('a rep range edited on review reaches both ends of the range', () => {
+  const draft = draftOf(draftItem());
+  setField(draft, 0, 0, 'reps', '6-10');
+  const item = draft.days[0].items[0];
+  eq([item.targetRepsLow, item.targetRepsHigh, item.targetRepsText], [6, 10, '6-10']);
+});
+
+test('the sentence the client will read follows the edit', () => {
+  const draft = draftOf(draftItem());
+  const before = setField(draft, 0, 0, 'sets', '4').target;
+  const after = setField(draft, 0, 0, 'sets', '5').target;
+  ok(before.startsWith('4 sets'), before);
+  ok(after.startsWith('5 sets'), after);
+});
+
+// The same rule the builder follows: a guess may be revised until somebody decides, and never
+// after. An EMOM row whose Load says "1 MIN EMOM" is exactly the row a trainer overrides.
+test('editing load re-guesses how a row is logged, until the trainer has chosen', () => {
+  const draft = draftOf(draftItem({ targetLoad: '1 MIN EMOM' }));
+  setField(draft, 0, 0, 'load', 'BW');
+  const guessed = draft.days[0].items[0].logMode;
+  setMode(draft, 0, 0, 'rounds');
+  setField(draft, 0, 0, 'load', '25 lb');
+  eq(draft.days[0].items[0].logMode, 'rounds', 'a decision is not guessed over');
+  ok(guessed !== undefined, 'and it did guess before the decision');
+});
+
+test('choosing not to log a row survives an edit to the row', () => {
+  const draft = draftOf(draftItem());
+  setMode(draft, 0, 0, 'none');
+  setField(draft, 0, 0, 'reps', '12');
+  eq(draft.days[0].items[0].isLogged, false);
+});
+
+test('an edit to a row that is not there changes nothing and returns nothing', () => {
+  const draft = draftOf(draftItem());
+  eq(setField(draft, 9, 9, 'rest', '90 SEC'), null);
+  eq(setField(draft, 0, 0, 'nonsense', 'x'), null);
+  eq(draft.days[0].items[0].restSeconds, 60, 'untouched');
+});
+
+test('every cell on the review screen is a field, and each one is addressable', () => {
+  const html = renderDraft(draftOf(draftItem(), draftItem({ groupLabel: '2' })));
+  for (const col of ['group', 'exercise', 'variation', 'sets', 'reps', 'load', 'rest']) {
+    ok(html.includes(`data-col="${col}"`), `${col} is editable`);
+  }
+  ok(html.includes('data-row="0-0"') && html.includes('data-row="0-1"'), 'rows are addressable');
+  ok(html.includes('data-target="0-0"'), 'and so is the sentence that has to follow an edit');
+});
+
+// A trainer types the exercise names, and the file is somebody else's spreadsheet.
+test('a draft cell carrying markup is escaped rather than rendered', () => {
+  const html = renderDraft(draftOf(draftItem({ exerciseName: '<b>SQUAT</b>' })));
+  ok(html.includes('&lt;b&gt;SQUAT&lt;/b&gt;'));
+  ok(!html.includes('<b>SQUAT</b>'));
 });
 
 // ------------------------------------------------------------------ report

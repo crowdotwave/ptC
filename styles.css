@@ -1605,6 +1605,13 @@ button.worknav__row:active {
   font-weight: 650;
 }
 
+/* Said and sent. Same green, because it is the same claim one step further on, and the Done button
+ * beside it changes at the same moment so the state is carried twice. */
+.feel__ask[data-state='saved'] {
+  color: var(--done);
+  font-weight: 700;
+}
+
 /* A grid rather than the scrolling row the day picker uses. Four fixed options that never grow
  * are not a scroller, and a half visible chip would be promising a fifth that does not exist. */
 .feel__chips {
@@ -1645,9 +1652,47 @@ button.worknav__row:active {
 }
 
 /* Full width, because a note is a sentence and a 44px tall input the width of a button would be
- * a text field pretending to be a search box. It commits on blur and on Enter, so it needs no
- * Save button of its own: a save control here would be the only one on this screen, and the rest
- * of the app writes on the action rather than on a second confirmation. */
+ * a text field pretending to be a search box. It commits into memory on blur and on Enter; what
+ * writes it is the Done button below. */
+/* The submit, and the one control on the summary card that is not chrome.
+ *
+ * It takes the emerald because it is the third place the app's one green means "recorded", after
+ * the card's own edge and the word "logged" on it. Filled rather than outlined, because this is
+ * the last action of a workout and the only thing on the card that does anything: everything above
+ * it is a statement or a choice, and a hollow control among hollow controls would not read as the
+ * end of the session.
+ *
+ * --surface-base for the label rather than --text-primary. --done is a light fill at Y 0.538, so
+ * dark ink on it measures 11.77 where --text-primary would measure 1.55, which is no contrast at
+ * all. Same arithmetic as the log action, which is dark on orange for the same reason.
+ *
+ * Full width, matching the input above it: this is the end of a column, not an item in a row. */
+.feel__done {
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--s-2) var(--s-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--done);
+  color: var(--surface-base);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+.feel__done:active {
+  background: color-mix(in srgb, var(--done) 82%, var(--surface-base));
+}
+
+/* Sent. It stays on screen rather than disappearing, because a control that vanishes on success
+ * takes its own confirmation with it. Flat and quiet, so it reads as a receipt rather than as a
+ * thing still waiting to be pressed, and it comes back the moment the answer changes. */
+.feel__done:disabled {
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--done) 55%, transparent);
+  color: var(--done);
+  cursor: default;
+}
+
 .feel__input {
   width: 100%;
   min-height: var(--tap);

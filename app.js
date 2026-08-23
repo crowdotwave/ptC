@@ -66,6 +66,7 @@ const ui = {
   feelMore: el('feel-more'),
   feelNote: el('feel-note'),
   feelText: el('feel-text'),
+  feelDone: el('feel-done'),
   rest: el('rest'),
   restFill: el('rest-fill'),
   restLabel: el('rest-label'),
@@ -109,6 +110,10 @@ const state = {
   // not have to take the stored note back apart every time. Both are null and empty until asked.
   feel: null,
   feelText: '',
+  // Whether what the client said has been submitted. How it felt and the note are held in
+  // memory until Done, so the card has a submit moment and an answer to it. Logged sets are
+  // never held this way: see the note on the Done button in index.html.
+  feelSaved: false,
   // Whether the note field has been opened. A tap, never a default: this screen does not raise a
   // keyboard on its own anywhere else either.
   feelTyping: false,
@@ -635,8 +640,18 @@ function renderFeel() {
   // "Log set" produces "Logged." per the copy rules, so a question produces an answer rather than
   // staying a question with something ticked underneath it. This line is also the second place the
   // green lands, on the card's own background where it measures about 10.5:1.
-  ui.feelAsk.textContent = said ? 'Noted.' : 'How did that feel?';
-  ui.feelAsk.dataset.state = said ? 'said' : 'asking';
+  //
+  // Three states now rather than two, because there is a submit in between. Asking, answered but
+  // not sent, and saved. The middle one is the state the Done button exists for: something has been
+  // said and the app has not been told to keep it yet.
+  ui.feelAsk.textContent = state.feelSaved ? 'Saved.' : said ? 'Noted.' : 'How did that feel?';
+  ui.feelAsk.dataset.state = state.feelSaved ? 'saved' : said ? 'said' : 'asking';
+
+  // Done is live until it has been pressed, and comes back the moment anything changes. It is
+  // offered on a session with nothing said as well, because "I am finished here" is a legitimate
+  // thing to tell the app whether or not there is a note attached to it.
+  ui.feelDone.textContent = state.feelSaved ? 'Saved' : 'Done';
+  ui.feelDone.disabled = state.feelSaved;
 
   // The button is the way in. Once the field is open it stays open for the rest of the session,
   // because closing it would throw away a sentence somebody is halfway through typing.
@@ -657,19 +672,84 @@ function renderFeel() {
  */
 function setFeel(word) {
   state.feel = state.feel === word ? null : word;
-  saveNote();
+  // Held, not written. Done is what writes.
+  state.feelSaved = false;
+  keepDraft();
   renderFeel();
 }
 
-/** Writes what the client said onto the session row. Optimistic, like everything else here. */
+/**
+ * Writes what the client said onto the session row, on the Done button and nowhere else.
+ *
+ * IT USED TO WRITE ON EVERY TAP, and the argument for that is still in the repository history and
+ * still half right: everything else on this screen writes on the action itself, so a note that
+ * needed confirming was the one thing here that could be lost by walking away. What that reasoning
+ * missed is that a screen with no submit has no moment of completion either, so finishing a session
+ * was something that quietly happened rather than something the app ever confirmed.
+ *
+ * So there is a submit now, and the loss it reintroduces is answered directly rather than by
+ * writing early: keepDraft holds the unsent answer in sessionStorage, so a reload during the
+ * summary comes back with it rather than losing it.
+ *
+ * WHAT IS NOT HELD IS THE SETS. Those are written the instant they are logged and always have been.
+ * A phone that dies between the last set and this button costs an unsent note, never a workout, and
+ * that ordering is not negotiable: set_logs is append only precisely so a session is on disk before
+ * anybody thinks about confirming anything.
+ */
 function saveNote() {
   if (!state.sessionRecord) return;
   const note = composeNote(state.feel, state.feelText);
-  if (note === (state.sessionRecord.client_note ?? null)) return;
-  stampSession({ client_note: note });
+  state.feelSaved = true;
+  dropDraft();
+  if (note !== (state.sessionRecord.client_note ?? null)) stampSession({ client_note: note });
   // Said once, at the end, on a screen somebody is about to close. For a calisthenics block this
   // is most of what the coach needs, and it is the last thing written before the phone goes away.
   flushSoon();
+  renderFeel();
+}
+
+/**
+ * The unsent answer, kept where a reload can find it.
+ *
+ * sessionStorage rather than the session row, because the whole point is that this has not been
+ * recorded yet. Keyed by the session, so a draft cannot leak onto a different workout. Wrapped
+ * because private mode can refuse storage entirely, and a summary card that throws is worse than
+ * one that forgets a sentence.
+ */
+const DRAFT_KEY = 'ptc.feel.draft';
+
+function keepDraft() {
+  if (!state.sessionRecord) return;
+  try {
+    sessionStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({ id: state.sessionRecord.id, feel: state.feel, text: state.feelText }),
+    );
+  } catch {
+    // Storage denied. The answer is still on screen and Done still writes it.
+  }
+}
+
+function dropDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Nothing to clean up that we are allowed to touch.
+  }
+}
+
+/** Puts an unsent answer back after a reload, for this session and no other. */
+function restoreDraft(sessionId) {
+  try {
+    const held = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null');
+    if (!held || held.id !== sessionId) return false;
+    state.feel = held.feel ?? null;
+    state.feelText = held.text ?? '';
+    state.feelTyping = Boolean(held.text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function shortDate(iso) {
@@ -721,6 +801,14 @@ function tickRest() {
 
 function ensureSessionRecord() {
   if (state.sessionRecord) return state.sessionRecord;
+  // A fresh session has said nothing yet, so the summary must not open on a "Saved." left behind
+  // by the one before it. The draft goes too: it is keyed by session id and would never match
+  // this one, but leaving a stale key around is how a draft eventually lands on the wrong workout.
+  state.feel = null;
+  state.feelText = '';
+  state.feelTyping = false;
+  state.feelSaved = false;
+  dropDraft();
   state.sessionRecord = makeRecord('sessions', {
     client_id: state.client.id,
     assignment_id: state.assignment ? state.assignment.id : null,
@@ -1357,23 +1445,24 @@ function wire() {
     ui.feelText.focus();
   });
 
-  // Commits on blur and on Enter, which is what `change` is on a text input, so there is no Save
-  // button. A save control here would be the only one in the app: everything else writes on the
-  // action itself, and a note that needed confirming would be the one thing on this screen that
-  // could be lost by walking away from it.
-  ui.feelText.addEventListener('change', () => {
-    state.feelText = ui.feelText.value.trim();
-    saveNote();
+  // Takes the typing into memory on Enter and on blur. It no longer writes: Done does that. Both
+  // handlers stay, because a phone that locks with the keyboard up never fires `change`, and the
+  // draft has to be held before the screen goes away either way.
+  const takeTyping = () => {
+    const typed = ui.feelText.value.trim();
+    if (state.feelText === typed) return;
+    state.feelText = typed;
+    state.feelSaved = false;
+    keepDraft();
     renderFeel();
-  });
+  };
+  ui.feelText.addEventListener('change', takeTyping);
+  ui.feelText.addEventListener('blur', takeTyping);
 
-  // A phone that locks with the keyboard up never fires `change`. This is the same commit, taken
-  // on the way out.
-  ui.feelText.addEventListener('blur', () => {
-    if (state.feelText === ui.feelText.value.trim()) return;
-    state.feelText = ui.feelText.value.trim();
+  // The submit. Everything the client said goes down here, in one write, and the card says so.
+  ui.feelDone.addEventListener('click', () => {
+    takeTyping();
     saveNote();
-    renderFeel();
   });
 
   ui.typeToggle.addEventListener('click', () => {
@@ -1512,10 +1601,16 @@ async function main() {
     // Anything said about this session before the interruption comes back with it, chip and all.
     // A client who answered, locked the phone, and came back to log one more set would otherwise
     // find the row blank and either answer twice or assume the first answer was lost.
+    // The row first, then anything unsent on top of it: a draft only exists because Done was not
+    // pressed, so it is newer than whatever the row is carrying.
     const already = parseNote(open.client_note);
     state.feel = already.feel;
     state.feelText = already.text;
     state.feelTyping = Boolean(already.text);
+    // Whatever is on the row got there through Done, so it counts as saved until something moves.
+    state.feelSaved = Boolean(open.client_note);
+    // And an unsent draft goes on top, because it only exists because Done was not pressed.
+    if (restoreDraft(open.id)) state.feelSaved = false;
   }
 
   renderDayPicker(snapshot, sessions);
