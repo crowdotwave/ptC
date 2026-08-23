@@ -65,6 +65,10 @@ export function buildSnapshot({ template, days, items, exercises }) {
         name: day.name,
         day_type: day.day_type,
         split: day.split,
+        // Null on every day of a program that has no options in it, and absent entirely from every
+        // snapshot frozen before this column existed. Both mean the same thing and both read as a
+        // day of the rotation, which is why nothing below tests for the field's presence.
+        alternate_of: day.alternate_of ?? null,
         warmup: day.warmup,
         comments: day.comments,
         items: items
@@ -128,12 +132,27 @@ export function sameSnapshot(a, b) {
   return canonical(a) === canonical(b);
 }
 
+/**
+ * A field that is null and a field that is not there are the same prescription, and this is where
+ * that is decided.
+ *
+ * The reason is the same one that made this a sorted walk rather than a JSON.stringify: a snapshot
+ * is frozen the moment it is handed out and can never be migrated, so every column added to
+ * `template_days` or `template_items` after today exists in new snapshots and not in old ones.
+ * `alternate_of` is the first of those. Comparing presence would mark every client on every
+ * program stale the day the column shipped, which says "on an older version of this program" to a
+ * trainer who changed nothing, on a screen built to tell those two states apart.
+ *
+ * A value that actually changes still reads as changed. A rest time going from 60 to null is
+ * `{rest_seconds:60}` against `{}`, which are different strings, exactly as before.
+ */
 function canonical(value) {
   if (value === undefined || value === null) return 'null';
   if (typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   return `{${Object.keys(value)
     .filter((key) => !BOOKKEEPING.has(key))
+    .filter((key) => value[key] !== null && value[key] !== undefined)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
     .join(',')}}`;
@@ -221,6 +240,57 @@ export function sortedItems(day) {
 }
 
 /**
+ * The days that make up the rotation, which is not the same set as the days of the program.
+ *
+ * A day carrying `alternate_of` is an option instead of the day it names: the same session of the
+ * week done a different way, which the client picks when they want it. It is in the program, it is
+ * in the picker, and it is not a further step in the cycle. So a four day program with two cardio
+ * options has five days and a rotation of four, and the visit after cardio is the day after
+ * cardio whichever of the two was done.
+ *
+ * Takes rows rather than a snapshot, because the builder holds `template_days` rows and the
+ * logging screen holds a frozen snapshot's days, and the rule has to be one rule. Anything naming
+ * a day that is not here stands on its own: a snapshot frozen from a program whose parent day was
+ * later deleted still has to say what its rotation is.
+ */
+export function rotationOf(days) {
+  const present = new Set(days.map((day) => day.id));
+  const rotation = days.filter((day) => !(day.alternate_of && present.has(day.alternate_of)));
+  // Every day claiming to be an option instead of another one, which two days pointing at each
+  // other would produce. There is no rotation to derive from that, so the program is its own.
+  return rotation.length ? rotation : [...days];
+}
+
+/**
+ * Every day of a program in reading order: each day of the rotation, then its options.
+ *
+ * Ordering only, and it is deliberately not `day_index`. An option is appended to the end of the
+ * program when it is created, because renumbering the days already in a program changes what
+ * `day_index` means and the sessions already logged carry that number. So the stored order puts a
+ * cardio option fifth and the picker has to put it beside the cardio day it belongs to, or the two
+ * chips a client chooses between sit at opposite ends of the row.
+ */
+export function readingOrder(days) {
+  const rotation = rotationOf(days);
+  const inRotation = new Set(rotation.map((day) => day.id));
+  const out = [];
+  for (const day of rotation) {
+    out.push(day);
+    out.push(...days.filter((other) => !inRotation.has(other.id) && other.alternate_of === day.id));
+  }
+  // Anything the walk above could not place, which is an option of an option. Kept rather than
+  // dropped: a screen that silently stops showing a day somebody typed is worse than one that
+  // shows it last.
+  const placed = new Set(out.map((day) => day.id));
+  return [...out, ...days.filter((day) => !placed.has(day.id))];
+}
+
+/** The days of a snapshot in reading order. */
+export function programDays(snapshot) {
+  return readingOrder(sortedDays(snapshot));
+}
+
+/**
  * What to call a day, in the trainer's own words where they gave any.
  *
  * The split first, because that is what the trainer scans for and what the day picker on the
@@ -247,15 +317,28 @@ export function dayTitle(day) {
  * A last session on a day the snapshot no longer contains starts the rotation again at the first
  * day, which is the honest answer: the program it belonged to is not this one.
  *
+ * It advances through the rotation and never through the options, and a session logged on an
+ * option advances from the day that option stands in for. Doing the second cardio workout is doing
+ * the cardio day, so what comes next is what comes after cardio. Landing on the option instead is
+ * the app asking somebody to do cardio twice, which is what a further day of the rotation would
+ * mean and is not what the trainer wrote down.
+ *
  * Returns null for a program with no days. Only a caller can decide what to show for that, and
  * the two that will need to (the logging screen and the program view) say different things.
  */
 export function pickDay(snapshot, sessions) {
   const days = sortedDays(snapshot);
-  if (!days.length) return null;
-  if (!sessions.length) return days[0];
+  const rotation = rotationOf(days);
+  if (!rotation.length) return null;
+  if (!sessions.length) return rotation[0];
 
   const last = sessions[sessions.length - 1];
-  const position = days.findIndex((day) => day.day_index === last.day_index);
-  return days[(position + 1) % days.length];
+  const done = days.find((day) => day.day_index === last.day_index);
+  const inRotation = new Set(rotation.map((day) => day.id));
+  // The option's own day where it stands in for one, and itself otherwise, which covers an option
+  // whose day was deleted after this session was logged.
+  const anchor = done && inRotation.has(done.alternate_of) ? done.alternate_of : done?.id ?? null;
+  // -1 for a day this program does not have, which the modulo below turns into the first day.
+  const position = rotation.findIndex((day) => day.id === anchor);
+  return rotation[(position + 1) % rotation.length];
 }

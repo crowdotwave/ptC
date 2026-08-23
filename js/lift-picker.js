@@ -32,7 +32,7 @@
 // a string or an array, so test.js can check it with no DOM. The pages own the open flag, the
 // search text, and the listeners.
 
-import { sortedDays, sortedItems, dayTitle } from './snapshot.js';
+import { programDays, sortedItems, dayTitle } from './snapshot.js';
 import { activeSetLogs } from './history.js';
 import { localDayOf } from './dates.js';
 
@@ -120,7 +120,9 @@ export function groupLifts(lifts, snapshot) {
   const groups = [];
   const placed = new Set();
 
-  for (const day of sortedDays(snapshot)) {
+  // Reading order, so a lift that only appears in an option is listed under that option and
+  // directly beneath the day it stands in for, rather than at the bottom of the list.
+  for (const day of programDays(snapshot)) {
     const rows = [];
     for (const item of sortedItems(day)) {
       const id = item.exercise?.id ?? item.exercise_id;

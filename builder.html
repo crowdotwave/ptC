@@ -121,6 +121,21 @@
         <ul class="clientlist" id="assign-list"></ul>
       </section>
 
+      <!-- Days this trainer has already written, to be copied into the program that is open. A
+           state of the screen rather than a layer over it, the way the lift picker and the workout
+           panel are: in flow, no focus trap, no z-index, escape to close. -->
+      <section id="copy-view" hidden>
+        <div class="context__row">
+          <p class="backlink"><a href="#" id="copy-back">Back to the program</a></p>
+        </div>
+        <p class="legend" id="copy-note"></p>
+        <label class="field">
+          <span class="field__label" for="copy-search">Search</span>
+          <input class="field__input" id="copy-search" type="search" placeholder="Cardio, legs, A4" />
+        </label>
+        <div id="copy-list"></div>
+      </section>
+
       <section id="edit-view" hidden>
         <!-- Preview sits in the top row rather than beside Add day, because checking what you
              wrote is something you reach for at any point, and the bottom of a five day table
@@ -134,6 +149,10 @@
         </div>
 
         <p class="suggest" id="live-warning" hidden></p>
+
+        <!-- What a copy just did, in the words a trainer would use for it. A day arriving at the
+             bottom of a five day table is a change nobody can see from where they pressed. -->
+        <p class="said" id="edit-said" hidden role="status"></p>
 
         <p class="legend">
           The <span class="legend__swatch">cyan line</span> under each exercise is the sentence
@@ -150,6 +169,9 @@
 
         <div class="secondary">
           <button type="button" class="button-secondary" id="add-day">Add day</button>
+          <!-- A second cardio workout is the first one with one row changed, so the copy is the
+               control that gets used and the blank day is the one for a program being started. -->
+          <button type="button" class="button-secondary" id="copy-day">Add a copy of a day</button>
           <button type="button" class="button-secondary" id="archive">Archive program</button>
         </div>
 

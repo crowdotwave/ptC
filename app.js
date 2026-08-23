@@ -19,7 +19,9 @@ import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
 import { targetLine } from './js/program.js';
-import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
+import {
+  pickDay, sortedDays, sortedItems, currentAssignment, dayTitle, programDays,
+} from './js/snapshot.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
@@ -1266,9 +1268,14 @@ function bindHold(button, apply) {
  * A five day rotation does not get done in order. Somebody skips legs on a Monday and does it
  * Thursday, and guessing from the last session with no way to override it makes the app wrong
  * in a way the client cannot fix.
+ *
+ * Every day, options included. An option is a day the client chooses INSTEAD of the one it stands
+ * in for, so this row is the only place it is ever picked: nothing suggests it, because suggesting
+ * one of two cardio workouts over the other is a decision the trainer did not make and the app
+ * cannot. In reading order, so it sits next to the day it replaces.
  */
 function renderDayPicker(snapshot, sessions) {
-  ui.dayPicker.innerHTML = sortedDays(snapshot)
+  ui.dayPicker.innerHTML = programDays(snapshot)
     .map((day) => {
       const on = day.day_index === state.day.day_index;
       // The split only. The day type above it said STRENGTH on almost every chip, which is a

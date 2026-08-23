@@ -21,7 +21,7 @@
 //                   history and neither does being moved onto a new one.
 
 import { localDayOf, monthKey, localMidnight, isoDate } from './dates.js';
-import { sortedDays, dayTitle } from './snapshot.js';
+import { sortedDays, dayTitle, rotationOf } from './snapshot.js';
 import { weekIndexOf } from './progression.js';
 
 /**
@@ -80,7 +80,10 @@ export function splitGlyphs(labels) {
     }
     members.forEach((index, n) => {
       const word = words[n];
-      out[index] = at >= 0 ? `${key}${word[at]}` : `${key}${n + 1}`;
+      // The fallback matters where one label is a prefix of another, which is what an option named
+      // after the day it stands in for looks like: CARDIO against CARDIO OPTION 2 first differ
+      // where the shorter has run out. Without it the shorter one's glyph read 'Cundefined'.
+      out[index] = at >= 0 ? `${key}${word[at] ?? ''}` : `${key}${n + 1}`;
     });
   }
   return out;
@@ -100,13 +103,22 @@ function daysOfAssignment(assignment) {
   const labels = days.map((day) => dayTitle(day));
   const glyphs = splitGlyphs(labels);
 
+  // Position in the rotation rather than the raw day_index, so a program whose days are numbered
+  // 0, 3, 7 still fills slots 1, 2, 3 instead of leaving gaps in the palette.
+  const slots = new Map(
+    rotationOf(days).map((day, position) => [day.id, Math.min(position, SPLIT_SLOTS - 1) + 1]),
+  );
+
   return days.map((day, position) => ({
     dayIndex: day.day_index,
     label: labels[position],
     glyph: glyphs[position],
-    // Position in the rotation rather than the raw day_index, so a program whose days are
-    // numbered 0, 3, 7 still fills slots 1, 2, 3 instead of leaving gaps in the palette.
-    slot: Math.min(position, SPLIT_SLOTS - 1) + 1,
+    // An option takes the colour of the day it stands in for, because it IS that day: a second
+    // cardio workout is a cardio cell. Giving it a slot of its own would spend a hue saying two
+    // sessions were different kinds of day when the whole point of the column is that they are the
+    // same kind, and on a four day program that hue is the colourless overflow anyway. The glyph is
+    // what says which of the two was done, which is the fourth channel doing exactly its job.
+    slot: slots.get(day.id) ?? slots.get(day.alternate_of) ?? SPLIT_SLOTS,
   }));
 }
 

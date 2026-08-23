@@ -96,6 +96,18 @@ export const TABLES = {
       // vocabulary, not ours, and a fixed enum would start rejecting their words.
       day_type: { type: TEXT, nullable: true },
       split: { type: TEXT, nullable: true },
+      // The day this one is an option instead of, or null for a day of the rotation itself.
+      //
+      // A cardio day with two versions is one day of the week done two ways, not two days of the
+      // week. Without this column the only way to add the second version is a sixth day, and then
+      // the rotation expects six sessions where the trainer prescribed five: pickDay advances into
+      // the alternate the visit after the day it replaces, so the app is wrong about what to do
+      // today on every cycle, and the client corrects it by hand every cycle.
+      //
+      // Points at another template_days row of the same template. The database has it on delete
+      // set null, so removing the day an option stands in for turns the option back into a day of
+      // the rotation rather than taking it with it.
+      alternate_of: { type: UUID, nullable: true, ref: 'template_days' },
       // The three warm up columns, shown and never logged. Nobody is ticking off a tibia
       // raise, so this is instruction rather than data.
       // { mobility: [], general: [], specific: [] }

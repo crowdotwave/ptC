@@ -160,6 +160,9 @@ template_days
   template_id uuid -> program_templates.id
   day_index int
   name text                   -- 'Push A', 'Lower Body', etc
+  alternate_of uuid null      -- another day of this template. Null is a day of the rotation, set
+                              -- is a day done INSTEAD of that one: a second cardio workout is the
+                              -- cardio day done differently, not a sixth day of the week
 
 template_items
   day_id uuid -> template_days.id
@@ -249,9 +252,46 @@ payments
   `sameSnapshot` in `js/snapshot.js` owns the comparison, and it sorts keys rather than comparing
   text. That is not tidiness. `snapshot` is jsonb, which parses what it is given and re-renders keys
   in its own order, so a byte compare marks every synced client permanently stale, which is a worse
-  lie than the one it replaced. Assigning from that list carries `deload_weeks` forward exactly as
+  lie than the one it replaced. A field that is null and a field that is absent are the same
+  prescription there, for the same reason: a snapshot is frozen and can never be migrated, so every
+  column added after today is in new snapshots and not in old ones, and `alternate_of` was the
+  first. Comparing presence would have said "on an older version of this program" to a trainer who
+  changed nothing, on the one screen built to tell those two states apart.
+  Assigning from that list carries `deload_weeks` forward exactly as
   the button in the editor does, and only within the same program: week 5 of a block somebody is
   leaving means nothing in the block they are joining.
+- **A day of the rotation and an option instead of one are different things, and `alternate_of` is
+  the difference.** The trainer asked for "A4 option 2", a second cardio workout to be done in
+  place of the cardio day rather than as well as it. Added as a further day, the rotation expects
+  five sessions where four were prescribed: `pickDay` advances from the last session, so the visit
+  after cardio is the second cardio workout, forever, and the client corrects it by hand every
+  cycle. That is the wrong-day failure the day picker exists to prevent, arrived at from the other
+  side. So an option says which day it stands in for. `rotationOf` in `js/snapshot.js` owns what
+  the rotation is, `pickDay` advances through that and never through the options, and a session
+  logged on an option advances from the day it replaces, because doing the second cardio workout
+  IS doing the cardio day. Nothing suggests an option: which of two cardio workouts to do is a
+  decision the trainer did not make and the app cannot. It is one more chip on the day picker,
+  where the client picks it.
+  **Reading order is not `day_index` order, and that is deliberate.** An option is APPENDED, never
+  inserted, because `sessions.day_index` is the number every logged session carries and
+  renumbering the days already in a program silently changes what those numbers mean. So the
+  stored order puts a cardio option fifth and `readingOrder` puts it beside the cardio day for
+  every picker and every list. The two orders are one function each and every screen takes them
+  from there.
+  **On the consistency grid an option takes the colour of the day it stands in for**, with its own
+  glyph. That is the `--split-N-face` fence held rather than loosened: a cell's face says which
+  kind of day this was, and both cardio workouts are the cardio day. A slot of its own would spend
+  a hue saying they were different, which is the opposite of what the column means, and on a four
+  day program that hue is the colourless overflow anyway. The glyph is the fourth channel doing
+  exactly its job.
+- **Adding a day a trainer has already written is one tap, and it copies rather than shares.**
+  A second cardio workout is the first with one row changed, and typing an eight row day again to
+  change one of them is the reason it does not get done. `js/day-copy.js` builds the new day and
+  its rows with new ids out of any day in any of that trainer's programs, archived ones included.
+  A day copied out of the program it is already in arrives as an option instead of it, named
+  `CARDIO OPTION 2`, because two chips reading `CARDIO` is a chooser that cannot be chosen from.
+  Nothing about the day copied from can change: a copy is new rows, and no assignment anybody
+  holds points at them.
 - **`payments.client_name_text` is denormalized on purpose.** Tax records must survive a
   client being deleted.
 - Money is `amount_cents` as an integer. Never floats.

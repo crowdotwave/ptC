@@ -17,7 +17,9 @@ import {
 } from './js/program.js';
 import {
   buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment, sameSnapshot,
+  rotationOf, readingOrder, programDays,
 } from './js/snapshot.js';
+import { copyDay, optionLabel, nextDayIndex } from './js/day-copy.js';
 import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.js';
 import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
 import { syncMessage, publishSync } from './js/sync-status.js';
@@ -31,7 +33,7 @@ import {
 import { validate, OUTBOX_STORE } from './js/schema.js';
 import { loadLabel, loadValue, unit, setUnit } from './js/units.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
-import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
+import { buildConsistency, splitGlyphs, SPLIT_SLOTS, identifySessions } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
 import { smoothPath, renderRepsAtLoadChart } from './js/charts.js';
 import { planForItem, setCountOf, countOf, nextSteppers, incrementOf } from './js/plan.js';
@@ -1034,6 +1036,194 @@ test('sorted reads survive a snapshot with a field missing', () => {
   eq(sortedItems(undefined), []);
 });
 
+// ------------------------------------------------------------------ a day done instead of a day
+//
+// A second cardio workout is the cardio day done differently, not a further day of the week. The
+// distinction is the whole column: without it the only way to add one is a fifth day, and then the
+// app asks for cardio on the visit after cardio for as long as the client is on the program.
+
+const optionProgram = {
+  ...program,
+  days: [
+    tday('d1', 0, { split: 'STRENGTH' }),
+    tday('d2', 1, { split: 'CARDIO' }),
+    // Appended, which is where the builder puts one: renumbering the days already in a program
+    // changes what sessions.day_index means on every session already logged.
+    tday('d3', 2, { split: 'CARDIO OPTION 2', alternate_of: 'd2' }),
+  ],
+  items: [...program.items, titem('i4', 'd3', 0, 'squat')],
+};
+const optioned = buildSnapshot(optionProgram);
+
+test('a snapshot says which day an option stands in for, and null where a day stands alone', () => {
+  eq(optioned.days[2].alternate_of, 'd2');
+  eq(optioned.days[0].alternate_of, null, 'a day of the rotation carries the column as null');
+});
+
+test('a snapshot frozen before the column existed reads as all rotation', () => {
+  eq(buildSnapshot(program).days.map((d) => d.alternate_of), [null, null]);
+  eq(rotationOf(sortedDays(frozen)).map((d) => d.id), ['d1', 'd2']);
+});
+
+test('an option is not a further day of the rotation', () => {
+  eq(pickDay(optioned, [onDay(0)]).day_index, 1, 'strength still leads to cardio');
+  eq(pickDay(optioned, [onDay(1)]).day_index, 0, 'and cardio wraps to the start, not to the option');
+});
+
+test('a session logged on the option advances from the day it stands in for', () => {
+  eq(pickDay(optioned, [onDay(2)]).day_index, 0, 'the second cardio workout IS the cardio day');
+});
+
+test('an option is never suggested, because choosing between two cardio workouts is not the app', () => {
+  eq(pickDay(optioned, []).day_index, 0);
+  ok(
+    rotationOf(sortedDays(optioned)).every((day) => !day.alternate_of),
+    'nothing carrying alternate_of is in the rotation at all',
+  );
+});
+
+test('reading order puts an option beside the day it replaces, wherever it was appended', () => {
+  const days = [
+    tday('d1', 0, { split: 'STRENGTH' }),
+    tday('d2', 1, { split: 'CARDIO' }),
+    tday('d3', 2, { split: 'STRENGTH OPTION 2', alternate_of: 'd1' }),
+  ];
+  eq(readingOrder(days).map((d) => d.id), ['d1', 'd3', 'd2']);
+  eq(days.map((d) => d.id), ['d1', 'd2', 'd3'], 'and the stored order is left alone');
+});
+
+test('an option whose day was deleted is a day of the rotation rather than a day that vanishes', () => {
+  const days = [tday('d1', 0), tday('d3', 2, { alternate_of: 'gone' })];
+  eq(rotationOf(days).map((d) => d.id), ['d1', 'd3']);
+  eq(readingOrder(days).map((d) => d.id), ['d1', 'd3']);
+});
+
+test('two days pointing at each other still leave a rotation to advance through', () => {
+  const days = [tday('d1', 0, { alternate_of: 'd2' }), tday('d2', 1, { alternate_of: 'd1' })];
+  eq(rotationOf(days).map((d) => d.id), ['d1', 'd2']);
+  eq(readingOrder(days).length, 2, 'and no day is dropped from the program');
+});
+
+test('programDays reads a snapshot the same way readingOrder reads rows', () => {
+  eq(programDays(optioned).map((d) => d.day_index), [0, 1, 2]);
+  eq(programDays(null), []);
+});
+
+test('adding the column does not tell a trainer their clients are on an older version', () => {
+  const before = buildSnapshot(program);
+  // What a snapshot frozen before this column existed looks like: no key at all, on any day.
+  const older = { ...before, days: before.days.map(({ alternate_of, ...rest }) => rest) };
+  ok(sameSnapshot(older, before), 'an absent field and a null one are the same prescription');
+});
+
+test('a field that actually changes still reads as changed', () => {
+  const a = buildSnapshot(program);
+  const b = buildSnapshot({ ...program, days: [tday('d1', 0, { split: 'PULL' }), tday('d2', 1)] });
+  ok(!sameSnapshot(a, b));
+});
+
+// ------------------------------------------------------------------ copying a day
+//
+// Typing an eight row day again to change one row of it is the reason a second cardio workout does
+// not get added, and a trainer who will not do it in the app goes back to the spreadsheet.
+
+const sourceDay = {
+  id: 'd2',
+  template_id: 't1',
+  day_index: 1,
+  name: 'Day 1',
+  day_type: 'CARDIO',
+  split: 'CARDIO',
+  warmup: { mobility: ['ankles'], general: [], specific: [] },
+  comments: 'Keep the pace honest.',
+  alternate_of: null,
+  created_at: 'x',
+  updated_at: 'y',
+};
+const sourceItems = [
+  { id: 'i9', day_id: 'd2', order_index: 1, exercise_id: 'bike', target_sets: 1, created_at: 'x' },
+  { id: 'i8', day_id: 'd2', order_index: 0, exercise_id: 'row', target_sets: 1, created_at: 'x' },
+];
+let copyCounter = 0;
+const copyIds = () => `new${(copyCounter += 1)}`;
+
+const copyOf = (over = {}) =>
+  copyDay({
+    day: sourceDay,
+    items: sourceItems,
+    templateId: 't1',
+    dayIndex: 4,
+    takenLabels: ['STRENGTH', 'CARDIO'],
+    newId: copyIds,
+    ...over,
+  });
+
+test('a copy is new rows, so nothing about the day it came from can change', () => {
+  const made = copyOf();
+  ok(made.id !== sourceDay.id, 'the day gets an id of its own');
+  ok(made.items.every((item) => item.day_id === made.id), 'and its rows point at it');
+  ok(made.items.every((item) => !('id' in item)), 'rows carry no id: makeRecord gives each one');
+  eq(sourceItems.map((item) => item.id), ['i9', 'i8'], 'the rows copied from are untouched');
+});
+
+test('a copy carries the whole day, columns this test has never heard of included', () => {
+  const made = copyOf({ day: { ...sourceDay, some_later_column: 'kept' } });
+  eq(made.day.comments, 'Keep the pace honest.');
+  eq(made.day.day_type, 'CARDIO');
+  eq(made.day.some_later_column, 'kept', 'taken by exclusion, so a new column is not lost silently');
+});
+
+test('a copy never shares the warm up object with the day it came from', () => {
+  const made = copyOf();
+  made.day.warmup.mobility.push('hips');
+  eq(sourceDay.warmup.mobility, ['ankles']);
+});
+
+test('copied rows are renumbered densely, in the order the trainer put them in', () => {
+  eq(copyOf().items.map((item) => [item.exercise_id, item.order_index]), [['row', 0], ['bike', 1]]);
+});
+
+test('a copy lands where it is told and never renumbers the days already in the program', () => {
+  const made = copyOf();
+  eq(made.day.day_index, 4);
+  eq(made.day.template_id, 't1');
+});
+
+test('a day copied inside its own program arrives as an option instead of it', () => {
+  eq(copyOf({ alternateOf: 'd2' }).day.alternate_of, 'd2');
+  eq(copyOf().day.alternate_of, null, 'and one from another program is a day of the rotation');
+});
+
+test('a copy is named for what it is, because two chips reading CARDIO cannot be chosen between', () => {
+  eq(copyOf().day.split, 'CARDIO OPTION 2');
+  eq(
+    copyOf({ takenLabels: ['CARDIO', 'CARDIO OPTION 2'] }).day.split,
+    'CARDIO OPTION 3',
+    'the third cardio workout is as ordinary as the second',
+  );
+  eq(
+    copyOf({ takenLabels: ['STRENGTH'] }).day.split,
+    'CARDIO',
+    'a name nothing else in the program uses is the right name',
+  );
+});
+
+test('the option word follows the case of the label it extends', () => {
+  eq(optionLabel('Cardio', ['Cardio']), 'Cardio Option 2');
+  eq(optionLabel('CARDIO', ['CARDIO']), 'CARDIO OPTION 2');
+  eq(optionLabel('', ['x']), null, 'a day with no name at all is left alone');
+});
+
+test('a day with no split is renamed by its name, which is what the picker would show', () => {
+  const made = copyOf({ day: { ...sourceDay, split: null }, takenLabels: ['Day 1'] });
+  eq(made.day.name, 'Day 1 Option 2');
+});
+
+test('the next day index is the highest plus one, never the count', () => {
+  eq(nextDayIndex([{ day_index: 0 }, { day_index: 3 }]), 4, 'a gap left by a delete cannot collide');
+  eq(nextDayIndex([]), 0);
+});
+
 // ------------------------------------------------------------------ the top set last time
 //
 // One line per lift on a screen that lists a whole day. Which set it reports is the whole
@@ -1726,6 +1916,47 @@ test('two days named the same thing still get told apart', () => {
 
 test('a glyph ignores punctuation and spacing when looking for the difference', () => {
   eq(splitGlyphs(['Push (heavy)', 'Push (light)']), ['PH', 'PL']);
+});
+
+// One label being a prefix of another is what an option looks like: it is named after the day it
+// stands in for. The shorter label runs out of characters where they first differ, and reading past
+// the end of it used to print the word undefined into the badge.
+test('a day whose name is the start of another one still gets a readable glyph', () => {
+  eq(splitGlyphs(['CARDIO', 'CARDIO OPTION 2']), ['C', 'CO']);
+});
+
+// An option takes the colour of the day it stands in for, because it IS that day: a second cardio
+// workout is a cardio cell. The glyph is what says which of the two was done.
+test('an option takes the colour of the day it stands in for and a glyph of its own', () => {
+  const days = [
+    cday(0, 'STRENGTH'),
+    cday(1, 'CARDIO'),
+    { ...cday(2, 'CARDIO OPTION 2'), alternate_of: 'd1' },
+  ];
+  const identity = identifySessions({
+    sessions: [
+      csession('s1', at(2026, 8, 3), { day_index: 1 }),
+      csession('s2', at(2026, 8, 5), { day_index: 2 }),
+    ],
+    assignments: [cassign('a1', '2026-08-03', days)],
+  });
+  eq(identity.get('s1').slot, 2, 'cardio is the second day of the rotation');
+  eq(identity.get('s2').slot, 2, 'and so is the second cardio workout');
+  eq([identity.get('s1').glyph, identity.get('s2').glyph], ['C', 'CO']);
+});
+
+test('an option does not push the day after it into the overflow slot', () => {
+  const days = [
+    cday(0, 'PUSH'),
+    { ...cday(1, 'PUSH LIGHT'), alternate_of: 'd0' },
+    cday(2, 'LEGS'),
+    cday(3, 'ARMS'),
+  ];
+  const identity = identifySessions({
+    sessions: [csession('s1', at(2026, 8, 5), { day_index: 3 })],
+    assignments: [cassign('a1', '2026-08-03', days)],
+  });
+  eq(identity.get('s1').slot, 3, 'arms is the third day of a three day rotation, not the fourth');
 });
 
 test('a day with no name at all still gets a glyph', () => {

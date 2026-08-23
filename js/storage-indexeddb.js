@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 10;
+export const DB_VERSION = 11;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -229,6 +229,20 @@ const MIGRATIONS = [
       // old session row, which is what completing or reopening one is, would fail without it.
       rewriteRows(tx, 'sessions', (row) =>
         row.discarded_at === undefined ? { ...row, discarded_at: null } : row,
+      );
+    },
+  },
+  {
+    version: 11,
+    describe: 'add template_days.alternate_of so a day can be an option instead of a new day',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Null, and null is the truthful answer rather than the convenient one: every day already
+      // written is a day of the rotation, because until now there was nothing else a day could be.
+      // Required rather than cosmetic, same as 10: the validator throws on a missing column, and
+      // the next write of an old day row is what typing in the builder does.
+      rewriteRows(tx, 'template_days', (row) =>
+        row.alternate_of === undefined ? { ...row, alternate_of: null } : row,
       );
     },
   },

@@ -368,6 +368,7 @@ export async function seed(storage, { force = false } = {}) {
         split: DAY_META[dayIndex].split,
         warmup: DAY_META[dayIndex].warmup,
         comments: '',
+        alternate_of: null,
       },
       { created_at: seededAt },
     ),

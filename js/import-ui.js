@@ -252,6 +252,9 @@ export async function createProgram(draft, { storage, trainerId, resolveExercise
       split: day.split,
       warmup: day.warmup,
       comments: day.comments.join('\n'),
+      // A sheet has no way to say a day is an option instead of another one, so an import is
+      // always a rotation and the builder is where one becomes an option.
+      alternate_of: null,
     });
     await storage.put('template_days', dayRecord);
 

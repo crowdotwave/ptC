@@ -2298,6 +2298,25 @@ button.row:active {
   box-shadow: none;
 }
 
+/* A fact about the group rather than its name: archived, this program. Lower case against the
+ * heading's caps, so it reads as an aside instead of as more of the name. */
+.row-group__note {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The chevron, in the mark column, for a list whose rows go somewhere rather than choose something.
+ * Same job and same size as .worknav__go on the logging screen: with the rows flat, this is what
+ * says the row is pressable. */
+.row__chev {
+  grid-area: mark;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
 /* ---------------------------------------------------------------- the lift picker
  *
  * Which lift the charts below are about. js/lift-picker.js says why this stopped being a row of
@@ -3326,6 +3345,26 @@ button.navlink:disabled {
 
 .day__type { flex: 0 1 12rem; text-transform: uppercase; }
 .day__split { flex: 1 1 16rem; text-transform: uppercase; }
+
+/* Where a day sits: in the rotation, or done instead of one of the days in it. The control and the
+ * sentence share a line, because the sentence is what makes the control readable and a legend two
+ * rows below the thing it explains is a legend nobody reads. */
+.day__where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.day__rolepick { flex: 0 1 22rem; }
+.day__note { flex: 1 1 18rem; margin: 0; }
+
+/* An option is marked by a heavier edge on one side as well as by the sentence inside it. A whole
+ * day of a program is a large object to tell apart at a glance while scrolling, and the words are
+ * only legible once you have stopped. No hue: this says which kind of day it is, and the palette's
+ * colours are spoken for. */
+.day--option { border-left-width: 3px; }
 
 /* Three columns, exactly as they sit on the sheet. Display only, never logged. */
 .warmup {

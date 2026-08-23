@@ -15,7 +15,11 @@ import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } from './js/program.js';
-import { buildSnapshot, currentAssignment, pickDay, sameSnapshot, sortedDays, sortedItems } from './js/snapshot.js';
+import {
+  buildSnapshot, currentAssignment, dayTitle, pickDay, readingOrder, rotationOf, sameSnapshot,
+  sortedDays, sortedItems,
+} from './js/snapshot.js';
+import { copyDay, nextDayIndex } from './js/day-copy.js';
 import { mountProgramView, repaintProgramView, WARMUP_KINDS, NO_PROGRAM_YET } from './js/program-view.js';
 import { topSet } from './js/history.js';
 import { loadSessions } from './js/session.js';
@@ -52,6 +56,11 @@ const state = {
   // Where Back goes from the preview. That view has two ways in now, from the editor and from
   // somebody else's program, and only one of them has an editor to return to.
   previewReturn: 'edit',
+  // Every day this trainer has already written, across every program of theirs, for the copy
+  // picker. Loaded when that view opens and dropped when it closes, because it is a list of
+  // everything and the editor has no use for it.
+  copyable: [],
+  copyFilter: '',
 };
 
 const esc = (v) =>
@@ -193,6 +202,7 @@ async function showList() {
   el('import-view').hidden = true;
   el('preview-view').hidden = true;
   el('assign-view').hidden = true;
+  el('copy-view').hidden = true;
   el('view-title').textContent = 'Programs';
 
   const on = renderSections();
@@ -392,6 +402,7 @@ function showPreview() {
 
   error.hidden = true;
   el('edit-view').hidden = true;
+  el('copy-view').hidden = true;
   el('preview-view').hidden = false;
   state.previewReturn = 'edit';
   el('preview-back').textContent = 'Back to the program';
@@ -486,6 +497,7 @@ async function openReadOnly(templateId) {
   el('import-view').hidden = true;
   el('edit-view').hidden = true;
   el('assign-view').hidden = true;
+  el('copy-view').hidden = true;
   el('preview-view').hidden = false;
   state.previewReturn = 'everyone';
   el('preview-back').textContent = 'Back to programs';
@@ -595,6 +607,7 @@ async function showAssign() {
   }
 
   el('edit-view').hidden = true;
+  el('copy-view').hidden = true;
   el('assign-view').hidden = false;
   el('view-title').textContent = state.template.name;
   el('view-note').textContent = state.assignSnapshot ? 'Who is doing this?' : 'This program cannot be assigned yet.';
@@ -654,12 +667,185 @@ async function assignTo(clientId, button) {
   if (client) sayAssigned(client.display_name, resend);
 }
 
+// ------------------------------------------------------------------ copying a day
+
+/**
+ * Every day this trainer has already written, program by program.
+ *
+ * The whole library rather than this program's own days, because the second cardio workout is as
+ * likely to come from the block they wrote last spring as from the one they are in. Archived
+ * programs included: a day is worth copying whether or not anybody is still on the program it sits
+ * in, and that is most of what an archive is for.
+ */
+async function loadCopyable(storage) {
+  const templates = (await storage.query('program_templates', { trainer_id: state.trainer.id })).sort(
+    (a, b) => a.name.localeCompare(b.name),
+  );
+
+  const out = [];
+  for (const template of templates) {
+    const days = (await storage.query('template_days', { template_id: template.id })).sort(
+      (a, b) => a.day_index - b.day_index,
+    );
+    if (!days.length) continue;
+    // One query per program rather than one per day. The filter takes an array as an in list, and
+    // a trainer with ten programs of five days each is otherwise fifty round trips to draw a list.
+    const items = await storage.query('template_items', { day_id: days.map((day) => day.id) });
+    const counts = new Map();
+    for (const item of items) counts.set(item.day_id, (counts.get(item.day_id) ?? 0) + 1);
+    out.push({ template, days: readingOrder(days), counts });
+  }
+  return out;
+}
+
+const matchesCopy = (text, query) =>
+  !query || String(text ?? '').toLowerCase().includes(query.toLowerCase());
+
+function renderCopyList() {
+  const query = state.copyFilter.trim();
+
+  const body = state.copyable
+    .map(({ template, days, counts }) => {
+      // A program matching by name keeps all of its days, because "cardio block" is how somebody
+      // searches for the day inside it.
+      const hit = matchesCopy(template.name, query);
+      const rows = days.filter((day) => hit || matchesCopy(dayTitle(day), query));
+      if (!rows.length) return '';
+
+      const heading =
+        esc(template.name) +
+        (template.archived_at ? ' <span class="row-group__note">archived</span>' : '') +
+        (template.id === state.template.id ? ' <span class="row-group__note">this program</span>' : '');
+
+      return (
+        `<p class="row-group">${heading}</p>` +
+        rows
+          .map((day) => {
+            const count = counts.get(day.id) ?? 0;
+            const facts = [
+              `${count} exercise${count === 1 ? '' : 's'}`,
+              day.day_type || null,
+              day.alternate_of ? 'an option' : null,
+            ]
+              .filter(Boolean)
+              .join(', ');
+            return (
+              `<button type="button" class="row" data-copy="${day.id}">` +
+              `<span class="row__body">` +
+              `<span class="row__name">${esc(dayTitle(day))}</span>` +
+              `<span class="row__meta num">${esc(facts)}</span>` +
+              `<svg class="row__chev" viewBox="0 0 20 20" aria-hidden="true" fill="none" ` +
+              `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` +
+              `<path d="M8 5l5 5-5 5" /></svg>` +
+              `</span></button>`
+            );
+          })
+          .join('')
+      );
+    })
+    .join('');
+
+  el('copy-list').innerHTML = body
+    ? `<div class="row-card">${body}</div>`
+    : `<p class="clientlist__empty">No day here matches ${esc(query)}. Try fewer letters.</p>`;
+}
+
+async function showCopy() {
+  hideList();
+  el('edit-view').hidden = true;
+  el('import-view').hidden = true;
+  el('preview-view').hidden = true;
+  el('assign-view').hidden = true;
+  el('copy-view').hidden = false;
+  el('view-title').textContent = state.template.name;
+  el('view-note').textContent = 'Which day?';
+  el('copy-note').textContent =
+    'The day is copied, warm ups and exercises and all, into this program. Nothing changes in the ' +
+    'program it came from. A day copied out of this program arrives as an option instead of it, ' +
+    'which you can change on the day itself.';
+  state.copyFilter = '';
+  el('copy-search').value = '';
+  el('copy-list').innerHTML = '';
+
+  state.copyable = await loadCopyable(state.storage);
+  renderCopyList();
+}
+
+/** The answer to a press, since what it did is at the bottom of a table somebody is not looking at. */
+function sayCopied(message) {
+  const said = el('edit-said');
+  said.hidden = !message;
+  said.textContent = message ?? '';
+}
+
+/**
+ * Writes the copy into the program that is open.
+ *
+ * Appended, never inserted. `sessions.day_index` is the number every logged session carries, and
+ * renumbering the days already in a program silently changes what those numbers mean: the next
+ * assignment would hand the client a program where day 3 is a different workout from the day 3 they
+ * trained, and pickDay would open on the wrong one. Appending leaves every existing day exactly
+ * where it is, which is what makes this safe to do to a program somebody is mid way through.
+ *
+ * A day copied out of this same program becomes an option instead of it, because that is what
+ * copying a day of the program you are looking at means. Copying an option copies what IT stands in
+ * for, since an option instead of an option is not a thing the rotation can read.
+ */
+async function takeCopy(sourceDayId) {
+  const source = await state.storage.get('template_days', sourceDayId);
+  if (!source || !state.template) return;
+
+  const items = await state.storage.query('template_items', { day_id: source.id });
+  const sameProgram = source.template_id === state.template.id;
+  const copied = copyDay({
+    day: source,
+    items,
+    templateId: state.template.id,
+    dayIndex: nextDayIndex(state.days),
+    alternateOf: sameProgram ? source.alternate_of ?? source.id : null,
+    takenLabels: state.days.map((day) => dayTitle(day)),
+    newId,
+  });
+
+  const dayRecord = makeRecord('template_days', copied.day, { id: copied.id });
+  await state.storage.put('template_days', dayRecord);
+
+  const itemRecords = [];
+  for (const fields of copied.items) {
+    const record = makeRecord('template_items', fields);
+    await state.storage.put('template_items', record);
+    itemRecords.push(record);
+  }
+
+  state.days.push(dayRecord);
+  state.items.set(dayRecord.id, itemRecords);
+
+  showEdit();
+  renderDays();
+
+  const standsIn = dayRecord.alternate_of
+    ? state.days.find((day) => day.id === dayRecord.alternate_of)
+    : null;
+  sayCopied(
+    `${dayTitle(dayRecord)} added, with ${itemRecords.length} exercise` +
+      `${itemRecords.length === 1 ? '' : 's'}. ` +
+      (standsIn
+        ? `It is done instead of ${dayTitle(standsIn)}, so the rotation is the same length it was. `
+        : 'It is a day of the rotation. ') +
+      'Nobody sees it until you send this program to them.',
+  );
+}
+
 function showEdit() {
   el('assign-view').hidden = true;
   el('preview-view').hidden = true;
+  el('copy-view').hidden = true;
   el('edit-view').hidden = false;
   el('view-title').textContent = state.template.name;
   el('view-note').textContent = '';
+  // What a copy did belongs to the arrival, not to the screen. Leaving it up would have it read as
+  // a description of a program somebody opened later.
+  sayCopied(null);
   renderArchiveControl();
 }
 
@@ -702,6 +888,7 @@ async function startImport(file) {
   el('edit-view').hidden = true;
   el('preview-view').hidden = true;
   el('assign-view').hidden = true;
+  el('copy-view').hidden = true;
   el('import-view').hidden = false;
   el('view-title').textContent = 'Review before creating';
   el('view-note').textContent = state.draft.fileName;
@@ -861,16 +1048,54 @@ async function pushEdits(button) {
   }
 }
 
+/**
+ * The days, in reading order rather than in day_index order.
+ *
+ * An option is appended to the end of the program when it is made, because renumbering the days
+ * already in one changes what `sessions.day_index` means on every session already logged. So the
+ * stored order and the order somebody reads a program in are two different things, and this is the
+ * second: each day of the rotation, then the options that stand in for it. The same function the
+ * client's day picker uses, so the trainer and the client see one order.
+ */
 function renderDays() {
-  el('days').innerHTML = state.days.map(renderDay).join('');
+  el('days').innerHTML = readingOrder(state.days).map(renderDay).join('');
+}
+
+/**
+ * Where this day sits: a day of the rotation, or an option instead of one of them.
+ *
+ * A select rather than a checkbox, because "an option" is not a state a day is in on its own, it is
+ * a day it points at. The rotation is what this can point at: an option instead of an option is a
+ * thing nothing in the app can render an answer for.
+ */
+function renderDayRole(day) {
+  const rotation = rotationOf(state.days).filter((other) => other.id !== day.id);
+  if (!rotation.length) return '';
+
+  const options = rotation
+    .map(
+      (other) =>
+        `<option value="${other.id}"${day.alternate_of === other.id ? ' selected' : ''}>` +
+        `Instead of ${esc(dayTitle(other))}</option>`,
+    )
+    .join('');
+
+  return (
+    `<label class="day__role">` +
+    `<span class="visually-hidden">Where this day sits</span>` +
+    `<select class="field__input day__rolepick" data-role="${day.id}">` +
+    `<option value=""${day.alternate_of ? '' : ' selected'}>A day of the rotation</option>` +
+    `${options}</select></label>`
+  );
 }
 
 function renderDay(day) {
   const items = state.items.get(day.id) ?? [];
   const warmup = day.warmup || { mobility: [], general: [], specific: [] };
+  const standsIn = day.alternate_of ? state.days.find((other) => other.id === day.alternate_of) : null;
 
   return `
-  <section class="day" data-day="${day.id}">
+  <section class="day${standsIn ? ' day--option' : ''}" data-day="${day.id}">
     <div class="day__head">
       <input class="field__input day__type" data-field="day_type" value="${esc(day.day_type)}"
              placeholder="STRENGTH" aria-label="Day type" />
@@ -879,6 +1104,19 @@ function renderDay(day) {
       <button type="button" class="button-secondary" data-act="day-up">Up</button>
       <button type="button" class="button-secondary" data-act="day-down">Down</button>
       <button type="button" class="button-secondary" data-act="day-delete">Delete day</button>
+    </div>
+
+    <!-- The one sentence a trainer needs before they press anything else here: what this day does
+         to the rotation. Said in words rather than by where the day sits in the list, because the
+         list is the same list either way. -->
+    <div class="day__where">
+      ${renderDayRole(day)}
+      <p class="legend day__note">${
+        standsIn
+          ? `Done instead of ${esc(dayTitle(standsIn))}, never as well. It is one more chip on ` +
+            `the client's day picker and no extra day in the cycle.`
+          : 'A day of the rotation. The client works through these in order.'
+      }</p>
     </div>
 
     <div class="warmup">
@@ -997,6 +1235,25 @@ async function saveDay(dayId, patch) {
   const next = { ...day, ...patch, updated_at: new Date().toISOString() };
   await state.storage.put('template_days', next);
   Object.assign(day, next);
+}
+
+/**
+ * Moves a day between being part of the rotation and being an option instead of another day.
+ *
+ * The re-pointing below keeps the graph one level deep. Making a day an option while other days are
+ * options instead of IT would leave those pointing at something that is no longer in the rotation,
+ * and an option instead of an option is a thing neither the picker nor the grid can render an
+ * answer for. They follow it to the same day it just joined, which is what a trainer means by it:
+ * these are all versions of that session.
+ */
+async function saveDayRole(dayId, alternateOf) {
+  await saveDay(dayId, { alternate_of: alternateOf });
+  if (alternateOf) {
+    for (const day of state.days.filter((other) => other.alternate_of === dayId)) {
+      await saveDay(day.id, { alternate_of: alternateOf });
+    }
+  }
+  renderDays();
 }
 
 /**
@@ -1153,12 +1410,16 @@ async function deleteRow(dayId, itemId) {
 async function addDay() {
   const day = makeRecord('template_days', {
     template_id: state.template.id,
-    day_index: state.days.length,
+    // Max plus one rather than the count. They are the same number for a program whose days have
+    // never moved and they are not after a delete, and a repeated day_index is two days a session
+    // cannot be told apart by.
+    day_index: nextDayIndex(state.days),
     name: `Day ${state.days.length + 1}`,
     day_type: null,
     split: null,
     warmup: { mobility: [], general: [], specific: [] },
     comments: '',
+    alternate_of: null,
   });
   await state.storage.put('template_days', day);
   state.days.push(day);
@@ -1185,6 +1446,15 @@ async function deleteDay(dayId) {
   for (const item of state.items.get(dayId) ?? []) {
     await state.storage.delete('template_items', item.id);
   }
+
+  // Any option that stood in for this day becomes a day of the rotation, which is what the
+  // database does too: template_days.alternate_of is on delete set null. Deleting the cardio day
+  // must not take the second cardio workout with it, and a row left pointing at a day that is gone
+  // is a row every reader has to guess about.
+  for (const day of state.days.filter((other) => other.alternate_of === dayId)) {
+    await saveDay(day.id, { alternate_of: null });
+  }
+
   await state.storage.delete('template_days', dayId);
   state.days = state.days.filter((d) => d.id !== dayId);
   state.items.delete(dayId);
@@ -1333,6 +1603,31 @@ function wire() {
 
   el('add-day').addEventListener('click', addDay);
 
+  el('copy-day').addEventListener('click', showCopy);
+
+  el('copy-back').addEventListener('click', (event) => {
+    event.preventDefault();
+    showEdit();
+  });
+
+  // On input, so the list narrows as it is typed. The rows are already in memory, so this is a
+  // filter rather than a query.
+  el('copy-search').addEventListener('input', (event) => {
+    state.copyFilter = event.target.value;
+    renderCopyList();
+  });
+
+  el('copy-list').addEventListener('click', (event) => {
+    const row = event.target.closest('[data-copy]');
+    if (row) takeCopy(row.dataset.copy);
+  });
+
+  // The keyboard affordance the lift picker and the workout panel both have. Not a modal: there is
+  // no focus trap and nothing behind this is inert, so escape is a way out rather than the way out.
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !el('copy-view').hidden) showEdit();
+  });
+
   el('archive').addEventListener('click', async () => {
     // Archive rather than delete: assignments.template_id is on delete restrict, so the
     // database refuses to remove a program somebody is on. Offer the operation that works, and
@@ -1381,6 +1676,8 @@ function wire() {
     const col = event.target.dataset.col;
     const row = event.target.closest('[data-item]');
     if (col && row) return saveRow(dayId, row.dataset.item, col, event.target.value);
+
+    if (event.target.dataset.role) return saveDayRole(dayId, event.target.value || null);
 
     const field = event.target.dataset.field;
     if (field) return saveDay(dayId, { [field]: event.target.value.trim() || (field === 'comments' ? '' : null) });

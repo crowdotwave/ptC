@@ -13,7 +13,7 @@
 // this file composes is the target line, and it is composed by targetLine() in js/program.js,
 // which is already the single source of that sentence for the logging screen and the builder.
 
-import { sortedDays, sortedItems, pickDay, dayTitle } from './snapshot.js';
+import { sortedDays, sortedItems, pickDay, dayTitle, programDays } from './snapshot.js';
 import { parseGroup, targetLine } from './program.js';
 import { weightLabel } from './units.js';
 
@@ -197,7 +197,9 @@ function renderDay(day, history) {
 }
 
 function renderChooser(snapshot, dayIndex) {
-  const days = sortedDays(snapshot);
+  // Reading order rather than day_index order, so a cardio option sits beside the cardio day it
+  // stands in for rather than at the far end of the row where it was appended.
+  const days = programDays(snapshot);
   // One day is not a chooser, it is a label for the only day there is.
   if (days.length < 2) return '';
 
