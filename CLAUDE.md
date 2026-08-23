@@ -566,10 +566,17 @@ Constraints:
   looked like in use: the buttons stopped reading as buttons. So: **a dark fill cannot carry an
   affordance, at any value.** Lifting the chrome fill nearly fourfold still only reaches 1.08 at
   fifteen percent. Only bright pixels survive dimming, so what says "this is a control" is a LIGHT
-  hairline, `--chrome-edge`, which holds 3.09 at full brightness and 1.31 at fifteen. The fill
+  hairline, `--chrome-edge`, which holds 4.67 at full brightness and 1.55 at fifteen. The fill
   gives the control a body and is what a press moves; it is not the signal. The same reasoning
   lifted `--divider`, which was a dark line on a dark card and therefore no line at all on a
   dimmed phone.
+- **That edge is violet, not grey, and the hue is the palette's own.** It began as `--text-primary`
+  at 38 percent, which measured correctly and looked like unpainted metal: a neutral line around a
+  coloured slab is the same "unfinished border" the steppers were rescued from. 272 degrees is the
+  ground hue that `--surface-raised` already belongs to, so it sits 82 degrees off `--accent-data`
+  and 110 off `--accent-action` and cannot compete for either meaning. It also measures better than
+  the grey in both conditions that matter, 4.67 against 3.09 at full brightness and 1.55 against
+  1.31 when dimmed, so striking and legible were the same change rather than a trade.
 - **A chrome control is as big as its label needs and no bigger, and the tap target is written
   down separately.** A 44px slab around a 14px word is wasted band on the one screen that must
   never scroll. The ink is about 38px; the 44px minimum is kept by a transparent `::after` centred
