@@ -10,8 +10,9 @@ import { boot, gate } from './js/boot.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';
-import { activeSetLogs } from './js/history.js';
 import { loadSessions } from './js/session.js';
+import { currentAssignment } from './js/snapshot.js';
+import { renderLiftPicker, groupLifts, liftSummaries } from './js/lift-picker.js';
 import { unit, toDisplay, weightLabel, loadUnit, mountUnitSwitch, onUnitChange } from './js/units.js';
 
 const el = (id) => document.getElementById(id);
@@ -25,6 +26,13 @@ const state = {
   // Display names for every trainer this account can see, which for staff is all of them. A row
   // that is somebody else's client says whose it is, because staff can now edit it.
   trainers: new Map(),
+  // The lift picker, the same control the progress screen carries and from the same module. A
+  // coach reading a client with forty lifts of history had the worst version of the scrolling row
+  // this replaced, since they arrive knowing which lift they came to look at.
+  lifts: [],
+  liftSnapshot: null,
+  pickerOpen: false,
+  pickerQuery: '',
 };
 
 const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -308,6 +316,9 @@ function renderDetail() {
   const data = state.data;
   const leadIsStrength = data.leadView === 'e1rm';
 
+  const exercise = state.exercises.get(state.exerciseId);
+  el('exercise-name').textContent = exercise ? exercise.name : '';
+
   el('lead-title').textContent = leadIsStrength ? 'Estimated 1RM' : 'Volume per session';
   el('second-title').textContent = leadIsStrength ? 'Volume per session' : 'Estimated 1RM';
 
@@ -329,12 +340,24 @@ function renderDetail() {
 
   const extra = data.points.reduce((t, p) => t + p.extra, 0);
   const prescribed = data.points.reduce((t, p) => t + p.prescribed, 0);
-  el('lead-caption').textContent = `${data.totalSessions} session${data.totalSessions === 1 ? '' : 's'} on this lift.`;
   // Volume is sets by reps by weight, so it carries the unit and scales with it.
   const volume = (v) => `${Math.round(toDisplay(v)).toLocaleString()} ${unit()}`;
-  el('second-caption').textContent =
+
+  // The captions follow their chart rather than their slot, which is the whole of the fix here.
+  // The two charts swap slots on `leadView`, and these two lines did not: the prescribed and added
+  // split, which is the only thing on this screen that explains the two tone volume bar, was
+  // printed under whichever chart was second. With volume leading, and it leads for every client
+  // inside their first block, that put the legend for the volume bar under the estimated 1RM line
+  // and left the volume card saying "1 session on this lift". The bar chart has no legend of its
+  // own, so there was nothing on screen at all to say what the pale band on top of it meant.
+  const countCaption = `${data.totalSessions} session${data.totalSessions === 1 ? '' : 's'} on this lift.`;
+  const volumeCaption =
     `${volume(prescribed)} prescribed` +
-    (extra > 0 ? `, ${volume(extra)} added beyond the plan.` : '. Nothing added beyond the plan.');
+    (extra > 0
+      ? `, ${volume(extra)} added beyond the plan. The pale band on each bar is the added work.`
+      : '. Nothing added beyond the plan.');
+  el('lead-caption').textContent = leadIsStrength ? countCaption : volumeCaption;
+  el('second-caption').textContent = leadIsStrength ? volumeCaption : countCaption;
   const lines = data.repsAtLoad.lines;
   el('reps-value').textContent = lines.length ? weightLabel(lines[lines.length - 1].loadKg) : '';
   el('reps-caption').textContent = lines.length
@@ -379,6 +402,33 @@ function renderDeloadSuggestion() {
   });
 }
 
+/**
+ * The lift picker, redrawn whole. Same control and same module as the progress screen, so the two
+ * cannot drift apart the way the chip rows they replaced once did.
+ */
+function drawPicker() {
+  if (!state.lifts.length) {
+    el('lift-picker').innerHTML = '';
+    return;
+  }
+  el('lift-picker').innerHTML = renderLiftPicker({
+    lifts: state.lifts,
+    groups: groupLifts(state.lifts, state.liftSnapshot),
+    selectedId: state.exerciseId,
+    open: state.pickerOpen,
+    query: state.pickerQuery,
+  });
+}
+
+function setPickerOpen(open) {
+  state.pickerOpen = open;
+  if (!open) state.pickerQuery = '';
+  drawPicker();
+  if (!open) return;
+  const search = el('liftpick-search');
+  if (search) search.focus();
+}
+
 async function selectExercise(exerciseId) {
   state.exerciseId = exerciseId;
   const sessions = await loadSessions(state.storage, state.client.id);
@@ -386,15 +436,7 @@ async function selectExercise(exerciseId) {
   const setLogs = await state.storage.query('set_logs', { exercise_id: exerciseId });
   state.data = buildProgression({ setLogs, sessions, assignments, exerciseId });
 
-  el('lift-picker').innerHTML = state.lifts
-    .map(
-      (ex) =>
-        `<button type="button" class="button-secondary lifts__item${
-          ex.id === exerciseId ? ' is-on' : ''
-        }" data-exercise="${ex.id}">${esc(ex.name)}</button>`,
-    )
-    .join('');
-
+  drawPicker();
   renderDetail();
 }
 
@@ -412,16 +454,15 @@ async function openClient(clientId) {
   el('see-sessions').href = `progress.html?client=${encodeURIComponent(state.client.id)}`;
 
   const sessions = await loadSessions(state.storage, clientId);
-  const sessionIds = new Set(sessions.map((s) => s.id));
   const logs = await state.storage.query('set_logs', {});
-  const done = new Set();
-  for (const row of activeSetLogs(logs)) {
-    if (sessionIds.has(row.session_id) && !row.is_warmup) done.add(row.exercise_id);
-  }
-  state.lifts = [...done]
-    .map((id) => state.exercises.get(id))
-    .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // One answer, shared with the progress screen, so the session counts under each name are the
+  // same numbers on both.
+  state.lifts = liftSummaries({ exercises: state.exercises, sessions, setLogs: logs });
+  // Grouped by the day of the program this client is on now, which is how their coach thinks
+  // about their lifts and what the day names on every other screen already say.
+  state.liftSnapshot = (await currentAssignment(state.storage, clientId))?.snapshot ?? null;
+  state.pickerOpen = false;
+  state.pickerQuery = '';
 
   if (!state.lifts.length) {
     el('detail-view').hidden = true;
@@ -537,9 +578,42 @@ function wire() {
     if (open) return openClient(open.dataset.client);
     return undefined;
   });
-  el('lift-picker').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-exercise]');
-    if (button) selectExercise(button.dataset.exercise);
+  // One listener on the container, because the control redraws itself whole and a listener bound
+  // to a button inside it would go with the button.
+  const picker = el('lift-picker');
+  picker.addEventListener('click', (event) => {
+    const row = event.target.closest('[data-exercise]');
+    if (row) {
+      state.pickerOpen = false;
+      state.pickerQuery = '';
+      selectExercise(row.dataset.exercise);
+      return;
+    }
+    if (event.target.closest('#liftpick-open')) setPickerOpen(!state.pickerOpen);
+  });
+
+  picker.addEventListener('input', (event) => {
+    const field = event.target.closest('#liftpick-search');
+    if (!field) return;
+    const at = field.selectionStart;
+    state.pickerQuery = field.value;
+    drawPicker();
+    const redrawn = el('liftpick-search');
+    if (!redrawn) return;
+    redrawn.focus();
+    try {
+      redrawn.setSelectionRange(at, at);
+    } catch {
+      // Some browsers refuse a selection range on type=search. The caret lands at the end, which
+      // is where somebody typing forwards wants it anyway.
+    }
+  });
+
+  picker.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.pickerOpen) return;
+    setPickerOpen(false);
+    const open = el('liftpick-open');
+    if (open) open.focus();
   });
   el('back-to-list').addEventListener('click', (event) => {
     event.preventDefault();

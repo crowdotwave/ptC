@@ -69,7 +69,9 @@
         </div>
       </header>
 
-      <nav class="lifts" id="lift-picker" aria-label="Choose a lift"></nav>
+      <!-- One control and a searchable list, not a row of chips. A rotation fits across a
+           phone and a lift library does not: see js/lift-picker.js for the measurement. -->
+      <div class="liftpick" id="lift-picker"></div>
 
       <section class="chart" id="lead-chart" aria-labelledby="lead-title">
         <div class="chart__head">

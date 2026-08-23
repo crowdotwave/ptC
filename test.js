@@ -52,6 +52,8 @@ import {
   stateLine,
   positionLine,
 } from './js/workout-view.js';
+import { liftSummaries, groupLifts, matchLifts, renderLiftPicker, SEARCH_AT } from './js/lift-picker.js';
+import { setLine, renderSessionReadout } from './js/session-readout.js';
 
 const results = [];
 
@@ -4132,6 +4134,256 @@ test('a smoothed curve never rises above the highest point it passes through', (
 test('a curve through one point is not a path anybody can stroke', () => {
   eq(smoothPath([]), '');
   eq(smoothPath([{ x: 5, y: 5 }]), 'M5.0 5.0', 'a moveto draws nothing, which is correct');
+});
+
+
+// ------------------------------------------------------------------ the lift picker
+//
+// js/lift-picker.js, which replaced the row of chooser chips on the progress screen and the
+// trainer's client view. The row could only hold as many lifts as fit across a phone, which on the
+// seeded client was under a third of them and on a real seven day split is a good deal less.
+//
+// What is worth testing here is the data, not the pixels: which lifts are offered, what each row
+// claims about them, and how forty of them are arranged so somebody can find one.
+
+const psession = (id, day, over = {}) => ({
+  id, client_id: 'c1', assignment_id: 'a1', day_index: 0,
+  started_at: `${day}T18:00:00.000Z`, completed_at: `${day}T19:00:00.000Z`, ...over,
+});
+
+const pexercises = (...names) =>
+  new Map(names.map((name) => [name.toLowerCase(), { id: name.toLowerCase(), name }]));
+
+test('a lift is offered once however many sets are behind it', () => {
+  const lifts = liftSummaries({
+    exercises: pexercises('Squat', 'Bench'),
+    sessions: [psession('s1', '2026-07-01'), psession('s2', '2026-07-03')],
+    setLogs: [
+      row({ id: 'a', session_id: 's1', exercise_id: 'squat' }),
+      row({ id: 'b', session_id: 's1', exercise_id: 'squat' }),
+      row({ id: 'c', session_id: 's2', exercise_id: 'squat' }),
+      row({ id: 'd', session_id: 's2', exercise_id: 'bench' }),
+    ],
+  });
+  eq(lifts.map((l) => [l.name, l.sessions]), [['Bench', 1], ['Squat', 2]], 'sessions, not rows');
+});
+
+// The bug this replaces: the progress screen counted raw rows, so a lift somebody corrected three
+// times in one session read as three sessions of work under its own name.
+test('a corrected set is one session on that lift and not two', () => {
+  const first = row({ id: 'a', session_id: 's1', exercise_id: 'squat', weight_kg: 100 });
+  const fixed = row({ id: 'b', session_id: 's1', exercise_id: 'squat', weight_kg: 105, supersedes_id: 'a' });
+  const lifts = liftSummaries({
+    exercises: pexercises('Squat'),
+    sessions: [psession('s1', '2026-07-01')],
+    setLogs: [first, fixed],
+  });
+  eq(lifts.map((l) => l.sessions), [1]);
+});
+
+test('a lift whose only rows were retracted is not offered at all', () => {
+  const logged = row({ id: 'a', session_id: 's1', exercise_id: 'squat' });
+  const taken = row({ id: 'b', session_id: 's1', exercise_id: 'squat', supersedes_id: 'a', is_void: true });
+  const lifts = liftSummaries({
+    exercises: pexercises('Squat'),
+    sessions: [psession('s1', '2026-07-01')],
+    setLogs: [logged, taken],
+  });
+  eq(lifts, [], 'an entry with nothing under it is a dead end');
+});
+
+test('a warmup is not a session on a lift', () => {
+  const lifts = liftSummaries({
+    exercises: pexercises('Squat'),
+    sessions: [psession('s1', '2026-07-01')],
+    setLogs: [row({ session_id: 's1', exercise_id: 'squat', is_warmup: true })],
+  });
+  eq(lifts, []);
+});
+
+// Rows arriving here can include another client's, since the adapter is asked for set_logs with no
+// filter and the local mirror holds whatever RLS let through.
+test('a row belonging to a session this client does not have is not offered', () => {
+  const lifts = liftSummaries({
+    exercises: pexercises('Squat'),
+    sessions: [psession('s1', '2026-07-01')],
+    setLogs: [row({ session_id: 'somebody-else', exercise_id: 'squat' })],
+  });
+  eq(lifts, []);
+});
+
+const plift = (id, name, sessions = 1) => ({ id, name, sessions, lastDay: '2026-07-01' });
+const pday = (dayIndex, split, ids) => ({
+  id: `d${dayIndex}`, day_index: dayIndex, name: null, split,
+  items: ids.map((id, i) => ({ order_index: i, exercise: { id, name: id } })),
+});
+
+test('lifts are grouped by the day of the program they are on, in the trainer order', () => {
+  const groups = groupLifts(
+    [plift('squat', 'Squat'), plift('bench', 'Bench'), plift('row', 'Row')],
+    { days: [pday(1, 'LOWER', ['squat']), pday(0, 'UPPER', ['bench', 'row'])] },
+  );
+  eq(
+    groups.map((g) => [g.label, g.lifts.map((l) => l.id)]),
+    [['UPPER', ['bench', 'row']], ['LOWER', ['squat']]],
+    'day order from day_index, lift order from order_index',
+  );
+});
+
+test('a lift on two days is listed under the first one and not both', () => {
+  const groups = groupLifts(
+    [plift('squat', 'Squat')],
+    { days: [pday(0, 'A', ['squat']), pday(1, 'B', ['squat'])] },
+  );
+  eq(groups.map((g) => [g.label, g.lifts.length]), [['A', 1]], 'a chooser with a duplicate in it picks twice');
+});
+
+test('a lift the current program does not ask for keeps its history and its own heading', () => {
+  const groups = groupLifts(
+    [plift('squat', 'Squat'), plift('curl', 'Curl')],
+    { days: [pday(0, 'LOWER', ['squat'])] },
+  );
+  eq(groups.map((g) => g.label), ['LOWER', 'Other lifts']);
+  eq(groups[1].lifts.map((l) => l.id), ['curl']);
+});
+
+test('with no program to group by the whole list is still offered', () => {
+  const groups = groupLifts([plift('squat', 'Squat')], null);
+  eq(groups.map((g) => [g.label, g.lifts.length]), [['Every lift', 1]], 'never an unlabelled tail');
+});
+
+test('search matches every word anywhere in the name, in any order', () => {
+  const lifts = [plift('a', 'Barbell Bench Press'), plift('b', 'Leg Press'), plift('c', 'Barbell Row')];
+  eq(matchLifts(lifts, 'press bench').map((l) => l.id), ['a'], 'order of the words is not the order in the name');
+  eq(matchLifts(lifts, 'press').map((l) => l.id), ['a', 'b'], 'substring, not prefix');
+  eq(matchLifts(lifts, '   ').map((l) => l.id), ['a', 'b', 'c'], 'nothing typed is not a filter');
+});
+
+test('the lift being read is the filled row and says so in a word', () => {
+  const html = renderLiftPicker({
+    lifts: [plift('squat', 'Squat'), plift('bench', 'Bench')],
+    selectedId: 'squat',
+    open: true,
+  });
+  ok(html.includes('data-exercise="squat"'), 'the row is there');
+  // Both signals, per the encoding rules: the fill comes from is-on and the word carries it again.
+  ok(/is-on[^>]*data-exercise="squat"/.test(html), 'the selected row fills');
+  ok(html.includes('Showing'), 'and says which one it is');
+  ok(!/is-on[^>]*data-exercise="bench"/.test(html), 'only one');
+});
+
+test('the search field appears only once the list is longer than a screen', () => {
+  const many = Array.from({ length: SEARCH_AT + 1 }, (_, i) => plift(`e${i}`, `Lift ${i}`));
+  ok(!renderLiftPicker({ lifts: many.slice(0, SEARCH_AT), open: true }).includes('liftpick-search'));
+  ok(renderLiftPicker({ lifts: many, open: true }).includes('liftpick-search'));
+});
+
+test('a narrowed list says what narrowed it and carries the way out', () => {
+  const html = renderLiftPicker({
+    lifts: [plift('squat', 'Squat')],
+    selectedId: 'squat',
+    open: true,
+    scope: 'Thursday, August 13',
+  });
+  ok(html.includes('Thursday, August 13'), 'the narrowing is stated');
+  ok(html.includes('data-clear-scope'), 'and reversible');
+  ok(html.includes('1 in this session'), 'the count says which list this is');
+});
+
+test('a search that matches nothing is an invitation rather than an empty box', () => {
+  const html = renderLiftPicker({ lifts: [plift('squat', 'Squat')], open: true, query: 'zzz' });
+  ok(html.includes('No lift here matches'), 'says what happened');
+  ok(!html.includes('data-exercise='), 'and offers nothing that is not there');
+});
+
+// A trainer types the split names, so they reach this markup as free text.
+test('a day name with markup in it is escaped rather than rendered', () => {
+  const groups = groupLifts([plift('squat', 'Squat')], { days: [pday(0, '<b>A</b>', ['squat'])] });
+  const html = renderLiftPicker({ lifts: [plift('squat', 'Squat')], groups, open: true });
+  ok(html.includes('&lt;b&gt;A&lt;/b&gt;'), 'escaped');
+  ok(!html.includes('<b>A</b>'), 'not rendered');
+});
+
+// ------------------------------------------------------------------ the day's readout
+//
+// js/session-readout.js, which is what a tapped cell on the consistency grid opens. It replaced a
+// line that named the lifts and counted the sets, which answered "did I train" for a second time
+// on a screen where the cell above had already answered it.
+
+const kg = (v) => `${v} kg`;
+
+test('a loaded set says the load and the reps', () => {
+  eq(setLine({ weight_kg: 100, reps: 5 }, kg), '100 kg × 5');
+});
+
+test('nothing on the bar is bodyweight and never zero', () => {
+  eq(setLine({ weight_kg: 0, reps: 8 }, kg), 'Bodyweight × 8');
+});
+
+test('a hold is seconds and a hold with a belt on says both', () => {
+  eq(setLine({ weight_kg: 0, reps: null, hold_seconds: 42 }, kg), '42s');
+  eq(setLine({ weight_kg: 10, reps: null, hold_seconds: 30 }, kg), '30s with 10 kg');
+});
+
+test('rounds are rounds and never reps', () => {
+  eq(setLine({ weight_kg: 0, reps: null, rounds: 6 }, kg), '6 rounds');
+});
+
+test('a carry has a load and nothing to count', () => {
+  eq(setLine({ weight_kg: 60, reps: null }, kg), '60 kg');
+});
+
+test('rpe rides along wherever it was recorded', () => {
+  eq(setLine({ weight_kg: 100, reps: 5, rpe: 8.5 }, kg), '100 kg × 5 RPE 8.5');
+});
+
+const readout = (over = {}) =>
+  renderSessionReadout(
+    {
+      day: '2026-08-13',
+      dayLabel: 'Thursday, August 13',
+      sessions: [{
+        label: 'LOWER A', time: '6:48 PM', note: '', isOpen: false,
+        lifts: [{ name: 'Squat', sets: [row({ weight_kg: 100, reps: 5 })] }],
+        ...over,
+      }],
+    },
+    { weight: kg },
+  );
+
+test('a warmup and an added set are marked in words and never in a colour', () => {
+  const html = readout({
+    lifts: [{
+      name: 'Squat',
+      sets: [
+        row({ weight_kg: 50, reps: 8, is_warmup: true }),
+        row({ weight_kg: 100, reps: 5 }),
+        row({ weight_kg: 100, reps: 5, is_extra: true }),
+      ],
+    }],
+  });
+  eq((html.match(/Warmup/g) ?? []).length, 1);
+  eq((html.match(/Added/g) ?? []).length, 1);
+});
+
+test('what the client said about a session is in the readout, in their words', () => {
+  ok(readout({ note: 'Hips felt tight all session' }).includes('Hips felt tight all session'));
+});
+
+test('a session still running says so rather than being drawn as a short one', () => {
+  ok(readout({ isOpen: true }).includes('Still open'));
+});
+
+test('a day with nothing on it is nothing, not an empty card', () => {
+  eq(renderSessionReadout({ day: '2026-08-13', dayLabel: 'x', sessions: [] }, { weight: kg }), '');
+});
+
+// The readout carries weights, which the line it replaced deliberately did not. Nothing in it may
+// format one itself: CLAUDE.md gives that job to js/units.js and to nothing else.
+test('nothing in the readout formats a weight its own way', () => {
+  const html = readout();
+  ok(html.includes('100 kg × 5'), 'the caller formatter is what ran');
+  ok(!html.includes('100kg'), 'and no second opinion about how a weight looks');
 });
 
 // ------------------------------------------------------------------ report
