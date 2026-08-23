@@ -1068,10 +1068,30 @@ button {
   min-height: 0;
 }
 
+/* NOTHING IN THIS PANEL SHRINKS EXCEPT THE LIST.
+ *
+ * .screen.is-overview fixes the screen's height, which is what stops the page scrolling and makes
+ * the overflow land inside .worknav__scroll. But a flex column distributes shrinkage across every
+ * item that will take it, and the default is that they all will. So on a long day the head, the
+ * day picker and the foot were each squeezed a little to make room, and the day picker is the one
+ * that shows it: it carries overflow-y: hidden, so instead of overflowing visibly it sliced its
+ * own chips in half. Measured on the seeded two day program, which is the SHORT case: a 393x852
+ * viewport gave the picker 40px around a 46px row, 667 gave it 29, and 560 gave it 22. A real
+ * seven day program does it on a full size phone.
+ *
+ * flex: 0 0 auto on the three fixed parts, so .worknav__scroll is the only thing left that can
+ * give, which is what it is for. */
 .worknav__head {
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
+  flex: 0 0 auto;
+}
+
+/* The day picker inside the panel. Same rule, stated separately because .daypicker is shared with
+ * the builder, where it is not inside a fixed height column and has nothing to shrink against. */
+.worknav > .daypicker {
+  flex: 0 0 auto;
 }
 
 .worknav__day {
@@ -1258,6 +1278,7 @@ button.worknav__row:active {
 
 .worknav__foot {
   display: flex;
+  flex: 0 0 auto;
 }
 
 .worknav__foot .button-secondary {
