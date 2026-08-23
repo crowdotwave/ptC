@@ -23,7 +23,7 @@ import {
   toDisplay,
   weightLabel,
   loadUnit,
-  mountUnitSwitch,
+  mountUnitSetting,
   onUnitChange,
   viewerName,
 } from './js/units.js';
@@ -853,7 +853,7 @@ async function main() {
     who.hidden = false;
   }
 
-  mountUnitSwitch(el('unit-switch'));
+  mountUnitSetting(el('unit-setting'));
   onUnitChange(redraw);
 
   const exercises = await storage.query('exercises', {});

@@ -15,9 +15,14 @@
 // So the row becomes what every training app converges on for this, because it is the only shape
 // that survives forty options on a phone: one control naming what you are looking at, and a list
 // you can search behind it. The chip rule still governs the rows inside the list, which is where
-// the selection actually is: the current lift FILLS with the raised gradient and its rim, steps to
+// the selection actually is: the current lift FILLS with --surface-raised and its rim, steps to
 // 700 weight and --text-primary, and carries the word "Showing". Fill against no fill is still the
 // signal doing the real work.
+//
+// The rows themselves are chrome and therefore flat, and they are drawn out of the shared .row-card
+// pattern in styles.css rather than as one lit slab each. The argument is at that block: a fall of
+// light is how you make one object read as liftable at arm's length, not how you draw a list of
+// forty, and eight glowing slabs in a column is the clutter that argument produces at this scale.
 //
 // It is a state of the screen rather than a layer over it, exactly as the workout panel on the
 // logging screen is: in flow, no focus trap, no z-index, no outside click handler. Escape closes
@@ -156,17 +161,27 @@ function metaOf(lift) {
   return lift.lastDay ? `${count}, last ${shortDay(lift.lastDay)}` : count;
 }
 
+/**
+ * One lift.
+ *
+ * The button carries no layout of its own and everything sits in .row__body, which is a real bug
+ * fix rather than a tidy up. A <button> lays its children out in an anonymous box and its own
+ * height is not computed from that box's grid rows: with the grid on the button the row measured
+ * 44.98px around 51px of content, so `min-height` won and the second line printed through the
+ * bottom border. See the .row-card block in styles.css.
+ */
 function renderRow(lift, selectedId) {
   const on = lift.id === selectedId;
   return (
-    `<button type="button" class="liftpick__row${on ? ' is-on' : ''}" data-exercise="${esc(lift.id)}"` +
+    `<button type="button" class="row${on ? ' is-on' : ''}" data-exercise="${esc(lift.id)}"` +
     `${on ? ' aria-current="true"' : ''}>` +
-    `<span class="liftpick__name">${esc(lift.name)}</span>` +
-    `<span class="liftpick__meta num">${esc(metaOf(lift))}</span>` +
+    `<span class="row__body">` +
+    `<span class="row__name">${esc(lift.name)}</span>` +
+    `<span class="row__meta num">${esc(metaOf(lift))}</span>` +
     // The state is said in a word as well as drawn in a fill, per the encoding rules. It is the
     // only thing in the row that is not a fact about the lift.
-    (on ? `<span class="liftpick__showing">Showing</span>` : '') +
-    `</button>`
+    (on ? `<span class="row__mark">Showing</span>` : '') +
+    `</span></button>`
   );
 }
 
@@ -187,16 +202,21 @@ export function renderLiftPicker({
   query = '',
   scope = null,
 } = {}) {
+  const selected = lifts.find((lift) => lift.id === selectedId) ?? null;
   const shown = matchLifts(lifts, query);
   const shownIds = new Set(shown.map((lift) => lift.id));
-  const inScope = scope ? `${lifts.length} in this session` : `${lifts.length} lift${lifts.length === 1 ? '' : 's'}`;
+  // The count is about the LIST, not about the lift named above it, so the wording has to say so.
+  // "8 lifts logged" under a lift's own name reads as a claim about that lift.
+  const inScope = scope
+    ? `${lifts.length} lift${lifts.length === 1 ? '' : 's'} in this session`
+    : `Choose from ${lifts.length} lift${lifts.length === 1 ? '' : 's'}`;
 
   const body = (groups ?? [{ label: '', lifts }])
     .map((group) => {
       const rows = group.lifts.filter((lift) => shownIds.has(lift.id));
       if (!rows.length) return '';
       return (
-        (group.label ? `<p class="liftpick__group">${esc(group.label)}</p>` : '') +
+        (group.label ? `<p class="row-group">${esc(group.label)}</p>` : '') +
         rows.map((lift) => renderRow(lift, selectedId)).join('')
       );
     })
@@ -205,29 +225,32 @@ export function renderLiftPicker({
   return (
     `<button type="button" class="liftpick__open" id="liftpick-open" aria-expanded="${open}" ` +
     `aria-controls="liftpick-panel">` +
-    // It says what it does rather than what is selected, and that is deliberate on a screen where
-    // the lift's name is the heading directly above it at 32px. A control that repeats the line
-    // above it is noise, and the selection is stated three more times regardless: in that heading,
-    // in the sessions line under it, and by the filled row inside the list saying "Showing".
-    `<span class="liftpick__lead">Choose a lift</span>` +
-    `<span class="liftpick__count num">${esc(inScope)}</span>` +
+    `<span class="row__body">` +
+    // It carries the current lift, which the heading above it also carries at 32px. That is not a
+    // duplication to remove: a closed control that does not say what it is set to is the failure
+    // the segmented unit switch was built to avoid, in a control with forty options rather than
+    // two. The heading is the subject of the page and this is the state of the control.
+    `<span class="row__name">${esc(selected ? selected.name : 'Choose a lift')}</span>` +
+    `<span class="row__meta num">${esc(inScope)}</span>` +
     // The same chevron the day chip carries, turned by CSS when the panel opens, which makes the
     // button its own close control rather than needing a second one inside the list.
     `<svg class="liftpick__glyph" viewBox="0 0 20 20" aria-hidden="true" fill="none" ` +
     `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` +
     `<path d="M5 8l5 5 5-5" /></svg>` +
-    `</button>` +
-    `<div class="liftpick__panel" id="liftpick-panel"${open ? '' : ' hidden'}>` +
+    `</span></button>` +
+    `<div class="liftpick__panel row-card" id="liftpick-panel"${open ? '' : ' hidden'}>` +
     (scope
       ? `<div class="liftpick__scope">` +
         `<span class="liftpick__scopeday">${esc(scope)}</span>` +
-        `<button type="button" class="button-secondary liftpick__all" data-clear-scope>Show every lift</button>` +
+        `<button type="button" class="button-secondary" data-clear-scope>Show every lift</button>` +
         `</div>`
       : '') +
     (lifts.length > SEARCH_AT
-      ? `<input type="search" class="liftpick__search" id="liftpick-search" ` +
+      ? `<div class="liftpick__find">` +
+        `<input type="search" class="liftpick__search" id="liftpick-search" ` +
         `placeholder="Search lifts" aria-label="Search lifts" value="${esc(query)}" ` +
-        `autocomplete="off" autocorrect="off" spellcheck="false" />`
+        `autocomplete="off" autocorrect="off" spellcheck="false" />` +
+        `</div>`
       : '') +
     `<div class="liftpick__scroll">` +
     // An invitation rather than an apology, per the copy rules, and it names what was typed so

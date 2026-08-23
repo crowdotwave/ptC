@@ -65,7 +65,6 @@
         <h2 class="context__exercise" id="exercise-name">&nbsp;</h2>
         <div class="context__row">
           <p class="context__last num" id="headline">&nbsp;</p>
-          <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
       </header>
 
@@ -118,6 +117,9 @@
            type on it, because signing out is something you do once when a bug happens. -->
       <footer class="account">
         <span class="account__who" id="account-name"></span>
+        <!-- Set once, so it lives here rather than in the corner of every screen. See
+             mountUnitSetting in js/units.js. -->
+        <div class="unitset" id="unit-setting" hidden></div>
         <button class="account__out" type="button" data-signout hidden>Sign out</button>
       </footer>
     </main>

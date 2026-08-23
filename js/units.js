@@ -20,7 +20,12 @@
 
 export const KG_PER_LB = 0.45359237;
 
-const state = { unit: 'kg', storage: null, table: null, id: null, name: '' };
+// Pounds by default, everywhere, including before a viewer row has been read. Kilograms is what
+// the database stores and it is not what anybody here reads: every client and trainer this is
+// being built for is in a pound gym, so kg as the default meant a first run that showed the
+// wrong numbers until somebody found the switch. Storage is unaffected, weight_kg is still the
+// only thing written, and this is still nothing but a display preference.
+const state = { unit: 'lb', storage: null, table: null, id: null, name: '' };
 const listeners = new Set();
 
 export const unit = () => state.unit;
@@ -112,9 +117,9 @@ async function viewerRecord(storage, actor) {
 /**
  * Reads the viewer's stored preference. Call once per page, before anything renders a weight.
  *
- * Falls back to kilograms and a read only switch when there is no viewer row to write to, which
- * happens on an unbound session. Offering a control that silently fails to save is worse than
- * not offering it.
+ * Falls back to pounds and no setting at all when there is no viewer row to write to, which
+ * happens on an unbound session. Offering a control that silently fails to save is worse than not
+ * offering it.
  */
 export async function loadUnit(storage, actor) {
   const found = await viewerRecord(storage, actor);
@@ -126,7 +131,7 @@ export async function loadUnit(storage, actor) {
   state.table = found.table;
   state.id = found.row.id;
   state.name = found.row.display_name ?? '';
-  state.unit = found.row.weight_unit === 'lb' ? 'lb' : 'kg';
+  state.unit = found.row.weight_unit === 'kg' ? 'kg' : 'lb';
   return state.unit;
 }
 
@@ -152,37 +157,43 @@ export async function setUnit(next) {
   });
 }
 
-const OPTIONS = [
-  ['kg', 'KG'],
-  ['lb', 'LB'],
-];
+const WORDS = { kg: 'kilograms', lb: 'pounds' };
 
 /**
- * The switch itself, rendered into whatever node is handed over.
+ * The unit setting, in the page footer.
  *
- * Segmented rather than a single button that flips. A lone pill reading KG cannot say whether it
- * means "you are reading kilograms" or "tap for kilograms", and that ambiguity sits on top of
- * every number on the screen. Both options visible, one of them filled, resolves it: it is the
- * chooser chip rule from CLAUDE.md applied to the smallest possible chooser.
+ * IT USED TO BE A SEGMENTED SWITCH IN EVERY HEADER, and the argument for that shape was sound and
+ * the argument for its PLACE was not. Sound: a lone pill reading KG cannot say whether it means
+ * "you are reading kilograms" or "tap for kilograms", so both options showed and one filled, which
+ * is the chooser chip rule at the smallest possible size. Not sound: that is 90px of the top right
+ * corner of every screen in the app, permanently, for a preference somebody sets once and never
+ * touches again. It had already been moved twice looking for a row it did not crowd, and the
+ * measurement that pushed it off the lift name's line is in the header corner block in styles.css.
+ * A control that has to be relocated twice to stop colliding with things is usually a control in
+ * the wrong band of the screen.
+ *
+ * So it moves to the footer, with sign out, in the quietest type on the page, and the ambiguity
+ * the segmented shape existed to solve is solved by a sentence instead: the state is a statement
+ * and the action is a button, which cannot be read as each other. That is cheaper than two chips
+ * and it says more.
+ *
+ * The logging screen's footer is hidden while that screen is doing its job, so this is unreachable
+ * mid session, which is correct. It is a setting, not a control.
  */
-export function mountUnitSwitch(node) {
+export function mountUnitSetting(node) {
   if (!node) return;
   if (!canSetUnit()) {
     node.hidden = true;
     return;
   }
   node.hidden = false;
-  node.setAttribute('role', 'group');
-  node.setAttribute('aria-label', 'Weight unit');
 
   const paint = () => {
-    node.innerHTML = OPTIONS.map(([value, label]) => {
-      const on = state.unit === value;
-      return (
-        `<button type="button" class="unitswitch__opt${on ? ' is-on' : ''}" data-unit="${value}" ` +
-        `aria-pressed="${on}">${label}</button>`
-      );
-    }).join('');
+    const other = state.unit === 'lb' ? 'kg' : 'lb';
+    node.innerHTML =
+      `<span class="unitset__now">Weights in ${WORDS[state.unit]}.</span>` +
+      `<button type="button" class="unitset__swap" data-unit="${other}">` +
+      `Switch to ${WORDS[other]}</button>`;
   };
 
   node.addEventListener('click', (event) => {

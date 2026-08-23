@@ -64,7 +64,6 @@
              the page, because the header above it belongs to the client list as well. -->
         <div class="context__row">
           <p class="backlink"><a href="#" id="back-to-list">Back to clients</a></p>
-          <div class="unitswitch" id="unit-switch" hidden></div>
         </div>
 
         <!-- Every session this client logged, including what they said about each one. That list
@@ -114,6 +113,9 @@
       <!-- Who you are signed in as, and the way out. Quietest type on the page. -->
       <footer class="account">
         <span class="account__who" id="trainer-name"></span>
+        <!-- Set once, so it lives here rather than in the corner of every screen. See
+             mountUnitSetting in js/units.js. -->
+        <div class="unitset" id="unit-setting" hidden></div>
         <button class="account__out" type="button" data-signout hidden>Sign out</button>
       </footer>
     </main>

@@ -146,7 +146,10 @@ const TRAINERS = [
         strength: 1.15,
         adherence: 0.9,
         weeks: 8,
-        unit: 'kg',
+        // The default client opens with ?local=1, so it reads in the unit the shipped default is,
+        // which is pounds. Marcus and Priya still differ from each other, which is what keeps the
+        // conversion exercised by the seed at all.
+        unit: 'lb',
         blockGain: 0.03, // estimated 1RM across the whole eight weeks, not per week
         stallWeek: 4,
         deloadWeek: 6,
@@ -320,7 +323,7 @@ export async function seed(storage, { force = false } = {}) {
       display_name: tspec.name,
       brand_color: tspec.brandColor,
       logo_url: null,
-      weight_unit: 'kg',
+      weight_unit: 'lb',
     },
     { created_at: seededAt },
   );

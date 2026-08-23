@@ -158,7 +158,7 @@ async function runAdapterCheck(storage) {
         display_name: 'Stray',
         email: 'stray@example.com',
         status: 'active',
-        weight_unit: 'kg',
+        weight_unit: 'lb',
         weight_lb: 185,
       });
     } catch {

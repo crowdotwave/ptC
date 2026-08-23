@@ -27,7 +27,7 @@ import {
   describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
 import { validate, OUTBOX_STORE } from './js/schema.js';
-import { loadLabel, loadValue } from './js/units.js';
+import { loadLabel, loadValue, unit, setUnit } from './js/units.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
@@ -1199,9 +1199,12 @@ test('a row the client never logs is named on their program rather than hidden f
 });
 
 test('a client sees what they lifted last time, under what they were asked to lift', () => {
+  // In the unit the viewer reads, which is pounds unless somebody has said otherwise. Named here
+  // rather than left to the module default, so this stays a test of the line and not of the
+  // default: 100 kg is 220 lb.
   const history = new Map([['squat', { weightKg: 100, reps: 5, on: '2026-07-27T18:00:00.000Z' }]]);
   const html = renderProgram(view(), 0, history);
-  ok(/Top set last time 100 kg for 5, Jul 27/.test(html), html);
+  ok(/Top set last time 220 lb for 5, Jul 27/.test(html), html);
 });
 
 test('a lift with no history says nothing rather than a zero', () => {
@@ -2600,9 +2603,29 @@ test('a set with nothing on it is named, not printed as a weight of zero', () =>
   eq(loadValue(0), 'BW', 'the stepper has no room for a sentence');
 });
 
+// Pounds is the default now, everywhere, because nobody using this reads kilograms. Asserted so a
+// change of default is a failing test rather than a surprise in a gym.
+test('weights read in pounds until somebody says otherwise', () => {
+  eq(unit(), 'lb');
+});
+
 test('a load that exists still prints as a load', () => {
+  eq(loadLabel(15 * 0.45359237), '15 lb');
+  eq(loadValue(15 * 0.45359237), '15', 'the stepper carries its unit in the label beneath it');
+});
+
+// Synchronous on purpose, and not because awaiting would be untidy. setUnit changes the state and
+// notifies its listeners before its first await, and only the persistence after that is async, so
+// the flip lands immediately. Awaiting it here would put the restore in a later microtask and let
+// every synchronous test after this one read kilograms, which is exactly the failure this comment
+// exists to stop somebody reintroducing. There is no storage bound in tests, so nothing is written.
+test('the same load in the other unit is the same load', () => {
+  setUnit('kg');
   eq(loadLabel(6.8), '6.8 kg');
-  eq(loadValue(6.8), '6.8', 'the stepper carries its unit in the label beneath it');
+  eq(loadValue(6.8), '6.8');
+  eq(loadLabel(0), 'bodyweight', 'nothing on the bar is still nothing on the bar');
+  setUnit('lb');
+  eq(unit(), 'lb', 'and put back, so nothing after this reads a unit it did not set');
 });
 
 // The line under Log set opens a sentence, so callers upper case the first character. That must
@@ -2613,7 +2636,7 @@ test('opening a line with a load leaves a number exactly as it was', () => {
     return load.charAt(0).toUpperCase() + load.slice(1);
   };
   eq(opens(0), 'Bodyweight');
-  eq(opens(60), '60 kg');
+  eq(opens(60), '132 lb', 'a number has no case to change, in either unit');
 });
 
 // ------------------------------------------------------------------ eight real workbooks
@@ -4287,7 +4310,7 @@ test('a narrowed list says what narrowed it and carries the way out', () => {
   });
   ok(html.includes('Thursday, August 13'), 'the narrowing is stated');
   ok(html.includes('data-clear-scope'), 'and reversible');
-  ok(html.includes('1 in this session'), 'the count says which list this is');
+  ok(html.includes('1 lift in this session'), 'the count says which list this is');
 });
 
 test('a search that matches nothing is an invitation rather than an empty box', () => {

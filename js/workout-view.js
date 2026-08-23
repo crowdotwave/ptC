@@ -183,7 +183,7 @@ export function positionLine(rows) {
 }
 
 function renderRow(row) {
-  const inner =
+  const cells =
     `<span class="worknav__num num">${esc(row.group ?? '')}</span>` +
     `<span class="worknav__body">` +
     `<span class="worknav__name">${esc(row.name)}` +
@@ -199,15 +199,34 @@ function renderRow(row) {
     (row.notes ? `<span class="worknav__note">${esc(row.notes)}</span>` : '') +
     `</span>`;
 
-  // Lit means pressable, flat means not, which is the same rule the steppers and the chooser chips
-  // follow. A finished lift is a plain slab with a border and no fall of light on it, so the thing
-  // that says "you cannot go here" is the same thing that says "this is not a control".
-  if (row.shown) return `<li class="worknav__row is-shown">${inner}</li>`;
-  if (row.at === null) return `<li class="worknav__row is-full">${inner}</li>`;
+  // A CHEVRON IS WHAT SEPARATES PRESSABLE FROM NOT, now that this list is flat.
+  //
+  // It used to be the fall of light: a lift you could jump to caught light along its top edge and
+  // a finished one was a bare slab, so the signal saying "you cannot go here" was the same signal
+  // saying "this is not a control". That worked, and it does not survive the panel becoming rows
+  // in one card, because there is no longer a per row surface to light. The replacement is what
+  // every list based app uses, and it is a shape rather than a colour, which is what the encoding
+  // rules ask for. The state line under the name says it a second time in words, as it always did.
+  const arrow =
+    `<svg class="worknav__go" viewBox="0 0 20 20" aria-hidden="true" fill="none" ` +
+    `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` +
+    `<path d="M7.5 4l6 6-6 6" /></svg>`;
+
+  // The grid lives on .worknav__grid and never on the row, and that is a bug fix rather than a
+  // wrapper for its own sake. A <button> lays its children out in an anonymous box and its own
+  // height is not computed from that box's grid rows, so a grid on the button leaves the row sized
+  // by min-height with the content spilling past it. Measured on the lift picker, which had the
+  // same shape: a 44.98px box around 51px of content. See .row-card in styles.css.
+  const grid = (extra) => `<span class="worknav__grid">${cells}${extra}</span>`;
+
+  if (row.shown) return `<li class="worknav__row is-shown">${grid('')}</li>`;
+  if (row.at === null) return `<li class="worknav__row is-full">${grid('')}</li>`;
 
   return (
     `<li><button type="button" class="worknav__row${row.isCurrent ? ' is-now' : ''}" ` +
-    `data-jump="${row.at}"${row.isCurrent ? ' aria-current="true"' : ''}>${inner}</button></li>`
+    `data-jump="${row.at}"${row.isCurrent ? ' aria-current="true"' : ''}>` +
+    grid(arrow) +
+    `</button></li>`
   );
 }
 

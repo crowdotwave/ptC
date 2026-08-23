@@ -21,7 +21,7 @@ import { topSet } from './js/history.js';
 import { loadSessions } from './js/session.js';
 import { weekIndexOf } from './js/progression.js';
 import { isoDate } from './js/dates.js';
-import { loadUnit, mountUnitSwitch, onUnitChange, viewerName, canSetUnit } from './js/units.js';
+import { loadUnit, mountUnitSetting, onUnitChange, viewerName } from './js/units.js';
 import { readFile, renderDraft, setMode, createProgram } from './js/import-ui.js';
 
 const el = (id) => document.getElementById(id);
@@ -112,7 +112,9 @@ function renderSections() {
     ).join('');
   }
 
-  el('unit-switch').hidden = !(on === 'mine' && canSetUnit());
+  // The unit setting used to be shown and hidden with this picker, because it sat in the header
+  // next to it. It lives in the page footer now, where it is a setting rather than a control on a
+  // screen, so there is nothing left here to keep in step with which section is showing.
   return on;
 }
 
@@ -181,7 +183,6 @@ function hideList() {
   el('mine-view').hidden = true;
   el('everyone-view').hidden = true;
   el('section-picker').hidden = true;
-  el('unit-switch').hidden = true;
 }
 
 async function showList() {
@@ -1266,7 +1267,7 @@ async function main() {
   // The viewer's own preference, read from and written to the viewer's own row. Loaded before
   // anything prints a weight, which on this page is the top set line under each lift.
   await loadUnit(storage, actor);
-  mountUnitSwitch(el('unit-switch'));
+  mountUnitSetting(el('unit-setting'));
   onUnitChange(() => repaintProgramView(el('mine-body')));
   el('viewer-name').textContent = viewerName();
 
