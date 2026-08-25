@@ -439,6 +439,68 @@ Requirements:
   one tap, and "and how was that?" after a max hold takes that back. The words are an effort ladder
   and carry no failure state, per the no-guilt rule below.
 
+### The clock-led day
+
+**Every minute on the minute inverts this whole screen, and that is the point of it.** Everywhere
+else the client sets the pace: a set exists because somebody tapped, the rest timer counts down and
+waits, nothing happens until a thumb moves. An EMOM is a client racing a clock that does not care.
+The window ends whether or not the work got done, the next one starts on top of it, and whatever is
+left of a window after the reps are done is the rest. So this screen has no primary action at all
+once it is running, which is the opposite of every other state of it.
+
+`template_days.emom` is `{ rounds, window_seconds }`, null on every ordinary day. **On the day and
+never on the items**, because what is being described is the clock and a clock belongs to the block:
+six rows disagreeing about how many times round the block goes has no sensible reading. Each item is
+one station owning one window, in `order_index` order, and a round is one pass through all of them.
+Emma's day is six stations of a minute, five rounds, thirty windows.
+
+**Everything is derived from elapsed time and nothing counts ticks.** `js/emom.js` owns it and no
+function in it may care how often it is called. A backgrounded tab is throttled to about a callback
+a second and then not called at all once the screen locks, so a counter that added a minute per
+firing would drift and then stop, and a drifting EMOM silently changes the workout. `emomDue` asks
+which windows have ENDED and not been written, which answers identically whether it was called sixty
+times or once in four minutes: a locked phone comes back and writes the three stations it missed.
+The consequence, stated because it will look like a bug: **locking the phone does not pause the
+block, and must not.** The clock in the room did not stop. Measured on the real screen, a reload at
+minute three resumes at minute five, because the reload took two minutes.
+
+**A reload rebuilds the clock from the rows, never from anything in memory.** Window zero is written
+the instant the first window closes, so the earliest row's `logged_at` is exactly one window after
+the block began and `emomStartedAt` subtracts one window to get back to it. Same principle as
+`replaySession`: the rows are enough, and they are the only thing a reload cannot destroy. The first
+draft read `state.logged`, which a reload empties, and the block restarted from zero every time.
+
+**A window logs the prescribed reps, and a window the client marked short logs no rep count at
+all.** Zero is not available and the schema is right about that: `set_logs.reps` is `above: 0` and
+nullable exactly so a set with no rep count has somewhere to say so, and a zero would assert the
+client did none, which is not what Missed it means. Writing no row is the SKIP encoding and means
+the work was never attempted; this means they stood at that station for that minute and did not
+finish. Null is the honest third thing. It also has to be a row mechanically, or the count the
+resume is rebuilt from has a hole in it.
+
+The one control while the block runs is not a stepper, because mid EMOM there is no time to dial a
+number: the honest thing somebody can say in two seconds is "not that one". The block starts on a
+deliberate press and never on arrival, since a clock that began when the screen loaded would spend
+the first window on walking to the rack, and there is no pausing it afterwards. It is scored in
+windows kept, never in volume: most of an EMOM is bodyweight, so a tonnage would read as almost
+nothing moved on the hardest day of the week.
+
+**No green on it.** `--done` is fenced to three places and "you are keeping up" would be a fourth
+meaning arriving on the screen most tempted to ask for one. What says a window is nearly out is the
+numeral falling and the track emptying. The clock is flat and bordered on the base surface rather
+than a lit slab, for two reasons that arrived together: lit means pressable in this app and a
+countdown is not, and cyan numerals measure 4.70 on `--surface-raised` against 11.79 on the base,
+which is the "on raised, `--text-primary` only" rule doing exactly what it exists to do.
+
+**It is checked by rehearsal, not by tapping through it.** Every failure mode here is about time
+passing: a window that never closes, a station that repeats, a round counter that sticks, a row
+written twice. None of those is visible in a screenshot and finding them at 1x costs half an hour an
+attempt. `emom-test.html` mounts the real `js/emom-view.js` and owns only the clock, so it can run a
+thirty minute block in seven seconds, and it lists the rows the logging screen WOULD have appended.
+A rehearsal that drew its own version of the screen would be a rehearsal of something no client ever
+sees. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
+adapter, which is a different question and the one that puts sets on somebody's phone.
+
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no
 notifications nagging the client to train.
 

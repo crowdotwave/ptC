@@ -4777,6 +4777,13 @@ test('a window that is not a whole number of minutes says its seconds', () => {
   eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
 });
 
+test('a block under a minute says its seconds and not zero minutes', () => {
+  // The reading somebody rehearsing a short window sees first, so it is the one most likely to be
+  // looked at by whoever is checking this works.
+  const quick = emomBlock(emomDay(4, 2), [station('A', 5), station('B', 5), station('C', 5), station('D', 5)], (i) => i.reps);
+  eq(emomLength(quick), '4 rounds, 4 stations, 32 sec');
+});
+
 // ------------------------------------------------------------ what the EMOM screen says
 
 const emomUi = () => {

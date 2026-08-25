@@ -231,7 +231,10 @@ export function emomLength(block) {
   const total = Math.round(emomDurationMs(block) / 1000);
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
-  const clock = seconds ? `${minutes} min ${seconds} sec` : `${minutes} min`;
+  // "0 min 32 sec" is not how anybody says half a minute. Only reachable with a short window, which
+  // is exactly what somebody rehearsing a block sets, so it is the reading most likely to be seen
+  // by whoever is checking this works.
+  const clock = !minutes ? `${seconds} sec` : seconds ? `${minutes} min ${seconds} sec` : `${minutes} min`;
   const stations = `${block.stations.length} station${block.stations.length === 1 ? '' : 's'}`;
   return `${block.rounds} round${block.rounds === 1 ? '' : 's'}, ${stations}, ${clock}`;
 }

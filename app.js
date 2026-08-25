@@ -20,6 +20,8 @@ import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
+import { emomBlock, emomAt, emomDue, emomStartedAt } from './js/emom.js';
+import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
@@ -92,6 +94,7 @@ const ui = {
   log: el('log'),
   logLabel: el('log-label'),
   logSub: el('log-sub'),
+  emomHost: el('emom-host'),
 };
 
 const state = {
@@ -137,6 +140,17 @@ const state = {
   restTotal: 0,
   restHandle: null,
   typing: false,
+  // The clock-led day, or null for every other day. Held as one object so that leaving the day
+  // clears the whole thing: a half torn down EMOM is an interval that keeps writing rows against
+  // a session the client has moved on from.
+  //
+  //   block      js/emom.js, frozen from the day's snapshot
+  //   startedAt  wall clock ms, or null before the first press. Never a counter: see js/emom.js
+  //   missed     window indices the client flagged, so a short window writes what it was
+  //   written    how many windows are on disk, which is what decides what is owed
+  //   view       the mounted js/emom-view.js handles
+  //   handle     the interval, cleared on every path out of this day
+  emom: null,
 };
 
 // ------------------------------------------------------------------ units
@@ -376,11 +390,20 @@ function render() {
     return;
   }
 
+  // Before the done check, because an EMOM day has no plan and so no entry, and falling through
+  // to the summary would end the session before the clock had started.
+  if (isEmomDay() && !state.sessionClosed) {
+    renderEmom();
+    return;
+  }
+
   if (!entry) {
     renderDone();
     return;
   }
 
+  ui.emomHost.hidden = true;
+  ui.screen.classList.remove('is-emom');
   ui.done.hidden = true;
   ui.overview.hidden = true;
   ui.screen.classList.remove('is-overview');
@@ -438,7 +461,12 @@ function render() {
 /** The chip top left: which day this is, and where in it the client is standing. */
 function renderHeader() {
   if (!state.day) return;
-  const position = positionLine(overviewRows(state.plan, state.cursor, state.day));
+  // An EMOM day has lifts but no position in them: the clock decides which station is up, and
+  // "Lift 1 of 4" on a day that walks through all four every round is a number that is wrong for
+  // fifteen of every sixteen minutes. Where the client is comes from the block instead.
+  const position = isEmomDay()
+    ? emomPositionLine()
+    : positionLine(overviewRows(state.plan, state.cursor, state.day));
   ui.dayJump.hidden = false;
   ui.dayJumpLabel.textContent = dayTitle(state.day);
   ui.dayJumpPos.textContent = position;
@@ -457,6 +485,8 @@ function renderHeader() {
  */
 function renderOverviewPanel() {
   ui.done.hidden = true;
+  ui.emomHost.hidden = true;
+  ui.screen.classList.remove('is-emom');
   ui.controls.hidden = true;
   ui.rest.hidden = state.restTotal === 0;
   ui.overview.hidden = false;
@@ -568,6 +598,8 @@ function renderUndo() {
 
 function renderDone() {
   ui.done.hidden = false;
+  ui.emomHost.hidden = true;
+  ui.screen.classList.remove('is-emom');
   ui.overview.hidden = true;
   ui.screen.classList.remove('is-overview');
   ui.controls.hidden = false;
@@ -606,10 +638,18 @@ function renderDone() {
   // empty card is an invitation to start, so it keeps the neutral edge every other card has.
   ui.done.dataset.tone = sets ? 'done' : 'empty';
   ui.doneTitle.textContent = sets ? 'Session logged.' : 'Nothing logged yet.';
-  ui.doneStat.textContent = sets
-    ? `${sets} working ${sets === 1 ? 'set' : 'sets'}${extra ? `, ${extra} added` : ''}, ` +
-      `${Math.round(toDisplay(volume)).toLocaleString()} ${unit()} moved.`
-    : 'Open a set and log it when you are ready.';
+  // A clock-led day is scored in windows kept, never in volume. Most of an EMOM is bodyweight and
+  // the loaded stations are dumbbells the app never asked the weight of, so a tonnage here would
+  // read as almost nothing moved on a day that was the hardest of the week.
+  ui.doneStat.textContent = !sets
+    ? 'Open a set and log it when you are ready.'
+    : isEmomDay()
+      // Counted from the rows rather than from the in-memory flags, so a summary read after a
+      // reload says the same thing as one read before it. A window with no rep count is one the
+      // client marked short: see logEmomWindow for why that is null and not zero.
+      ? emomSummary(state.emom.block, state.emom.rows.filter((row) => row.reps === null).length)
+      : `${sets} working ${sets === 1 ? 'set' : 'sets'}${extra ? `, ${extra} added` : ''}, ` +
+        `${Math.round(toDisplay(volume)).toLocaleString()} ${unit()} moved.`;
 
   // Only a session with something in it gets asked how it felt. "How did that feel?" under
   // "Nothing logged yet" is the app asking about a workout that did not happen.
@@ -797,7 +837,244 @@ function tickRest() {
   }
 }
 
+// ------------------------------------------------------------------ every minute on the minute
+//
+// The rest timer above counts the client's recovery and waits for them. This does the opposite: it
+// counts the window down and moves on regardless, which is what an EMOM is. Everything it decides
+// comes from js/emom.js and is derived from elapsed time, so this driver is allowed to be called
+// at any rate at all, including not at all for four minutes while the screen is locked.
+
+/** How often the clock is asked where it is. Four times a second, same as the rest timer. */
+const EMOM_TICK_MS = 250;
+
+/**
+ * Builds the block for a day, or clears it.
+ *
+ * Called on every path that changes the day, including the day picker and the resume path, and
+ * clearing is as important as building: an interval left running against a day the client has left
+ * would keep appending rows to a session that has moved on.
+ */
+function setEmomDay(day) {
+  stopEmom();
+  const block = emomBlock(day, sortedItems(day), (item) => item.target_reps_low ?? 0);
+  state.emom = block
+    ? { block, startedAt: null, missed: new Set(), written: 0, view: null, handle: null, rows: [] }
+    : null;
+}
+
+function stopEmom() {
+  if (state.emom?.handle) clearInterval(state.emom.handle);
+  if (state.emom) state.emom.handle = null;
+}
+
+/** Whether this day is run against a clock, which decides which screen the client gets. */
+function isEmomDay() {
+  return Boolean(state.emom);
+}
+
+/** What the day chip says on a clock-led day: the block before it starts, the round once it has. */
+function emomPositionLine() {
+  const emom = state.emom;
+  if (emom.startedAt === null) return `${emom.block.minutes} windows`;
+  const at = emomAt(emom.block, Date.now() - emom.startedAt);
+  return at.done ? 'Done' : `Round ${at.round + 1} of ${emom.block.rounds}`;
+}
+
+/**
+ * Begins the block, or picks a running one back up after a reload.
+ *
+ * The start time is rebuilt from the rows wherever there are any, per js/emom.js emomStartedAt, so
+ * a client whose phone died at minute nine comes back into minute nine rather than to a fresh
+ * clock. The clock in the room did not restart, and neither does this one.
+ */
+function startEmom() {
+  const emom = state.emom;
+  if (!emom || emom.startedAt !== null) return;
+
+  const rebuilt = emomStartedAt(emom.block, emom.rows);
+  emom.startedAt = rebuilt ?? Date.now();
+  emom.written = rebuilt === null ? 0 : emom.rows.length;
+
+  emom.handle = setInterval(tickEmom, EMOM_TICK_MS);
+  tickEmom();
+}
+
+/**
+ * One tick: draw where the block is, then write whatever windows have closed.
+ *
+ * Draw first, so the window the client is standing in is on screen before the one that just ended
+ * is filed. Writing first would leave the screen a frame behind the log, which on the one screen
+ * whose whole job is telling somebody what to do right now is the wrong way round.
+ */
+function tickEmom() {
+  const emom = state.emom;
+  if (!emom || emom.startedAt === null || !emom.view) return;
+
+  const elapsed = Date.now() - emom.startedAt;
+  const at = drawEmom(emom.view, emom.block, elapsed, emom.missed);
+  // The chip carries the round, so it has to move with the clock rather than only when something
+  // is rendered. Cheap: on this day it is one string and two attribute writes.
+  renderHeader();
+
+  for (const minute of emomDue(emom.block, elapsed, emom.written)) {
+    emom.written += 1;
+    logEmomWindow(minute, emom.missed.has(minute.index));
+  }
+
+  if (at.done) {
+    stopEmom();
+    // The block running out IS the end of the day, so the session closes itself rather than
+    // waiting for a tap the client has no reason to expect. Everything else on this screen ends
+    // when the last set is logged; this ends when the clock does.
+    //
+    // The second render is not redundant. endSession renders before it sets sessionClosed, which
+    // is correct for every other day and wrong here: this screen's branch runs while that flag is
+    // false, so without a redraw afterwards the summary never replaces the finished clock.
+    endSession();
+    render();
+  }
+}
+
+/**
+ * One window, as a set_logs row.
+ *
+ * A window is a set: the station's exercise, at the round's index, carrying the reps that were
+ * asked for. That is what the client chose when they picked the "log the prescribed reps" shape,
+ * and it is the only shape that costs zero taps, which is the whole point of a screen where there
+ * is no time to tap.
+ *
+ * A flagged window writes a row with NO rep count rather than a row of zero or no row at all, and
+ * the schema is right to have forced the question. `set_logs.reps` is `above: 0` and nullable
+ * precisely so that a set with no rep count has somewhere to say so: zero would assert that the
+ * client did none, which is not what Missed it means, and it is the same zero migration 0009 was
+ * written to stop a hold becoming. No row at all would be the skip encoding, and a skip means the
+ * work was never attempted, where this means the client stood at that station for that minute and
+ * did not finish. Null is the honest third thing: present, and no number captured.
+ *
+ * It also has to be a row for a mechanical reason. The block's start time is rebuilt from these
+ * rows on a reload, so a window that wrote nothing would leave a hole in the count and the resume
+ * would replay windows that had already happened.
+ */
+function logEmomWindow(minute, short) {
+  const session = ensureSessionRecord();
+  const item = minute.station.item;
+  const reps = short ? null : minute.station.reps;
+
+  const record = makeRecord('set_logs', {
+    session_id: session.id,
+    exercise_id: item.exercise_id,
+    // The round, so a station's five windows are set 1 to 5 of that lift, which is what every
+    // chart downstream already understands a set index to mean.
+    set_index: minute.round,
+    weight_kg: 0,
+    reps,
+    rounds: null,
+    hold_seconds: null,
+    rpe: null,
+    is_warmup: false,
+    logged_at: new Date().toISOString(),
+    supersedes_id: null,
+    is_void: false,
+    is_extra: false,
+    device_id: getDeviceId(),
+  });
+
+  state.logged.push({
+    id: record.id,
+    entry: null,
+    exerciseId: item.exercise_id,
+    setIndex: minute.round,
+    weightKg: 0,
+    reps,
+    logMode: 'bodyweight_reps',
+    isWarmup: false,
+    isExtra: false,
+    previousBest: state.best.get(item.exercise_id),
+  });
+
+  // The block's own list, which is what the start time is rebuilt from. Kept alongside the record
+  // rather than re-queried, so the count is right the instant the row exists rather than once the
+  // optimistic write has drained.
+  state.emom.rows.push(record);
+
+  write(async () => {
+    await ensureSessionWritten(session);
+    await state.storage.put('set_logs', record);
+  });
+  flushSoon();
+}
+
+/** The EMOM screen, in the space the steppers and the log action would have been. */
+function renderEmom() {
+  const emom = state.emom;
+  ui.done.hidden = true;
+  ui.overview.hidden = true;
+  ui.screen.classList.remove('is-overview');
+  ui.controls.hidden = true;
+  // The rest timer has nothing to say here: the rest IS whatever is left of the window, and two
+  // countdowns on one screen is two things to read when there is time for one.
+  ui.rest.hidden = true;
+  ui.lastTime.hidden = true;
+  ui.emomHost.hidden = false;
+  // Same trick the overview panel uses: the spacer exists to push the controls into the thumb
+  // arc, and with the controls gone it is a third of a screen of nothing above the clock.
+  ui.screen.classList.add('is-emom');
+
+  if (!emom.view) {
+    emom.view = mountEmomView(ui.emomHost);
+    emom.view.start.addEventListener('click', startEmom);
+    emom.view.missed.addEventListener('click', flagEmomWindow);
+  }
+
+  ui.exerciseName.textContent = dayTitle(state.day);
+  // The small line, not the big one. `.context__set` is the 28px band that says "Set 3 of 4", and
+  // "Every minute on the minute" put in there wrapped to three lines on a 390px phone and pushed
+  // the clock into the tab bar. What this screen is is a caption, not a position.
+  ui.setPosition.textContent = '';
+  ui.target.hidden = false;
+  ui.target.textContent = 'Every minute on the minute';
+
+  if (emom.startedAt === null) {
+    readyEmom(emom.view, emom.block, emom.rows.length > 0);
+    return;
+  }
+  drawEmom(emom.view, emom.block, Date.now() - emom.startedAt, emom.missed);
+}
+
+/**
+ * Marks the window on screen as one the client did not finish.
+ *
+ * Toggles, because the tap is made in a hurry and a mis-tap must cost one more tap rather than a
+ * wrong row. It only reaches a row if the window has not closed yet: once a window is written, the
+ * row is on disk and append only, so changing it is a correction rather than a flag, and this
+ * screen is not where somebody makes one.
+ */
+function flagEmomWindow() {
+  const emom = state.emom;
+  if (!emom || emom.startedAt === null) return;
+
+  const at = emomAt(emom.block, Date.now() - emom.startedAt);
+  if (at.done) return;
+  if (emom.missed.has(at.index)) emom.missed.delete(at.index);
+  else emom.missed.add(at.index);
+  tickEmom();
+}
+
 // ------------------------------------------------------------------ actions
+
+/**
+ * Puts the session row down before the first set that points at it.
+ *
+ * Called from inside a write queue task and nowhere else, which is what makes the flag safe: the
+ * queue is serial, so two sets logged in the same second cannot both find it false and both insert.
+ * Reading it outside the queue would be a different question with a different answer, which is the
+ * trap endSession documents where it tests the record instead.
+ */
+async function ensureSessionWritten(session) {
+  if (state.sessionWritten) return;
+  await state.storage.put('sessions', session);
+  state.sessionWritten = true;
+}
 
 function ensureSessionRecord() {
   if (state.sessionRecord) return state.sessionRecord;
@@ -912,10 +1189,7 @@ function logSet() {
   // being the same thing the moment somebody could log the last set on the list first.
   const shouldComplete = !state.plan.some(isPending);
   write(async () => {
-    if (!state.sessionWritten) {
-      await state.storage.put('sessions', session);
-      state.sessionWritten = true;
-    }
+    await ensureSessionWritten(session);
     await state.storage.put('set_logs', record);
   });
 
@@ -1311,6 +1585,9 @@ async function chooseDay(dayIndex) {
 
   const carried = state.logged.length;
   state.day = picked;
+  // Before anything else reads the day. Leaving an interval running against the day the client
+  // just left would keep appending windows to a session that has moved on.
+  setEmomDay(picked);
 
   // The session follows the picker, or it files itself under the day the client changed their mind
   // about. This is the row the next set is written against and the row every chart reads the day
@@ -1369,6 +1646,31 @@ async function openDayOn(day, sessions, session) {
   });
 
   const rows = session ? await state.storage.query('set_logs', { session_id: session.id }) : [];
+
+  // A clock-led day is not replayed against a cursor, because it has no cursor: the block decides
+  // what is next and the rows are the record of what the clock has already been through. So they
+  // go to the block, which rebuilds its own start time from them, and the plan below is left
+  // alone. Sorted here rather than trusted, since emomStartedAt wants the earliest and a query
+  // makes no promise about order.
+  if (isEmomDay()) {
+    state.emom.rows = [...rows].sort((a, b) => String(a.logged_at).localeCompare(String(b.logged_at)));
+    // Enough for the summary to count what the session holds. Nothing on this day reads an entry.
+    state.logged = state.emom.rows.map((row) => ({
+      id: row.id,
+      entry: null,
+      exerciseId: row.exercise_id,
+      setIndex: row.set_index,
+      weightKg: row.weight_kg,
+      reps: row.reps,
+      logMode: 'bodyweight_reps',
+      isWarmup: false,
+      isExtra: false,
+      previousBest: null,
+    }));
+    state.cursor = 0;
+    return;
+  }
+
   if (rows.length) {
     const replayed = replaySession(state.plan, rows, state.best);
     state.plan = replayed.plan;
@@ -1587,6 +1889,8 @@ async function main() {
     showNotice(NO_PROGRAM_YET);
     return;
   }
+
+  setEmomDay(state.day);
 
   // The same function the day picker goes through. A set on disk is a set that was done, wherever
   // in the day it sits, and both ways of arriving on a day have to put those sets back the same

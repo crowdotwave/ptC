@@ -20,7 +20,7 @@
 // is exactly the overload that fence exists to prevent. What says the window is nearly out is the
 // numeral and the track emptying, which is size and position rather than hue.
 
-import { emomAt, emomClock } from './emom.js';
+import { emomAt, emomClock, emomLength } from './emom.js';
 
 const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -52,6 +52,17 @@ export function mountEmomView(host) {
            in the two seconds they have is "not that one", and the exact count is a correction they
            make afterwards from the summary, when they are breathing again. -->
       <button type="button" class="emom__missed" data-emom-missed>Missed it</button>
+
+      <!-- Nothing starts on arrival, and that is not a nicety. A clock that began the moment the
+           screen loaded would spend the client's first window on walking to the rack and picking
+           up dumbbells, and there is no pausing an EMOM once it is going: the whole block would be
+           a minute out for the next half hour. So the clock waits for a deliberate press, and the
+           press is the biggest target on the screen because it is made with a thumb, standing
+           over the equipment, about to start moving. -->
+      <button type="button" class="emom__start" data-emom-start>
+        <span data-emom-start-label>Start the clock</span>
+        <span class="emom__startsub num" data-emom-start-sub></span>
+      </button>
     </div>`;
 
   const node = (name) => host.querySelector(`[data-emom-${name}]`);
@@ -64,7 +75,31 @@ export function mountEmomView(host) {
     fill: node('fill'),
     next: node('next'),
     missed: node('missed'),
+    start: node('start'),
+    startLabel: node('start-label'),
+    startSub: node('start-sub'),
   };
+}
+
+/**
+ * The screen before the clock is running: what the block is, and the one press that begins it.
+ *
+ * Says the whole block rather than the first station, because the decision being made here is
+ * whether to start half an hour of work, and the first lift is not that decision. The first
+ * station gets named underneath so the client knows what to be standing over.
+ */
+export function readyEmom(ui, block, resumable) {
+  ui.root.dataset.state = 'ready';
+  ui.where.textContent = emomLength(block);
+  ui.lift.textContent = block.stations[0].name;
+  ui.reps.textContent = block.stations[0].reps ? `${block.stations[0].reps} reps` : '';
+  ui.time.textContent = emomClock(block.windowMs);
+  ui.fill.style.width = '100%';
+  ui.next.textContent = block.stations.length > 1 ? `Next: ${block.stations[1].name}` : '';
+  ui.missed.hidden = true;
+  ui.start.hidden = false;
+  ui.startLabel.textContent = resumable ? 'Pick the clock back up' : 'Start the clock';
+  ui.startSub.textContent = resumable ? 'It kept running' : `${block.minutes} windows`;
 }
 
 /**
@@ -107,6 +142,7 @@ export function drawEmom(ui, block, elapsedMs, missed) {
   ui.missed.textContent = flagged ? 'Marked short' : 'Missed it';
   ui.missed.dataset.flagged = flagged ? 'true' : 'false';
   ui.missed.hidden = at.done;
+  ui.start.hidden = true;
 
   return at;
 }

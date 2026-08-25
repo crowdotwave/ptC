@@ -1287,7 +1287,8 @@ button.worknav__row:active {
 
 /* The spacer exists to push the controls into the thumb arc. With the panel open the panel is
  * what fills that space, and two things claiming it would split the screen between them. */
-.screen.is-overview .spacer {
+.screen.is-overview .spacer,
+.screen.is-emom .spacer {
   display: none;
 }
 
@@ -4341,21 +4342,23 @@ button.navlink:disabled {
   line-height: 1;
 }
 
-/* Lit, because it is the mid-set object on this screen and the lighting model says a thing read
- * at arm's length under bad light catches light on its top edge and drops a shadow from its
- * bottom one. It is not pressable, and that is the one place this screen departs from the letter
- * of the rule: the fall of light here says "this is the object", not "press this". Nothing else
- * on the screen is lit, so there is no ambiguity to resolve. */
+/* Flat, bordered, base background: the rest timer's treatment, because this is the same kind of
+ * object and the app already has an answer for it.
+ *
+ * It was a lit slab for one draft and that was wrong twice over. Lit means pressable in this app,
+ * and nothing about a countdown is pressable. And a raised face costs the palette: the "on
+ * --surface-raised, --text-primary only" rule exists because every other text token falls under
+ * the contrast floor on that surface, so cyan numerals on it measured 4.70 where the same numerals
+ * on the base measure 11.79. The clock is the one thing on this screen that has to be readable
+ * across a gym, so it gets the surface that gives it the most contrast, not the one that looks
+ * the most like furniture. */
 .emom__clock {
   position: relative;
   width: 100%;
   padding: var(--s-3) var(--s-3) calc(var(--s-3) + var(--rest-track-height));
-  border: 1px solid var(--surface-raised-rim);
+  border: 1px solid var(--surface-raised);
   border-radius: var(--radius);
-  background: linear-gradient(to bottom, var(--surface-raised), var(--surface-raised-shade));
-  box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
-    0 2px 6px 0 color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  background: var(--surface-base);
   overflow: hidden;
 }
 
@@ -4495,4 +4498,62 @@ button.navlink:disabled {
   margin: var(--s-2) 0 0;
   color: var(--text-secondary);
   font-size: var(--t-small);
+}
+
+/* The one press that begins a block. Lit and large, on the same terms as the log action: it is
+ * made with a thumb, standing over the equipment, about to start moving. It is the only thing on
+ * this screen that is pressed with any force, and after it the screen has no primary action at
+ * all, which is the point of an EMOM. */
+.emom__start {
+  width: 100%;
+  min-height: 88px;
+  padding: var(--s-3);
+  border: 1px solid var(--surface-raised-rim);
+  border-radius: var(--radius);
+  background: linear-gradient(to bottom, var(--accent-action), var(--accent-action-shade));
+  /* The base, not a text token. Orange at 7.41 against black is a light fill, so what goes on it
+   * is the dark ground, exactly as the log action does it. */
+  color: var(--surface-base);
+  font: inherit;
+  font-size: var(--t-md);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit-strong), transparent),
+    0 3px 8px 0 color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+/* Pressed drops the gradient and takes an inner shadow, so the press reads as depressed rather
+ * than merely recoloured. Same as every other lit control in the app. */
+.emom__start:active {
+  background: var(--accent-action-shade);
+  box-shadow: inset 0 2px 6px 0 color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+}
+
+.emom__startsub {
+  display: block;
+  margin-top: var(--s-1);
+  font-size: var(--t-small);
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.emom__start[hidden],
+.emom__missed[hidden] {
+  display: none;
+}
+
+/* Takes the space the steppers and the log action would have had, and centres in it. Without
+ * this the clock sits jammed against the tab bar under a third of a screen of nothing, because
+ * the spacer above is sized for a layout whose bottom half has been removed. */
+.emomhost {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+
+.emomhost[hidden] {
+  display: none;
 }

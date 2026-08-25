@@ -2,7 +2,8 @@
 // no backend. Everything here is invented. Nothing in this file ships to a real trainer.
 //
 // It produces one trainer, three clients, a shared exercise library, one program template
-// with two days, an assignment per client with a frozen snapshot, and eight weeks of session
+// with three days, one of them clock led, an assignment per client with a frozen snapshot, and
+// eight weeks of session
 // and set_log history with enough shape that a progression chart has something to draw.
 //
 // Seed rows are written with the bulk path, which skips the outbox on purpose: fake data must
@@ -15,7 +16,7 @@ import { buildSnapshot } from './snapshot.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 7;
+const SEED_VERSION = 8;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -106,7 +107,24 @@ const DAY_TWO = [
   ['4', 'face-pull', 'CABLE', '3', '12-15', '1 RIR', '60 SEC', 'Light. This is for the shoulders staying healthy.'],
 ];
 
-// The two day headers, matching the shape of a real sheet.
+// The clock-led day. Four stations, four rounds, sixteen minutes, which is short enough to sit
+// through at 1x while checking it and long enough to cross a round boundary several times.
+//
+// It exists so that ?local=1 can RUN an EMOM rather than only describe one. emom-test.html checks
+// the clock and the view against a fabricated block; this checks the whole path, the one that
+// writes rows against a real session through the real adapter. Those are different questions and
+// the second one is the one that puts sets on somebody's phone.
+//
+// Rest is deliberately blank on every row. On an EMOM the rest is whatever is left of the window,
+// and a Rest cell here would be a number nothing reads.
+const DAY_THREE = [
+  ['1', 'walking-lunge', 'DUMBELL', '4', '12', '1 MIN EMOM', '', 'Long steps. Back knee to the floor.'],
+  ['2', 'face-pull', 'CABLE', '4', '20', '1 MIN EMOM', '', 'Light and fast. Elbows high.'],
+  ['3', 'dumbbell-incline-press', 'DUMBELL', '4', '10', '1 MIN EMOM', '', 'Stop the set with two left, whatever the clock says.'],
+  ['4', 'seated-cable-row', 'CABLE', '4', '15', '1 MIN EMOM', '', 'Chest up. Pull to the ribs.'],
+];
+
+// The day headers, matching the shape of a real sheet.
 const DAY_META = [
   {
     day_type: 'STRENGTH',
@@ -125,6 +143,17 @@ const DAY_META = [
       general: ['BANDED WALKS X20', 'STANDING CALF RAISE X20'],
       specific: ['PREPARE JOINTS', 'INCREASE BODY TEMP'],
     },
+  },
+  {
+    day_type: 'CARDIO',
+    split: 'EMOM 4 ROUNDS',
+    warmup: {
+      mobility: ['ARM SWINGS X20', 'ANKLE ROCKS X10'],
+      general: ['ROW 500M EASY'],
+      specific: ['SET EVERYTHING OUT BEFORE THE CLOCK STARTS'],
+    },
+    // The clock. Four stations in the plan above, four times round, so sixteen windows.
+    emom: { rounds: 4, window_seconds: 60 },
   },
 ];
 
@@ -357,7 +386,7 @@ export async function seed(storage, { force = false } = {}) {
   );
   templates.push(template);
 
-  const trainerDays = [0, 1].map((dayIndex) =>
+  const trainerDays = [0, 1, 2].map((dayIndex) =>
     makeRecord(
       'template_days',
       {
@@ -376,7 +405,7 @@ export async function seed(storage, { force = false } = {}) {
   days.push(...trainerDays);
 
   const trainerItems = [];
-  [DAY_ONE, DAY_TWO].forEach((plan, dayIndex) => {
+  [DAY_ONE, DAY_TWO, DAY_THREE].forEach((plan, dayIndex) => {
     plan.forEach(([number, slug, adjust, sets, reps, load, rest, notes], orderIndex) => {
       // Parsed the same way a pasted spreadsheet row would be, so the seed and the importer
       // cannot drift apart.
