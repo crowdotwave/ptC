@@ -102,6 +102,17 @@ export const TABLES = {
       warmup: { type: JSONB },
       // The Comments block under each day. Coaching cues, one line each.
       comments: { type: TEXT },
+      // Every minute on the minute, or null for every other day in the app.
+      //
+      // { rounds, window_seconds }. On the DAY rather than on the items, because the thing being
+      // described is the clock, and a clock belongs to the block rather than to any one lift in
+      // it. Putting rounds on each item would let six rows disagree about how many times round
+      // the block goes, and there is no sensible reading of that disagreement.
+      //
+      // Nullable, and null is the overwhelming default: this is one day of one program. See
+      // js/emom.js, which owns what these two numbers mean and refuses a malformed pair rather
+      // than letting it reach the logging screen.
+      emom: { type: JSONB, nullable: true },
     },
   },
 

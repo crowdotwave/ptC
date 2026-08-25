@@ -57,6 +57,9 @@ import {
 } from './js/workout-view.js';
 import { liftSummaries, groupLifts, matchLifts, renderLiftPicker, SEARCH_AT } from './js/lift-picker.js';
 import { setLine, renderSessionReadout } from './js/session-readout.js';
+import {
+  emomSettings, emomBlock, emomAt, emomDue, emomStartedAt, emomClock, emomLength, emomDurationMs,
+} from './js/emom.js';
 
 const results = [];
 
@@ -1354,6 +1357,22 @@ test('a missing field and an explicit null are the same snapshot', () => {
   // What a round trip does to undefined, so treating them apart would report a phantom edit.
   ok(sameSnapshot({ template: { notes: undefined } }, { template: { notes: null } }));
   ok(sameSnapshot(null, undefined), 'and neither of them being there does not throw');
+});
+
+// The deploy that adds a nullable column is the one this protects. Every snapshot frozen before it
+// has no such key; every freeze after it carries the key as null. Marking those apart would call
+// every client on every program stale over a change that altered nobody's training.
+test('a snapshot frozen before a new nullable column is not stale because of it', () => {
+  const before = { days: [{ id: 'd1', split: 'EMOM', items: [{ id: 'i1', rest_seconds: 60 }] }] };
+  const after = { days: [{ id: 'd1', split: 'EMOM', emom: null, items: [{ id: 'i1', rest_seconds: 60 }] }] };
+  ok(sameSnapshot(before, after), 'the column arrived, the prescription did not change');
+});
+
+test('a nullable column that is actually set is a real difference', () => {
+  const off = { days: [{ id: 'd1', emom: null }] };
+  const on = { days: [{ id: 'd1', emom: { rounds: 5, window_seconds: 60 } }] };
+  ok(!sameSnapshot(off, on), 'turning a day into an EMOM changes the program');
+  ok(!sameSnapshot(on, { days: [{ id: 'd1', emom: { rounds: 8, window_seconds: 60 } }] }), 'and so does the round count');
 });
 
 // Both of these are taken from the live database rather than imagined. buildSnapshot spreads a
@@ -4562,6 +4581,199 @@ test('a draft cell carrying markup is escaped rather than rendered', () => {
   const html = renderDraft(draftOf(draftItem({ exerciseName: '<b>SQUAT</b>' })));
   ok(html.includes('&lt;b&gt;SQUAT&lt;/b&gt;'));
   ok(!html.includes('<b>SQUAT</b>'));
+});
+
+// ------------------------------------------------------------------ every minute on the minute
+//
+// The one screen where the app sets the pace. All of it is derived from elapsed time, because the
+// phone this runs on throttles a backgrounded tab and then stops calling back entirely, so
+// anything that counted ticks would drift and then stop, and a drifting EMOM silently changes the
+// workout. These tests call the functions at times, never in sequences, which is the property
+// worth pinning: the answer must not depend on how often anybody asked.
+
+const station = (name, reps) => ({ exercise_id: `e-${name}`, exercise: { name }, reps });
+const emomDay = (rounds, windowSeconds) => ({ emom: { rounds, window_seconds: windowSeconds } });
+// Emma's day: six stations, one minute each, five rounds.
+const emmaBlock = () =>
+  emomBlock(
+    emomDay(5, 60),
+    [
+      station('DB THRUSTERS', 12), station('ALT DB SNATCH', 12), station('TOE TAPS', 40),
+      station('MOUNTAIN CLIMBERS', 40), station('BICYCLE CRUNCHES', 30), station('JUMPING SQUATS', 15),
+    ],
+    (item) => item.reps,
+  );
+
+test('a day with no emom settings is not a block', () => {
+  eq(emomSettings({}), null);
+  eq(emomSettings({ emom: null }), null);
+  eq(emomSettings({ emom: { rounds: 0 } }), null, 'zero rounds is not a block');
+  eq(emomSettings({ emom: { rounds: 'five' } }), null, 'a bad field must not take the screen down');
+  eq(emomBlock({}, [station('X', 10)], (i) => i.reps), null);
+});
+
+test('a block with no stations is not a block', () => {
+  eq(emomBlock(emomDay(5, 60), [], (i) => i.reps), null, 'a clock with nothing on it is not a workout');
+});
+
+test('the window defaults to sixty seconds and a bad one does not', () => {
+  eq(emomSettings({ emom: { rounds: 3 } }).windowSeconds, 60);
+  eq(emomSettings({ emom: { rounds: 3, window_seconds: 90 } }).windowSeconds, 90);
+  eq(emomSettings({ emom: { rounds: 3, window_seconds: 0 } }).windowSeconds, 60, 'a zero window would divide by nothing');
+  eq(emomSettings({ emom: { rounds: 3, window_seconds: -5 } }).windowSeconds, 60);
+});
+
+test('Emma’s block is thirty windows and half an hour', () => {
+  const block = emmaBlock();
+  eq(block.minutes, 30, 'six stations, five rounds');
+  eq(emomDurationMs(block), 30 * 60 * 1000);
+  eq(emomLength(block), '5 rounds, 6 stations, 30 min');
+});
+
+test('the station rotates every window and the round rises with it', () => {
+  const b = emmaBlock();
+  const at = (min) => emomAt(b, min * 60 * 1000);
+
+  eq(at(0).station.name, 'DB THRUSTERS', 'minute one');
+  eq(at(0).round, 0);
+  eq(at(1).station.name, 'ALT DB SNATCH', 'minute two, the next lift, not the next set of the same one');
+  eq(at(5).station.name, 'JUMPING SQUATS', 'last station of round one');
+  // The whole point of the shape: minute seven is back to the top, one round further on.
+  eq(at(6).station.name, 'DB THRUSTERS', 'minute seven is round two, station one');
+  eq(at(6).round, 1);
+  eq(at(29).round, 4, 'the last window is round five');
+  eq(at(29).station.name, 'JUMPING SQUATS');
+});
+
+test('the clock counts down inside a window and never reads a short minute', () => {
+  const b = emmaBlock();
+  eq(emomClock(emomAt(b, 0).remainingMs), '1:00', 'a window opens reading a full minute');
+  eq(emomClock(emomAt(b, 1).remainingMs), '1:00', 'and one millisecond in, still a full minute');
+  eq(emomClock(emomAt(b, 22_000).remainingMs), '0:38');
+  eq(emomClock(emomAt(b, 59_500).remainingMs), '0:01');
+  // Across a boundary the next window opens full again rather than continuing down.
+  eq(emomClock(emomAt(b, 60_000).remainingMs), '1:00');
+  eq(emomAt(b, 60_000).stationIndex, 1);
+});
+
+test('the block ends and stays on the lift that was actually last', () => {
+  const b = emmaBlock();
+  const end = emomAt(b, 30 * 60 * 1000);
+  ok(end.done);
+  eq(end.remainingMs, 0);
+  eq(end.station.name, 'JUMPING SQUATS', 'not back at the top of the block');
+  eq(end.round, 4);
+  eq(emomAt(b, 40 * 60 * 1000).done, true, 'and long past the end it is still done');
+  eq(emomAt(b, 40 * 60 * 1000).completed, 30, 'never more windows than the block has');
+});
+
+test('a window that has started is not a window that was done', () => {
+  const b = emmaBlock();
+  eq(emomAt(b, 0).completed, 0, 'standing in minute one is not having finished it');
+  eq(emomAt(b, 59_999).completed, 0);
+  eq(emomAt(b, 60_000).completed, 1, 'it counts the moment the window closes');
+});
+
+test('a clock set backwards does not throw underneath somebody mid workout', () => {
+  const b = emmaBlock();
+  const back = emomAt(b, -5000);
+  eq(back.index, 0);
+  eq(back.completed, 0);
+  eq(emomClock(back.remainingMs), '1:00');
+});
+
+// The property the whole module exists for.
+test('what is due depends on the time, never on how often it was asked', () => {
+  const b = emmaBlock();
+  const fourMinutes = 4 * 60 * 1000;
+
+  // Asked once, four minutes in, having written nothing: all four finished windows come back.
+  const inOneGo = emomDue(b, fourMinutes, 0);
+  eq(inOneGo.length, 4, 'a locked phone comes back and writes what it missed');
+  eq(inOneGo.map((m) => m.station.name).join(', '),
+     'DB THRUSTERS, ALT DB SNATCH, TOE TAPS, MOUNTAIN CLIMBERS');
+
+  // Asked every second from the start, writing as it goes: the same four windows, once each.
+  const seen = [];
+  let written = 0;
+  for (let ms = 0; ms <= fourMinutes; ms += 1000) {
+    for (const minute of emomDue(b, ms, written)) { seen.push(minute.index); written += 1; }
+  }
+  eq(seen.join(','), '0,1,2,3', 'no window written twice, none skipped');
+  eq(written, inOneGo.length, 'and it lands in the same place as the single call');
+});
+
+test('nothing is due again once it is written', () => {
+  const b = emmaBlock();
+  eq(emomDue(b, 4 * 60 * 1000, 4).length, 0, 'four written, four elapsed, nothing owed');
+  eq(emomDue(b, 4 * 60 * 1000, 9).length, 0, 'and more written than elapsed does not go backwards');
+});
+
+test('every window of the block is due exactly once across the whole run', () => {
+  const b = emmaBlock();
+  let written = 0;
+  // Deliberately ragged: 7 second steps land inside windows and cross boundaries unevenly. The
+  // bound clears the end by a whole window, because a 7 second step lands at 29:59 and the
+  // thirtieth window has not closed there.
+  for (let ms = 0; ms <= emomDurationMs(b) + b.windowMs; ms += 7000) written += emomDue(b, ms, written).length;
+  eq(written, 30, 'thirty windows, thirty rows, whatever the sampling');
+});
+
+test('the start time is rebuilt from the rows, so a reload does not restart the clock', () => {
+  const b = emmaBlock();
+  const begun = Date.parse('2026-08-25T18:00:00.000Z');
+  // Minute zero is written when the first window ENDS, so the first row is one window in.
+  const rows = [
+    { logged_at: '2026-08-25T18:01:00.000Z' },
+    { logged_at: '2026-08-25T18:02:00.000Z' },
+    { logged_at: '2026-08-25T18:03:00.000Z' },
+  ];
+  eq(emomStartedAt(b, rows), begun);
+  eq(emomStartedAt(b, [...rows].reverse()), begun, 'the earliest row decides, not the first in the array');
+});
+
+test('the start time reads a synced timestamp as well as a local one', () => {
+  const b = emmaBlock();
+  // Postgres renders a space where toISOString writes a T, and six fractional digits where it
+  // writes three. Both reach this module. The answer is still one window before the row.
+  eq(
+    emomStartedAt(b, [{ logged_at: '2026-08-25 18:01:00.048006+00' }]),
+    Date.parse('2026-08-25T18:01:00.048Z') - 60_000,
+  );
+  eq(emomStartedAt(b, []), null, 'nothing written yet, so the caller holds the start');
+  eq(emomStartedAt(b, [{ logged_at: 'not a time' }]), null, 'and a junk row does not become the epoch');
+});
+
+test('a rebuilt start lands the block back where it was', () => {
+  const b = emmaBlock();
+  const begun = Date.parse('2026-08-25T18:00:00.000Z');
+  const rows = [];
+  for (let n = 1; n <= 8; n += 1) rows.push({ logged_at: new Date(begun + n * 60_000).toISOString() });
+
+  // Eight windows written, and it is now eight and a half minutes in.
+  const started = emomStartedAt(b, rows);
+  const now = begun + 8.5 * 60_000;
+  const where = emomAt(b, now - started);
+  eq(where.index, 8, 'minute nine, which is round two station three');
+  eq(where.round, 1);
+  eq(where.station.name, 'TOE TAPS');
+  eq(emomDue(b, now - started, rows.length).length, 0, 'and nothing is owed twice after the reload');
+});
+
+test('a window longer than a minute still reads and rotates correctly', () => {
+  const b = emomBlock(emomDay(3, 90), [station('A', 5), station('B', 5)], (i) => i.reps);
+  eq(b.minutes, 6);
+  eq(emomLength(b), '3 rounds, 2 stations, 9 min');
+  eq(emomClock(emomAt(b, 0).remainingMs), '1:30');
+  eq(emomAt(b, 90_000).station.name, 'B');
+  eq(emomAt(b, 180_000).round, 1, 'two stations in, so back to the top');
+});
+
+test('a window that is not a whole number of minutes says its seconds', () => {
+  const b = emomBlock(emomDay(4, 45), [station('A', 5), station('B', 5)], (i) => i.reps);
+  eq(emomLength(b), '4 rounds, 2 stations, 6 min');
+  const odd = emomBlock(emomDay(3, 50), [station('A', 5)], (i) => i.reps);
+  eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
 });
 
 // ------------------------------------------------------------------ report

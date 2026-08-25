@@ -1,3 +1,5 @@
+import { instantOf } from './dates.js';
+
 // The frozen program: how one is built, and how one is read.
 //
 // `assignments.snapshot` is a copy of a whole program taken at assign time. It exists so that
@@ -67,6 +69,10 @@ export function buildSnapshot({ template, days, items, exercises }) {
         split: day.split,
         warmup: day.warmup,
         comments: day.comments,
+        // The clock, frozen with everything else. A client's phone reads their assignment and not
+        // the template, so an EMOM day whose rounds live only on the live row is a day that runs
+        // as an ordinary list of lifts on the one screen that matters.
+        emom: day.emom ?? null,
         items: items
           .filter((item) => item.day_id === day.id)
           .sort((a, b) => a.order_index - b.order_index)
@@ -121,6 +127,15 @@ export function buildSnapshot({ template, days, items, exercises }) {
  *
  * Neither is part of what a client was told to do. A rest time is; when the row was last saved is
  * not, and a screen that says "on an older version" has to mean the prescription.
+ *
+ * A key that is absent and a key that is null are the same key, and that one is load bearing every
+ * time this app grows a column. buildSnapshot spreads a row, so the day a nullable field is added
+ * every freeze taken after it carries `field: null` while every snapshot frozen before it has no
+ * such key. Treating those apart would mark every client on every program stale on the deploy that
+ * added the column, which is a mass false alarm arriving from a change that altered nobody's
+ * training. It is also what fromWire already decides: a column the reader cannot see comes back
+ * absent and is restored as null, on the grounds that they are all nullable and null is the true
+ * answer rather than the convenient one. Same rule, same reason.
  */
 const BOOKKEEPING = new Set(['created_at', 'updated_at']);
 
@@ -133,7 +148,7 @@ function canonical(value) {
   if (typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   return `{${Object.keys(value)
-    .filter((key) => !BOOKKEEPING.has(key))
+    .filter((key) => !BOOKKEEPING.has(key) && value[key] !== null && value[key] !== undefined)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
     .join(',')}}`;
@@ -178,30 +193,17 @@ export async function currentAssignment(storage, clientId) {
  * week from the client's chart, so ordering on updated_at would let marking a deload on an old
  * block promote it over the block the client is actually doing.
  *
- * Parsing is careful because created_at reaches this module in two different formats that do not
- * sort against each other. A row written on this device carries new Date().toISOString(),
- * '2026-08-05T06:11:58.048Z'. A row that has come back from the server carries what Postgres
- * renders, '2026-08-05 06:11:58.048006+00', which fromWire passes through untouched. A space is
- * 0x20 and a T is 0x54, so comparing them as text puts every synced row before every local one
- * whatever the clock says, which is the exact failure this tie break exists to fix.
+ * Parsing is careful because created_at reaches this module in two spellings that do not sort
+ * against each other, and js/dates.js `instantOf` owns the details and the reasoning. It used to
+ * live here privately; js/emom.js then needed exactly the same parse to rebuild a block's start
+ * time from its rows, and two copies of a parser this fiddly is a bug waiting for whichever copy
+ * gets fixed first.
  *
- * The normalising is measured rather than assumed, and it is not the obvious version: Date.parse
- * accepts the raw Postgres string through a lenient path, and REJECTS it once the space becomes a
- * T, because six fractional digits and a bare '+00' offset are both outside the ISO grammar the
- * strict path uses. So the fraction is cut to three and the offset given its minutes, and the raw
- * string stays as the fallback for anything this does not recognise.
+ * Zero for anything unparseable, which keeps a junk row at the bottom of the ordering rather than
+ * letting it win a tie break.
  */
 function assignedAt(assignment) {
-  const text = String(assignment?.created_at ?? '').trim();
-  if (!text) return 0;
-  const iso = text
-    .replace(' ', 'T')
-    .replace(/(\.\d{3})\d+/, '$1')
-    .replace(/([+-]\d{2})$/, '$1:00');
-  const at = Date.parse(iso);
-  if (!Number.isNaN(at)) return at;
-  const raw = Date.parse(text);
-  return Number.isNaN(raw) ? 0 : raw;
+  return instantOf(assignment?.created_at) ?? 0;
 }
 
 /**

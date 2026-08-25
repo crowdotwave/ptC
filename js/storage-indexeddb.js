@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 10;
+export const DB_VERSION = 11;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -230,6 +230,17 @@ const MIGRATIONS = [
       rewriteRows(tx, 'sessions', (row) =>
         row.discarded_at === undefined ? { ...row, discarded_at: null } : row,
       );
+    },
+  },
+  {
+    version: 11,
+    describe: 'add template_days.emom so a day can be run against a clock',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Null is not an EMOM, and every day already on disk is an ordinary one. Backfilled rather
+      // than left absent for the same reason discarded_at was: the validator throws on a missing
+      // column, so the next write of an old day row, which is what any builder edit is, would fail.
+      rewriteRows(tx, 'template_days', (row) => (row.emom === undefined ? { ...row, emom: null } : row));
     },
   },
 ];

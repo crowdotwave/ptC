@@ -47,6 +47,42 @@ export function monthKey(day) {
 }
 
 /**
+ * A stored timestamp as an instant, in either of the two spellings that reach this app.
+ *
+ * A row written on this device carries `new Date().toISOString()`, '2026-08-25T18:01:00.048Z'. The
+ * same row pulled back from the server carries what Postgres renders, '2026-08-25 18:01:00.048006+00',
+ * because js/remote.js `fromWire` passes timestamps through untouched. Both spell the same instant
+ * and neither sorts against the other as text: a space is 0x20 and a T is 0x54, so comparing them
+ * raw puts every synced row before every local one whatever the clock says.
+ *
+ * The normalising is measured rather than assumed, and it is not the obvious version. `Date.parse`
+ * accepts the raw Postgres string through a lenient path and REJECTS it once the space becomes a T,
+ * because six fractional digits and a bare '+00' offset are both outside the ISO grammar the strict
+ * path uses. So the fraction is cut to three and the offset given its minutes, and the raw string
+ * stays as the fallback for anything this does not recognise.
+ *
+ * Returns null rather than NaN for anything unparseable, so a caller cannot accidentally arrive at
+ * the epoch and treat a junk row as the oldest thing in the database.
+ *
+ * This lived privately inside js/snapshot.js, found the second caller it was always going to find,
+ * and a second copy of a parser this fiddly is a bug waiting for whichever copy gets fixed first.
+ */
+export function instantOf(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+
+  const iso = text
+    .replace(' ', 'T')
+    .replace(/(\.\d{3})\d+/, '$1')
+    .replace(/([+-]\d{2})$/, '$1:00');
+
+  const at = Date.parse(iso);
+  if (!Number.isNaN(at)) return at;
+  const raw = Date.parse(text);
+  return Number.isNaN(raw) ? null : raw;
+}
+
+/**
  * A local date column ('YYYY-MM-DD') as a Date at local midnight.
  *
  * The T00:00:00 is the whole point: without it Date reads the string as UTC. weekIndexOf in
