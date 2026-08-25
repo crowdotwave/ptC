@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>ptC EMOM rehearsal</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="dev.css" />
+  </head>
+  <body class="dev">
+    <main class="dev__shell">
+      <header>
+        <h1>EMOM rehearsal</h1>
+        <p class="dev__note">
+          The real screen, driven by a clock this page controls. This is the only way to check a
+          clock-led day without standing in a gym for half an hour: the failure modes are all
+          about time passing, so tapping through it proves nothing. Run it at 60x and a thirty
+          minute block takes thirty seconds.
+          <br />
+          Everything below comes from <code>js/emom.js</code> and <code>js/emom-view.js</code>,
+          the same two modules the logging screen mounts. Nothing here reimplements the view, so a
+          rehearsal that looks right is the real screen looking right.
+          <br />
+          Nothing is written. No storage, no adapter, no session. The rows column shows what the
+          logging screen WOULD have appended at each window boundary.
+        </p>
+      </header>
+
+      <div class="dev__row">
+        <h2>Speed</h2>
+        <span class="dev__status" id="speed-state" data-state="ok">60x</span>
+      </div>
+      <div class="rehearse__controls">
+        <button type="button" class="button-secondary" data-speed="1">1x, real time</button>
+        <button type="button" class="button-secondary" data-speed="10">10x</button>
+        <button type="button" class="button-secondary" data-speed="60">60x</button>
+        <button type="button" class="button-secondary" data-speed="240">240x</button>
+        <button type="button" class="button-secondary" id="play">Pause</button>
+        <button type="button" class="button-secondary" id="restart">Restart</button>
+      </div>
+
+      <div class="dev__row">
+        <h2>Block</h2>
+        <span class="dev__status" id="block-state" data-state="ok"></span>
+      </div>
+      <div class="rehearse__controls">
+        <label class="emomset__field">
+          <span class="field__label">Rounds</span>
+          <input class="field__input" id="rounds" type="number" min="1" step="1" value="5" />
+        </label>
+        <label class="emomset__field">
+          <span class="field__label">Window</span>
+          <input class="field__input" id="window" type="number" min="5" step="5" value="60" />
+        </label>
+        <label class="emomset__field">
+          <span class="field__label">Stations</span>
+          <input class="field__input" id="stations" type="number" min="1" max="6" step="1" value="6" />
+        </label>
+      </div>
+
+      <div class="rehearse">
+        <!-- Held to a phone's width for the same reason the builder's preview is: this is read on
+             the narrowest screen the app supports, and a rehearsal that filled a desktop would
+             hide every wrap that matters. -->
+        <div class="rehearse__phone" id="screen"></div>
+
+        <div class="rehearse__side">
+          <h2>Rows the screen would write</h2>
+          <p class="dev__note" id="written-count">0 of 30</p>
+          <ol class="rehearse__rows num" id="written"></ol>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="emom-test.js"></script>
+  </body>
+</html>

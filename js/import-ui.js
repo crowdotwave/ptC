@@ -252,6 +252,9 @@ export async function createProgram(draft, { storage, trainerId, resolveExercise
       split: day.split,
       warmup: day.warmup,
       comments: day.comments.join('\n'),
+      // A spreadsheet has no way to say "run this against a clock", so an import never produces
+      // one. The trainer turns it on in the builder, on the day that needs it.
+      emom: null,
     });
     await storage.put('template_days', dayRecord);
 

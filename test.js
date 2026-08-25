@@ -60,6 +60,7 @@ import { setLine, renderSessionReadout } from './js/session-readout.js';
 import {
   emomSettings, emomBlock, emomAt, emomDue, emomStartedAt, emomClock, emomLength, emomDurationMs,
 } from './js/emom.js';
+import { mountEmomView, drawEmom, emomSummary } from './js/emom-view.js';
 
 const results = [];
 
@@ -4774,6 +4775,99 @@ test('a window that is not a whole number of minutes says its seconds', () => {
   eq(emomLength(b), '4 rounds, 2 stations, 6 min');
   const odd = emomBlock(emomDay(3, 50), [station('A', 5)], (i) => i.reps);
   eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
+});
+
+// ------------------------------------------------------------ what the EMOM screen says
+
+const emomUi = () => {
+  const host = document.createElement('div');
+  return { ui: mountEmomView(host), host };
+};
+
+test('the screen names the lift, the reps, the clock and what is coming', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 22_000, new Set());
+
+  eq(ui.lift.textContent, 'DB THRUSTERS');
+  eq(ui.reps.textContent, '12 reps');
+  eq(ui.time.textContent, '0:38');
+  eq(ui.next.textContent, 'Next: ALT DB SNATCH', 'so the last seconds are spent moving, not reading');
+  ok(ui.where.textContent.includes('Round 1 of 5'));
+  ok(ui.where.textContent.includes('Minute 1 of 30'));
+});
+
+test('the position counts the way a person counts', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 6 * 60_000, new Set());
+  ok(ui.where.textContent.includes('Round 2 of 5'), 'minute seven is round two');
+  ok(ui.where.textContent.includes('Minute 7 of 30'));
+  eq(ui.lift.textContent, 'DB THRUSTERS', 'back to the top of the block');
+});
+
+test('the track empties as the window runs out', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 0, new Set());
+  eq(ui.fill.style.width, '100%');
+  drawEmom(ui, b, 30_000, new Set());
+  eq(ui.fill.style.width, '50%');
+  drawEmom(ui, b, 30 * 60_000, new Set());
+  eq(ui.fill.style.width, '0%');
+});
+
+test('the last window says so rather than pointing at a station nobody is doing', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 29 * 60_000, new Set());
+  eq(ui.next.textContent, 'Last one');
+});
+
+test('a finished block stops offering the control and says it is done', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 30 * 60_000, new Set());
+  eq(ui.root.dataset.state, 'done');
+  eq(ui.time.textContent, 'Done');
+  eq(ui.where.textContent, '30 of 30 done');
+  ok(ui.missed.hidden, 'nothing left to miss');
+  eq(ui.next.textContent, '');
+});
+
+test('a window the client flagged keeps saying so while it is on screen', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  drawEmom(ui, b, 10_000, new Set());
+  eq(ui.missed.textContent, 'Missed it');
+  drawEmom(ui, b, 20_000, new Set([0]));
+  eq(ui.missed.textContent, 'Marked short', 'the flag does not flicker back mid window');
+  drawEmom(ui, b, 70_000, new Set([0]));
+  eq(ui.missed.textContent, 'Missed it', 'and the next window starts clean');
+});
+
+test('the summary counts windows kept and grades nothing', () => {
+  const b = emmaBlock();
+  eq(emomSummary(b, 0), '5 rounds, all 30 windows');
+  eq(emomSummary(b, 4), '5 rounds, 26 of 30 windows');
+  // No percentage, no "you missed", no colour word. A shortfall is a count, per the no-guilt rule.
+  ok(!/miss|fail|only|%/i.test(emomSummary(b, 4)));
+});
+
+test('a station with no rep count does not print an empty reps line', () => {
+  const b = emomBlock(emomDay(2, 60), [station('ROW', 0)], (i) => i.reps);
+  const { ui } = emomUi();
+  drawEmom(ui, b, 0, new Set());
+  eq(ui.reps.textContent, '');
+});
+
+test('a lift name carrying markup is escaped rather than rendered', () => {
+  // Trainers type these, and an importer takes them from somebody else's spreadsheet.
+  const b = emomBlock(emomDay(1, 60), [station('<b>SQUAT</b>', 5)], (i) => i.reps);
+  const { ui, host } = emomUi();
+  drawEmom(ui, b, 0, new Set());
+  eq(ui.lift.textContent, '<b>SQUAT</b>');
+  ok(!host.querySelector('b'), 'set as text, so markup in a name cannot reach the DOM');
 });
 
 // ------------------------------------------------------------------ report

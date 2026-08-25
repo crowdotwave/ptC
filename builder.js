@@ -21,6 +21,7 @@ import { topSet } from './js/history.js';
 import { loadSessions } from './js/session.js';
 import { weekIndexOf } from './js/progression.js';
 import { isoDate } from './js/dates.js';
+import { emomSettings, emomBlock, emomLength, DEFAULT_WINDOW_SECONDS } from './js/emom.js';
 import { loadUnit, mountUnitSetting, onUnitChange, viewerName } from './js/units.js';
 import { readFile, renderDraft, setMode, setField, createProgram } from './js/import-ui.js';
 
@@ -865,6 +866,56 @@ function renderDays() {
   el('days').innerHTML = state.days.map(renderDay).join('');
 }
 
+/**
+ * Turning a day into a clock, and reading back what that clock will do.
+ *
+ * Two numbers and a checkbox, which is the whole of Clay's ask: a minute timer that loops for the
+ * desired number of times. Off by default and off on every other day in the app, because an EMOM
+ * is one day of one program and a control that implies otherwise is a control in the way.
+ *
+ * The length line is the point of the readout rather than decoration. Rounds alone does not tell a
+ * trainer what they just built: six stations at five rounds is half an hour, and half an hour is
+ * the fact that says whether they meant five. It counts the exercises in the day as they stand, so
+ * adding a lift to an EMOM day visibly makes the block longer.
+ */
+function renderEmomControl(day, items) {
+  const settings = emomSettings(day);
+  const on = Boolean(settings);
+  const rounds = settings?.rounds ?? 5;
+  const window = settings?.windowSeconds ?? DEFAULT_WINDOW_SECONDS;
+
+  // Built from the day as it stands, so this is the same block js/emom.js hands the logging
+  // screen rather than a second opinion about it.
+  const block = on ? emomBlock({ emom: { rounds, window_seconds: window } }, items, () => 0) : null;
+  const length = block ? emomLength(block) : '';
+
+  return `
+    <div class="emomset" data-emom-day="${day.id}">
+      <label class="emomset__on">
+        <input type="checkbox" data-emom="on"${on ? ' checked' : ''} />
+        <span>Every minute on the minute</span>
+      </label>
+      <div class="emomset__fields"${on ? '' : ' hidden'}>
+        <label class="emomset__field">
+          <span class="field__label">Rounds</span>
+          <input class="field__input" data-emom="rounds" type="number" inputmode="numeric"
+                 min="1" step="1" value="${rounds}" aria-label="Rounds" />
+        </label>
+        <label class="emomset__field">
+          <span class="field__label">Window</span>
+          <input class="field__input" data-emom="window" type="number" inputmode="numeric"
+                 min="5" step="5" value="${window}" aria-label="Window in seconds" />
+        </label>
+        <p class="emomset__length num">${esc(length)}</p>
+      </div>
+      <p class="emomset__note">
+        The clock runs on its own. Each exercise below owns one window in turn, and the block
+        repeats for the rounds you set. Whatever is left of a window after the reps are done is
+        the rest, so the Rest column is not read on this day.
+      </p>
+    </div>`;
+}
+
 function renderDay(day) {
   const items = state.items.get(day.id) ?? [];
   const warmup = day.warmup || { mobility: [], general: [], specific: [] };
@@ -880,6 +931,8 @@ function renderDay(day) {
       <button type="button" class="button-secondary" data-act="day-down">Down</button>
       <button type="button" class="button-secondary" data-act="day-delete">Delete day</button>
     </div>
+
+    ${renderEmomControl(day, items)}
 
     <div class="warmup">
       <!-- Labelled from the same list the client's view reads them under, so a column cannot be
@@ -990,6 +1043,35 @@ function renderRow(item) {
 }
 
 // ------------------------------------------------------------------ writes
+
+/**
+ * Reads the three EMOM controls off the day and writes them as one object.
+ *
+ * All three together rather than one field per event, because they are one setting: rounds without
+ * a window is not a clock, and a half written pair is what js/emom.js would then have to refuse.
+ *
+ * Only the readout is redrawn, never the whole day. Rebuilding the table would throw the caret to
+ * the end of whichever number is being typed, which is the same reason the import review screen
+ * refreshes only its derived cells. Unchecking keeps the numbers on screen and writes null: the
+ * trainer who turns it off and straight back on gets what they had rather than the defaults.
+ */
+async function saveEmom(dayId, dayEl) {
+  const on = dayEl.querySelector('[data-emom="on"]')?.checked;
+  const rounds = Math.max(1, Math.round(Number(dayEl.querySelector('[data-emom="rounds"]')?.value) || 1));
+  const window = Math.max(5, Math.round(Number(dayEl.querySelector('[data-emom="window"]')?.value) || DEFAULT_WINDOW_SECONDS));
+
+  const fields = dayEl.querySelector('.emomset__fields');
+  if (fields) fields.hidden = !on;
+
+  await saveDay(dayId, { emom: on ? { rounds, window_seconds: window } : null });
+
+  const length = dayEl.querySelector('.emomset__length');
+  if (length) {
+    const items = state.items.get(dayId) ?? [];
+    const block = on ? emomBlock({ emom: { rounds, window_seconds: window } }, items, () => 0) : null;
+    length.textContent = block ? emomLength(block) : '';
+  }
+}
 
 async function saveDay(dayId, patch) {
   const day = state.days.find((d) => d.id === dayId);
@@ -1159,6 +1241,9 @@ async function addDay() {
     split: null,
     warmup: { mobility: [], general: [], specific: [] },
     comments: '',
+    // An ordinary day, which is what a new one is. Written rather than left absent because the
+    // validator throws on a missing column.
+    emom: null,
   });
   await state.storage.put('template_days', day);
   state.days.push(day);
@@ -1377,6 +1462,8 @@ function wire() {
     const dayEl = event.target.closest('[data-day]');
     if (!dayEl) return;
     const dayId = dayEl.dataset.day;
+
+    if (event.target.dataset.emom) return saveEmom(dayId, dayEl);
 
     const col = event.target.dataset.col;
     const row = event.target.closest('[data-item]');

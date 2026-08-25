@@ -151,3 +151,66 @@ ul.dev__log {
   color: var(--accent-action);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------- the EMOM rehearsal
+ *
+ * Dev chrome only. The screen under test is styled entirely by styles.css, so nothing in here may
+ * touch a .emom rule: a rehearsal that restyled the thing it is rehearsing would be checking a
+ * screen nobody ships. */
+
+.rehearse {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  align-items: flex-start;
+  margin-top: var(--s-4);
+}
+
+/* A phone's width, for the reason the builder's preview frame gives: this is read on the
+ * narrowest screen the app supports, and a rehearsal filling a desktop hides every wrap. */
+.rehearse__phone {
+  flex: 0 0 390px;
+  max-width: 100%;
+  padding: var(--s-4);
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+}
+
+.rehearse__side {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.rehearse__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.rehearse__rows {
+  max-height: 26rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--s-2);
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--radius);
+  list-style: none;
+  font-size: var(--t-small);
+}
+
+.rehearse__row {
+  padding: 2px 0;
+  color: var(--text-secondary);
+  white-space: pre;
+}
+
+/* A window the client flagged. Dimmed rather than reddened: this is a dev readout, and the
+ * no-guilt rule is about the client's screen, but there is no reason to teach the eye a colour
+ * here that the real screen would never use. */
+.rehearse__row--short {
+  color: var(--muted);
+  font-style: italic;
+}

@@ -4289,3 +4289,210 @@ button.navlink:disabled {
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------- every minute on the minute
+ *
+ * The clock-led day. The only screen in the app where the app sets the pace, so it is also the
+ * only one whose largest element is a countdown rather than a load: the number the client is
+ * racing is the number that has to be readable from the floor, mid burpee, at arm's length.
+ *
+ * --t-xl for the clock, which is the size the log action's own numerals get. That is deliberate
+ * and it is the whole hierarchy: on an ordinary day the biggest thing is what you are lifting,
+ * and here it is how long you have left.
+ *
+ * NO GREEN ANYWHERE IN HERE. --done marks a finished session in the three places it is fenced to,
+ * and "you are keeping up" would be a fourth meaning arriving on the one screen most tempted to
+ * ask for it. What says a window is nearly out is the numeral falling and the track emptying,
+ * which is position and size. Cyan is correct here for the same reason it is correct on the rest
+ * timer: this is time, and time is the data axis. */
+.emom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  text-align: center;
+}
+
+/* Round and minute. Chrome, and the quietest thing on the screen: it is reassurance about where
+ * you are, not an instruction, and it must never compete with the lift name above the clock. */
+.emom__where {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.emom__lift {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* The rep count is the instruction, so it outranks the lift name in size. Somebody who has done
+ * this block twice already knows which lift is third; what they are checking is whether it is
+ * twelve or forty. */
+.emom__reps {
+  margin: 0;
+  color: var(--accent-action);
+  font-size: var(--t-md);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Lit, because it is the mid-set object on this screen and the lighting model says a thing read
+ * at arm's length under bad light catches light on its top edge and drops a shadow from its
+ * bottom one. It is not pressable, and that is the one place this screen departs from the letter
+ * of the rule: the fall of light here says "this is the object", not "press this". Nothing else
+ * on the screen is lit, so there is no ambiguity to resolve. */
+.emom__clock {
+  position: relative;
+  width: 100%;
+  padding: var(--s-3) var(--s-3) calc(var(--s-3) + var(--rest-track-height));
+  border: 1px solid var(--surface-raised-rim);
+  border-radius: var(--radius);
+  background: linear-gradient(to bottom, var(--surface-raised), var(--surface-raised-shade));
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    0 2px 6px 0 color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent);
+  overflow: hidden;
+}
+
+.emom__time {
+  display: block;
+  color: var(--accent-data);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tabular numerals above are not cosmetic. A proportional 1 is narrower than a 0, so 1:00 ticking
+ * to 0:59 would shift the whole numeral sideways every second for half an hour. */
+
+.emom__track {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: var(--rest-track-height);
+  background: var(--surface-raised-shade);
+}
+
+.emom__fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent-data);
+  /* Glow site three, legal on the same terms as the rest timer's: the track sits below the
+   * numerals and never behind them. */
+  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+  transition: width 0.25s linear;
+}
+
+/* No transition across a window boundary. The fill goes from empty back to full in one frame, and
+ * easing that would draw a quarter second of the track filling backwards, which reads as the
+ * clock running the wrong way at the exact moment the client needs to know it restarted. */
+.emom[data-state='done'] .emom__fill,
+.emom__fill[data-jump='true'] {
+  transition: none;
+}
+
+.emom__next {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* Chrome, flat, and the only control on the screen while the block runs. Sized to its label with
+ * the 44px target kept by a transparent ::after, same as every other chrome control. */
+.emom__missed {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: var(--s-2) var(--s-4);
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--radius);
+  background: var(--chrome-face);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--t-small);
+  cursor: pointer;
+}
+
+.emom__missed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  min-height: var(--tap);
+  transform: translateY(-50%);
+}
+
+/* Filled means chosen, which is the app's one selection signal and the reason this is not a
+ * colour change. A flagged window reads as marked by having a face where the others have none. */
+.emom__missed[data-flagged='true'] {
+  background: var(--surface-raised);
+  border-color: var(--surface-raised-rim);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.emom__missed:active {
+  background: var(--chrome-face-press);
+}
+
+/* ---------------------------------------------------------------- the builder's clock control */
+
+.emomset {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-3);
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--radius);
+}
+
+.emomset__on {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  cursor: pointer;
+}
+
+.emomset__fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+
+.emomset__fields[hidden] {
+  display: none;
+}
+
+.emomset__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  width: 7rem;
+}
+
+/* What the two numbers add up to, which is the fact a trainer is actually checking. */
+.emomset__length {
+  margin: 0 0 var(--s-2);
+  color: var(--accent-data);
+  font-size: var(--t-small);
+  font-weight: 650;
+}
+
+.emomset__note {
+  margin: var(--s-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
