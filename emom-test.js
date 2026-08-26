@@ -31,7 +31,14 @@ const STATIONS = [
 const el = (id) => document.getElementById(id);
 
 const state = {
-  speed: 60,
+  // Ten, not sixty, and this is a bug fix rather than a preference. A window at 60x lasts one
+  // real second, so the one control on this page could be pressed and its answer was gone before
+  // anybody saw it: the flag landed on window 0, the clock rolled to window 2, and the button read
+  // "Missed it" again. It looked exactly like a dead button, which is what it was reported as. At
+  // 10x a window is six seconds, which is long enough to press something and watch what it did,
+  // and a thirty minute block still runs in three minutes. 60x and 240x are still a button away
+  // for watching the clock itself, which is what they are for.
+  speed: 10,
   running: true,
   // Elapsed in BLOCK time, not wall time. Advanced by the wall clock delta times the speed, so
   // changing speed mid run does not teleport the block: it changes the rate from here on.
@@ -100,9 +107,16 @@ function paint() {
     el('written').scrollTop = el('written').scrollHeight;
   }
 
+  // The count of flagged windows lives HERE and not on the screen under test, and the line is
+  // worth drawing. This is a dev readout, so it can say things the client's screen may not: the
+  // no-guilt rule bars a running tally of what somebody missed from the app itself, and adding one
+  // to js/emom-view.js to make this page feel responsive would be letting the test change the
+  // thing it is testing. What it fixes is real though. Above 10x the button's own answer is gone
+  // before it can be read, so without this there is nowhere to see that a press did anything.
+  const short = state.missed.size ? `, ${state.missed.size} marked short` : '';
   el('written-count').textContent = at.done
     ? `${state.written} of ${state.block.minutes}. ${emomSummary(state.block, state.missed.size)}`
-    : `${state.written} of ${state.block.minutes}`;
+    : `${state.written} of ${state.block.minutes}${short}`;
 }
 
 function frame(now) {
