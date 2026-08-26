@@ -58,9 +58,10 @@ import {
 import { liftSummaries, groupLifts, matchLifts, renderLiftPicker, SEARCH_AT } from './js/lift-picker.js';
 import { setLine, renderSessionReadout } from './js/session-readout.js';
 import {
-  emomSettings, emomBlock, emomAt, emomDue, emomStartedAt, emomClock, emomLength, emomDurationMs,
+  emomSettings, emomBlock, emomClock, emomLength, emomDurationMs, emomMinuteAt,
+  emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
 } from './js/emom.js';
-import { mountEmomView, drawEmom, emomSummary } from './js/emom-view.js';
+import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 
 const results = [];
 
@@ -4584,13 +4585,13 @@ test('a draft cell carrying markup is escaped rather than rendered', () => {
   ok(!html.includes('<b>SQUAT</b>'));
 });
 
+
 // ------------------------------------------------------------------ every minute on the minute
 //
-// The one screen where the app sets the pace. All of it is derived from elapsed time, because the
-// phone this runs on throttles a backgrounded tab and then stops calling back entirely, so
-// anything that counted ticks would drift and then stop, and a drifting EMOM silently changes the
-// workout. These tests call the functions at times, never in sequences, which is the property
-// worth pinning: the answer must not depend on how often anybody asked.
+// The one screen where the app sets the pace. The model is a cursor rather than a division of
+// elapsed time, because a window has to be able to be longer than its neighbours once somebody has
+// added a minute to it, and a uniform grid cannot hold that. What these pin is the property the
+// module exists for: the answer depends on the time, never on how often anybody asked.
 
 const station = (name, reps) => ({ exercise_id: `e-${name}`, exercise: { name }, reps });
 const emomDay = (rounds, windowSeconds) => ({ emom: { rounds, window_seconds: windowSeconds } });
@@ -4605,22 +4606,33 @@ const emmaBlock = () =>
     (item) => item.reps,
   );
 
+const T0 = Date.parse('2026-08-26T18:00:00.000Z');
+const min = (n) => T0 + n * 60_000;
+
+/** Runs a block from its start to `now`, in steps, the way a screen ticking would. */
+function runTo(block, now, stepMs = 1000, cursor = emomStart(block, T0)) {
+  const written = [];
+  for (let t = T0; t <= now; t += stepMs) {
+    const moved = emomAdvance(block, cursor, t);
+    cursor = moved.cursor;
+    written.push(...moved.due);
+  }
+  return { cursor, written };
+}
+
 test('a day with no emom settings is not a block', () => {
   eq(emomSettings({}), null);
   eq(emomSettings({ emom: null }), null);
   eq(emomSettings({ emom: { rounds: 0 } }), null, 'zero rounds is not a block');
   eq(emomSettings({ emom: { rounds: 'five' } }), null, 'a bad field must not take the screen down');
   eq(emomBlock({}, [station('X', 10)], (i) => i.reps), null);
-});
-
-test('a block with no stations is not a block', () => {
   eq(emomBlock(emomDay(5, 60), [], (i) => i.reps), null, 'a clock with nothing on it is not a workout');
 });
 
 test('the window defaults to sixty seconds and a bad one does not', () => {
   eq(emomSettings({ emom: { rounds: 3 } }).windowSeconds, 60);
   eq(emomSettings({ emom: { rounds: 3, window_seconds: 90 } }).windowSeconds, 90);
-  eq(emomSettings({ emom: { rounds: 3, window_seconds: 0 } }).windowSeconds, 60, 'a zero window would divide by nothing');
+  eq(emomSettings({ emom: { rounds: 3, window_seconds: 0 } }).windowSeconds, 60, 'a zero window has no length');
   eq(emomSettings({ emom: { rounds: 3, window_seconds: -5 } }).windowSeconds, 60);
 });
 
@@ -4633,168 +4645,235 @@ test('Emma’s block is thirty windows and half an hour', () => {
 
 test('the station rotates every window and the round rises with it', () => {
   const b = emmaBlock();
-  const at = (min) => emomAt(b, min * 60 * 1000);
-
-  eq(at(0).station.name, 'DB THRUSTERS', 'minute one');
-  eq(at(0).round, 0);
-  eq(at(1).station.name, 'ALT DB SNATCH', 'minute two, the next lift, not the next set of the same one');
-  eq(at(5).station.name, 'JUMPING SQUATS', 'last station of round one');
-  // The whole point of the shape: minute seven is back to the top, one round further on.
-  eq(at(6).station.name, 'DB THRUSTERS', 'minute seven is round two, station one');
-  eq(at(6).round, 1);
-  eq(at(29).round, 4, 'the last window is round five');
-  eq(at(29).station.name, 'JUMPING SQUATS');
+  eq(emomMinuteAt(b, 0).station.name, 'DB THRUSTERS', 'minute one');
+  eq(emomMinuteAt(b, 1).station.name, 'ALT DB SNATCH', 'the next lift, not the next set of the same one');
+  eq(emomMinuteAt(b, 5).station.name, 'JUMPING SQUATS', 'last station of round one');
+  eq(emomMinuteAt(b, 6).station.name, 'DB THRUSTERS', 'minute seven is round two, station one');
+  eq(emomMinuteAt(b, 6).round, 1);
+  eq(emomMinuteAt(b, 29).round, 4, 'the last window is round five');
 });
 
-test('the clock counts down inside a window and never reads a short minute', () => {
+test('a block that has not started has no clock to read', () => {
   const b = emmaBlock();
-  eq(emomClock(emomAt(b, 0).remainingMs), '1:00', 'a window opens reading a full minute');
-  eq(emomClock(emomAt(b, 1).remainingMs), '1:00', 'and one millisecond in, still a full minute');
-  eq(emomClock(emomAt(b, 22_000).remainingMs), '0:38');
-  eq(emomClock(emomAt(b, 59_500).remainingMs), '0:01');
-  // Across a boundary the next window opens full again rather than continuing down.
-  eq(emomClock(emomAt(b, 60_000).remainingMs), '1:00');
-  eq(emomAt(b, 60_000).stationIndex, 1);
+  const at = emomWhere(b, emomCursor(), min(5));
+  eq(at.running, false);
+  eq(at.remainingMs, 0);
+  eq(emomAdvance(b, emomCursor(), min(5)).due.length, 0, 'and nothing falls due before it begins');
 });
 
-test('the block ends and stays on the lift that was actually last', () => {
+test('the clock counts down inside a window and opens the next one full', () => {
   const b = emmaBlock();
-  const end = emomAt(b, 30 * 60 * 1000);
-  ok(end.done);
-  eq(end.remainingMs, 0);
-  eq(end.station.name, 'JUMPING SQUATS', 'not back at the top of the block');
-  eq(end.round, 4);
-  eq(emomAt(b, 40 * 60 * 1000).done, true, 'and long past the end it is still done');
-  eq(emomAt(b, 40 * 60 * 1000).completed, 30, 'never more windows than the block has');
+  const { cursor } = runTo(b, T0 + 22_000);
+  eq(emomClock(emomWhere(b, cursor, T0).remainingMs), '1:00', 'a window opens reading a full minute');
+  eq(emomClock(emomWhere(b, cursor, T0 + 22_000).remainingMs), '0:38');
+  eq(emomClock(emomWhere(b, cursor, T0 + 59_500).remainingMs), '0:01');
+
+  const rolled = runTo(b, min(1));
+  eq(emomClock(emomWhere(b, rolled.cursor, min(1)).remainingMs), '1:00', 'the next opens full, not continuing down');
+  eq(emomWhere(b, rolled.cursor, min(1)).stationIndex, 1);
 });
 
 test('a window that has started is not a window that was done', () => {
   const b = emmaBlock();
-  eq(emomAt(b, 0).completed, 0, 'standing in minute one is not having finished it');
-  eq(emomAt(b, 59_999).completed, 0);
-  eq(emomAt(b, 60_000).completed, 1, 'it counts the moment the window closes');
-});
-
-test('a clock set backwards does not throw underneath somebody mid workout', () => {
-  const b = emmaBlock();
-  const back = emomAt(b, -5000);
-  eq(back.index, 0);
-  eq(back.completed, 0);
-  eq(emomClock(back.remainingMs), '1:00');
+  eq(runTo(b, T0 + 59_999).written.length, 0, 'standing in minute one is not having finished it');
+  eq(runTo(b, min(1)).written.length, 1, 'it counts the moment the window closes');
 });
 
 // The property the whole module exists for.
-test('what is due depends on the time, never on how often it was asked', () => {
+test('what falls due depends on the time, never on how often it was asked', () => {
   const b = emmaBlock();
-  const fourMinutes = 4 * 60 * 1000;
 
-  // Asked once, four minutes in, having written nothing: all four finished windows come back.
-  const inOneGo = emomDue(b, fourMinutes, 0);
-  eq(inOneGo.length, 4, 'a locked phone comes back and writes what it missed');
-  eq(inOneGo.map((m) => m.station.name).join(', '),
+  // Asked once, four minutes in: all four finished windows come back at once.
+  const inOneGo = emomAdvance(b, emomStart(b, T0), min(4));
+  eq(inOneGo.due.length, 4, 'a locked phone comes back and writes what it missed');
+  eq(inOneGo.due.map((m) => m.station.name).join(', '),
      'DB THRUSTERS, ALT DB SNATCH, TOE TAPS, MOUNTAIN CLIMBERS');
 
-  // Asked every second from the start, writing as it goes: the same four windows, once each.
-  const seen = [];
-  let written = 0;
-  for (let ms = 0; ms <= fourMinutes; ms += 1000) {
-    for (const minute of emomDue(b, ms, written)) { seen.push(minute.index); written += 1; }
+  // Asked every second from the start: the same four windows, once each, same cursor.
+  const stepped = runTo(b, min(4));
+  eq(stepped.written.map((m) => m.index).join(','), '0,1,2,3', 'no window written twice, none skipped');
+  eq(stepped.cursor.windowsDone, inOneGo.cursor.windowsDone, 'and it lands in the same place');
+  eq(stepped.cursor.windowStartedAt, inOneGo.cursor.windowStartedAt, 'to the millisecond');
+});
+
+test('every window of the block falls due exactly once across the whole run', () => {
+  const b = emmaBlock();
+  // Deliberately ragged: 7 second steps land inside windows and cross boundaries unevenly.
+  const ragged = runTo(b, T0 + emomDurationMs(b) + 60_000, 7000);
+  eq(ragged.written.length, 30, 'thirty windows, thirty rows, whatever the sampling');
+  eq(new Set(ragged.written.map((m) => m.index)).size, 30, 'and every one of them distinct');
+  ok(emomWhere(b, ragged.cursor, min(40)).done);
+});
+
+test('a finished block stays on the lift that was actually last', () => {
+  const b = emmaBlock();
+  const { cursor } = runTo(b, min(31));
+  const end = emomWhere(b, cursor, min(31));
+  ok(end.done);
+  eq(end.remainingMs, 0);
+  eq(end.station.name, 'JUMPING SQUATS', 'not back at the top of the block');
+  eq(end.round, 4);
+  eq(cursor.windowsDone, 30, 'and never more windows than the block has');
+});
+
+// ---------------------------------------------------------------- adding a minute
+
+test('adding a minute lengthens the window you are standing in', () => {
+  const b = emmaBlock();
+  let { cursor } = runTo(b, min(2) + 50_000);         // 50s into minute 3
+  eq(emomWhere(b, cursor, min(2) + 50_000).station.name, 'TOE TAPS');
+  eq(emomClock(emomWhere(b, cursor, min(2) + 50_000).remainingMs), '0:10');
+
+  cursor = emomAddMinute(b, cursor, min(2) + 50_000);
+  const at = emomWhere(b, cursor, min(2) + 50_000);
+  eq(at.station.name, 'TOE TAPS', 'the same lift, which is the whole point');
+  eq(at.round, 0, 'and the same round');
+  eq(at.index, 2, 'and the same window');
+  eq(emomClock(at.remainingMs), '1:10', 'ten seconds left became a minute and ten');
+  ok(at.stretched, 'the screen has to be able to say why the clock reads over a minute');
+});
+
+// The failure that forced the cursor. With one offset into one uniform grid, buying sixty seconds
+// moved the client back a station, because the clock and the station were the same number.
+test('adding a minute never sends the client back to the previous lift', () => {
+  const b = emmaBlock();
+  for (const secondsIn of [0, 1, 30, 59]) {
+    const at = min(3) + secondsIn * 1000;
+    let { cursor } = runTo(b, at);
+    const before = emomWhere(b, cursor, at);
+    cursor = emomAddMinute(b, cursor, at);
+    const after = emomWhere(b, cursor, at);
+    eq(after.index, before.index, `still window ${before.index} at ${secondsIn}s in`);
+    eq(after.station.name, before.station.name);
   }
-  eq(seen.join(','), '0,1,2,3', 'no window written twice, none skipped');
-  eq(written, inOneGo.length, 'and it lands in the same place as the single call');
 });
 
-test('nothing is due again once it is written', () => {
+test('the block picks up on the next station after the added minute runs out', () => {
   const b = emmaBlock();
-  eq(emomDue(b, 4 * 60 * 1000, 4).length, 0, 'four written, four elapsed, nothing owed');
-  eq(emomDue(b, 4 * 60 * 1000, 9).length, 0, 'and more written than elapsed does not go backwards');
+  let { cursor } = runTo(b, T0 + 50_000);
+  cursor = emomAddMinute(b, cursor, T0 + 50_000);
+
+  // The window now ends at two minutes rather than one.
+  eq(emomAdvance(b, cursor, T0 + 119_000).due.length, 0, 'not yet');
+  const moved = emomAdvance(b, cursor, min(2));
+  eq(moved.due.length, 1, 'one window, not two: the minute stretched, it did not insert');
+  eq(moved.due[0].index, 0);
+  eq(moved.cursor.windowsDone, 1);
+  eq(emomWhere(b, moved.cursor, min(2)).station.name, 'ALT DB SNATCH', 'straight on to the next lift');
+  eq(emomClock(emomWhere(b, moved.cursor, min(2)).remainingMs), '1:00', 'at its ordinary length');
 });
 
-test('every window of the block is due exactly once across the whole run', () => {
+test('an added minute applies to that window and to no other', () => {
   const b = emmaBlock();
-  let written = 0;
-  // Deliberately ragged: 7 second steps land inside windows and cross boundaries unevenly. The
-  // bound clears the end by a whole window, because a 7 second step lands at 29:59 and the
-  // thirtieth window has not closed there.
-  for (let ms = 0; ms <= emomDurationMs(b) + b.windowMs; ms += 7000) written += emomDue(b, ms, written).length;
-  eq(written, 30, 'thirty windows, thirty rows, whatever the sampling');
+  let { cursor } = runTo(b, T0 + 10_000);
+  cursor = emomAddMinute(b, cursor, T0 + 10_000);
+  const moved = emomAdvance(b, cursor, min(2));
+  eq(moved.cursor.windowMs, b.windowMs, 'the next window is an ordinary one again');
+  ok(!emomWhere(b, moved.cursor, min(2)).stretched);
 });
 
-test('the start time is rebuilt from the rows, so a reload does not restart the clock', () => {
+test('a minute can be added more than once to the same window', () => {
   const b = emmaBlock();
-  const begun = Date.parse('2026-08-25T18:00:00.000Z');
-  // Minute zero is written when the first window ENDS, so the first row is one window in.
-  const rows = [
-    { logged_at: '2026-08-25T18:01:00.000Z' },
-    { logged_at: '2026-08-25T18:02:00.000Z' },
-    { logged_at: '2026-08-25T18:03:00.000Z' },
-  ];
-  eq(emomStartedAt(b, rows), begun);
-  eq(emomStartedAt(b, [...rows].reverse()), begun, 'the earliest row decides, not the first in the array');
+  let { cursor } = runTo(b, T0 + 30_000);
+  cursor = emomAddMinute(b, cursor, T0 + 30_000);
+  cursor = emomAddMinute(b, cursor, T0 + 30_000);
+  eq(emomClock(emomWhere(b, cursor, T0 + 30_000).remainingMs), '2:30');
+  eq(emomWhere(b, cursor, T0 + 30_000).index, 0, 'and it is still the first window');
 });
 
-test('the start time reads a synced timestamp as well as a local one', () => {
+test('the block still holds the same number of windows however many minutes are added', () => {
+  const b = emmaBlock();
+  let cursor = emomStart(b, T0);
+  const written = [];
+  // Add a minute to every third window, all the way through.
+  for (let t = T0; t <= T0 + 60 * 60_000; t += 1000) {
+    const moved = emomAdvance(b, cursor, t);
+    cursor = moved.cursor;
+    written.push(...moved.due);
+    const at = emomWhere(b, cursor, t);
+    if (at.running && at.index % 3 === 0 && !at.stretched) cursor = emomAddMinute(b, cursor, t);
+  }
+  eq(written.length, 30, 'thirty windows, thirty rows, no matter how long it took');
+  eq(new Set(written.map((m) => m.index)).size, 30);
+  eq(written.at(-1).station.name, 'JUMPING SQUATS');
+});
+
+test('a minute cannot be added to a block that is not running', () => {
+  const b = emmaBlock();
+  const fresh = emomCursor();
+  eq(emomAddMinute(b, fresh, min(1)), fresh, 'nothing is running before the start press');
+
+  const { cursor } = runTo(b, min(31));
+  eq(emomAddMinute(b, cursor, min(31)).windowMs, cursor.windowMs, 'and the block is over');
+});
+
+// A window whose row is owed but not yet written has no honest way to be lengthened: the log would
+// have to describe a minute that ended before it was extended.
+test('a minute cannot be added to a window that has already closed', () => {
+  const b = emmaBlock();
+  const cursor = emomStart(b, T0);
+  eq(emomAddMinute(b, cursor, min(1)).windowMs, cursor.windowMs, 'the window ended at minute one');
+  eq(emomAddMinute(b, cursor, T0 + 59_999).windowMs, cursor.windowMs + b.windowMs, 'a millisecond earlier is fine');
+});
+
+// ---------------------------------------------------------------- picking it back up
+
+test('a reload reads the block position straight off the rows', () => {
+  const b = emmaBlock();
+  // A row is written the instant a window closes, so the newest row IS when this window began.
+  const rows = [1, 2, 3].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
+  const cursor = emomResume(b, rows);
+  eq(cursor.windowsDone, 3, 'three windows closed');
+  eq(cursor.windowStartedAt, min(3), 'and the fourth began when the third row was written');
+  eq(cursor.windowMs, b.windowMs);
+
+  const at = emomWhere(b, cursor, min(3) + 20_000);
+  eq(at.index, 3, 'minute four');
+  eq(at.station.name, 'MOUNTAIN CLIMBERS');
+  eq(emomClock(at.remainingMs), '0:40');
+  eq(emomAdvance(b, cursor, min(3) + 20_000).due.length, 0, 'and nothing is owed twice after the reload');
+});
+
+test('the row order in the array does not decide where the block is', () => {
+  const b = emmaBlock();
+  const rows = [3, 1, 2].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
+  eq(emomResume(b, rows).windowStartedAt, min(3), 'the newest row decides, not the last in the array');
+});
+
+test('a reload reads a synced timestamp as well as a local one', () => {
   const b = emmaBlock();
   // Postgres renders a space where toISOString writes a T, and six fractional digits where it
-  // writes three. Both reach this module. The answer is still one window before the row.
-  eq(
-    emomStartedAt(b, [{ logged_at: '2026-08-25 18:01:00.048006+00' }]),
-    Date.parse('2026-08-25T18:01:00.048Z') - 60_000,
-  );
-  eq(emomStartedAt(b, []), null, 'nothing written yet, so the caller holds the start');
-  eq(emomStartedAt(b, [{ logged_at: 'not a time' }]), null, 'and a junk row does not become the epoch');
+  // writes three. Both reach this module.
+  eq(emomResume(b, [{ logged_at: '2026-08-26 18:01:00.048006+00' }]).windowStartedAt,
+     Date.parse('2026-08-26T18:01:00.048Z'));
+  eq(emomResume(b, []), null, 'nothing written yet, so there is nothing to pick up');
+  eq(emomResume(b, [{ logged_at: 'not a time' }]), null, 'and a junk row does not become the epoch');
 });
 
-test('a rebuilt start lands the block back where it was', () => {
+test('the clock does not stop for the reload it survived', () => {
   const b = emmaBlock();
-  const begun = Date.parse('2026-08-25T18:00:00.000Z');
-  const rows = [];
-  for (let n = 1; n <= 8; n += 1) rows.push({ logged_at: new Date(begun + n * 60_000).toISOString() });
-
-  // Eight windows written, and it is now eight and a half minutes in.
-  const started = emomStartedAt(b, rows);
-  const now = begun + 8.5 * 60_000;
-  const where = emomAt(b, now - started);
-  eq(where.index, 8, 'minute nine, which is round two station three');
-  eq(where.round, 1);
-  eq(where.station.name, 'TOE TAPS');
-  eq(emomDue(b, now - started, rows.length).length, 0, 'and nothing is owed twice after the reload');
+  // Three windows written, then the phone died and two minutes passed before it came back.
+  const rows = [1, 2, 3].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
+  const moved = emomAdvance(b, emomResume(b, rows), min(5));
+  eq(moved.due.length, 2, 'the two windows that closed while nobody was watching');
+  eq(moved.due.map((m) => m.index).join(','), '3,4');
+  eq(emomWhere(b, moved.cursor, min(5)).index, 5, 'and it comes back at minute six, not minute four');
 });
 
-test('a window longer than a minute still reads and rotates correctly', () => {
-  const b = emomBlock(emomDay(3, 90), [station('A', 5), station('B', 5)], (i) => i.reps);
-  eq(b.minutes, 6);
-  eq(emomLength(b), '3 rounds, 2 stations, 9 min');
-  eq(emomClock(emomAt(b, 0).remainingMs), '1:30');
-  eq(emomAt(b, 90_000).station.name, 'B');
-  eq(emomAt(b, 180_000).round, 1, 'two stations in, so back to the top');
-});
-
-test('a window that is not a whole number of minutes says its seconds', () => {
-  const b = emomBlock(emomDay(4, 45), [station('A', 5), station('B', 5)], (i) => i.reps);
-  eq(emomLength(b), '4 rounds, 2 stations, 6 min');
-  const odd = emomBlock(emomDay(3, 50), [station('A', 5)], (i) => i.reps);
-  eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
-});
-
-test('a block under a minute says its seconds and not zero minutes', () => {
-  // The reading somebody rehearsing a short window sees first, so it is the one most likely to be
-  // looked at by whoever is checking this works.
-  const quick = emomBlock(emomDay(4, 2), [station('A', 5), station('B', 5), station('C', 5), station('D', 5)], (i) => i.reps);
-  eq(emomLength(quick), '4 rounds, 4 stations, 32 sec');
-});
-
-// ------------------------------------------------------------ what the EMOM screen says
+// ---------------------------------------------------------------- what the screen says
 
 const emomUi = () => {
   const host = document.createElement('div');
   return { ui: mountEmomView(host), host };
 };
 
+const drawAt = (ui, block, cursor, now) => drawEmom(ui, block, emomWhere(block, cursor, now));
+
 test('the screen names the lift, the reps, the clock and what is coming', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 22_000, new Set());
+  const { cursor } = runTo(b, T0 + 22_000);
+  drawAt(ui, b, cursor, T0 + 22_000);
 
   eq(ui.lift.textContent, 'DB THRUSTERS');
   eq(ui.reps.textContent, '12 reps');
@@ -4802,69 +4881,94 @@ test('the screen names the lift, the reps, the clock and what is coming', () => 
   eq(ui.next.textContent, 'Next: ALT DB SNATCH', 'so the last seconds are spent moving, not reading');
   ok(ui.where.textContent.includes('Round 1 of 5'));
   ok(ui.where.textContent.includes('Minute 1 of 30'));
+  ok(!ui.more.hidden, 'the catch up control is there while the block runs');
+  ok(ui.start.hidden);
 });
 
 test('the position counts the way a person counts', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 6 * 60_000, new Set());
+  const { cursor } = runTo(b, min(6));
+  drawAt(ui, b, cursor, min(6));
   ok(ui.where.textContent.includes('Round 2 of 5'), 'minute seven is round two');
   ok(ui.where.textContent.includes('Minute 7 of 30'));
   eq(ui.lift.textContent, 'DB THRUSTERS', 'back to the top of the block');
 });
 
-test('the track empties as the window runs out', () => {
+test('the track empties across whatever length this window has', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 0, new Set());
+  let { cursor } = runTo(b, T0);
+  drawAt(ui, b, cursor, T0);
   eq(ui.fill.style.width, '100%');
-  drawEmom(ui, b, 30_000, new Set());
+  drawAt(ui, b, cursor, T0 + 30_000);
   eq(ui.fill.style.width, '50%');
-  drawEmom(ui, b, 30 * 60_000, new Set());
-  eq(ui.fill.style.width, '0%');
+
+  // A window with a minute added drains across two minutes, not past the end of the track.
+  cursor = emomAddMinute(b, cursor, T0 + 30_000);
+  drawAt(ui, b, cursor, T0 + 30_000);
+  eq(ui.fill.style.width, '75%', 'ninety of a hundred and twenty seconds left');
+});
+
+test('a window with a minute added says so, and it outranks the next lift', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  let { cursor } = runTo(b, T0 + 40_000);
+  drawAt(ui, b, cursor, T0 + 40_000);
+  eq(ui.next.textContent, 'Next: ALT DB SNATCH');
+
+  cursor = emomAddMinute(b, cursor, T0 + 40_000);
+  drawAt(ui, b, cursor, T0 + 40_000);
+  eq(ui.next.textContent, 'Extra minute on this one', 'a clock reading over a minute needs explaining');
+  eq(ui.time.textContent, '1:20');
 });
 
 test('the last window says so rather than pointing at a station nobody is doing', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 29 * 60_000, new Set());
+  const { cursor } = runTo(b, min(29));
+  drawAt(ui, b, cursor, min(29));
   eq(ui.next.textContent, 'Last one');
 });
 
 test('a finished block stops offering the control and says it is done', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 30 * 60_000, new Set());
+  const { cursor } = runTo(b, min(30));
+  drawAt(ui, b, cursor, min(30));
   eq(ui.root.dataset.state, 'done');
   eq(ui.time.textContent, 'Done');
   eq(ui.where.textContent, '30 of 30 done');
-  ok(ui.missed.hidden, 'nothing left to miss');
+  ok(ui.more.hidden, 'there is no window left to lengthen');
   eq(ui.next.textContent, '');
 });
 
-test('a window the client flagged keeps saying so while it is on screen', () => {
+test('the ready screen offers the block and the one press that starts it', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  drawEmom(ui, b, 10_000, new Set());
-  eq(ui.missed.textContent, 'Missed it');
-  drawEmom(ui, b, 20_000, new Set([0]));
-  eq(ui.missed.textContent, 'Marked short', 'the flag does not flicker back mid window');
-  drawEmom(ui, b, 70_000, new Set([0]));
-  eq(ui.missed.textContent, 'Missed it', 'and the next window starts clean');
+  readyEmom(ui, b, false);
+  eq(ui.where.textContent, '5 rounds, 6 stations, 30 min', 'the decision is half an hour, not one lift');
+  eq(ui.lift.textContent, 'DB THRUSTERS', 'named so the client knows what to stand over');
+  eq(ui.startLabel.textContent, 'Start the clock');
+  eq(ui.startSub.textContent, '30 windows');
+  ok(ui.more.hidden, 'nothing to catch up on before it begins');
+
+  readyEmom(ui, b, true);
+  eq(ui.startLabel.textContent, 'Pick the clock back up');
+  eq(ui.startSub.textContent, 'It kept running');
 });
 
-test('the summary counts windows kept and grades nothing', () => {
-  const b = emmaBlock();
-  eq(emomSummary(b, 0), '5 rounds, all 30 windows');
-  eq(emomSummary(b, 4), '5 rounds, 26 of 30 windows');
-  // No percentage, no "you missed", no colour word. A shortfall is a count, per the no-guilt rule.
-  ok(!/miss|fail|only|%/i.test(emomSummary(b, 4)));
+test('the summary counts windows and grades nothing', () => {
+  eq(emomSummary(emmaBlock()), '5 rounds, 30 windows');
+  // No percentage, no "you missed", no shortfall. Every window of a block that ran to the end is a
+  // window the client stood through.
+  ok(!/miss|fail|only|short|%/i.test(emomSummary(emmaBlock())));
 });
 
 test('a station with no rep count does not print an empty reps line', () => {
   const b = emomBlock(emomDay(2, 60), [station('ROW', 0)], (i) => i.reps);
   const { ui } = emomUi();
-  drawEmom(ui, b, 0, new Set());
+  drawAt(ui, b, emomStart(b, T0), T0);
   eq(ui.reps.textContent, '');
 });
 
@@ -4872,9 +4976,25 @@ test('a lift name carrying markup is escaped rather than rendered', () => {
   // Trainers type these, and an importer takes them from somebody else's spreadsheet.
   const b = emomBlock(emomDay(1, 60), [station('<b>SQUAT</b>', 5)], (i) => i.reps);
   const { ui, host } = emomUi();
-  drawEmom(ui, b, 0, new Set());
+  drawAt(ui, b, emomStart(b, T0), T0);
   eq(ui.lift.textContent, '<b>SQUAT</b>');
   ok(!host.querySelector('b'), 'set as text, so markup in a name cannot reach the DOM');
+});
+
+test('a window longer than a minute still reads and rotates correctly', () => {
+  const b = emomBlock(emomDay(3, 90), [station('A', 5), station('B', 5)], (i) => i.reps);
+  eq(b.minutes, 6);
+  eq(emomLength(b), '3 rounds, 2 stations, 9 min');
+  eq(emomClock(emomWhere(b, emomStart(b, T0), T0).remainingMs), '1:30');
+  eq(emomWhere(b, runTo(b, T0 + 90_000).cursor, T0 + 90_000).station.name, 'B');
+  eq(emomWhere(b, runTo(b, T0 + 180_000).cursor, T0 + 180_000).round, 1, 'two stations in, so back to the top');
+});
+
+test('a block under a minute says its seconds and not zero minutes', () => {
+  const quick = emomBlock(emomDay(4, 2), [station('A', 5), station('B', 5), station('C', 5), station('D', 5)], (i) => i.reps);
+  eq(emomLength(quick), '4 rounds, 4 stations, 32 sec');
+  const odd = emomBlock(emomDay(3, 50), [station('A', 5)], (i) => i.reps);
+  eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
 });
 
 // ------------------------------------------------------------------ report

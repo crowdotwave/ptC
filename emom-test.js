@@ -6,15 +6,20 @@
 // a screenshot, and finding them at 1x means standing over a phone for half an hour per attempt.
 // At 240x, Emma's block runs in seven and a half seconds.
 //
+// It opens at 10x rather than 60x, because the page has a control now and a window at 60x lasts one
+// real second, which is not long enough to press anything and see what it did.
+//
 // It mounts js/emom-view.js and drives it from js/emom.js, which is the whole point. A rehearsal
 // that drew its own version of the screen would be a rehearsal of something the client never
 // sees. The only thing this page owns is the clock, and it owns that so it can lie about it.
 //
-// Nothing is written. `emomDue` is asked the same question the logging screen asks it, and the
+// Nothing is written. `emomAdvance` is asked the same question the logging screen asks it, and the
 // answers are listed rather than turned into rows, so what appears in that column is exactly what
 // would have been appended to set_logs, in the order it would have landed.
 
-import { emomBlock, emomDue, emomLength, emomDurationMs } from './js/emom.js';
+import {
+  emomBlock, emomLength, emomStart, emomAdvance, emomWhere, emomAddMinute,
+} from './js/emom.js';
 import { mountEmomView, drawEmom, emomSummary } from './js/emom-view.js';
 
 // Emma's actual day, so the rehearsal is of the thing that prompted this rather than of a
@@ -31,22 +36,20 @@ const STATIONS = [
 const el = (id) => document.getElementById(id);
 
 const state = {
-  // Ten, not sixty, and this is a bug fix rather than a preference. A window at 60x lasts one
-  // real second, so the one control on this page could be pressed and its answer was gone before
-  // anybody saw it: the flag landed on window 0, the clock rolled to window 2, and the button read
-  // "Missed it" again. It looked exactly like a dead button, which is what it was reported as. At
-  // 10x a window is six seconds, which is long enough to press something and watch what it did,
-  // and a thirty minute block still runs in three minutes. 60x and 240x are still a button away
-  // for watching the clock itself, which is what they are for.
+  // Ten, not sixty. A window at 60x lasts one real second, which is not long enough to press the
+  // one control on this page and see what it did. At 10x a window is six seconds and a thirty
+  // minute block still runs in three minutes. 60x and 240x are a button away for watching the
+  // clock itself, which is what they are for.
   speed: 10,
   running: true,
-  // Elapsed in BLOCK time, not wall time. Advanced by the wall clock delta times the speed, so
-  // changing speed mid run does not teleport the block: it changes the rate from here on.
-  elapsed: 0,
+  // The page's own clock, in BLOCK milliseconds rather than wall milliseconds. Advanced by the wall
+  // delta times the speed, so changing speed mid run changes the rate from here on rather than
+  // teleporting the block. js/emom.js is handed this as if it were Date.now(), which is the whole
+  // trick: the module never learns it is being lied to.
+  clock: 0,
   last: performance.now(),
-  written: 0,
-  missed: new Set(),
   block: null,
+  cursor: null,
   ui: null,
 };
 
@@ -70,10 +73,9 @@ function rebuild() {
 }
 
 function restart() {
-  state.elapsed = 0;
+  state.clock = 0;
   state.last = performance.now();
-  state.written = 0;
-  state.missed = new Set();
+  state.cursor = emomStart(state.block, 0);
   el('written').innerHTML = '';
   paint();
 }
@@ -84,39 +86,33 @@ function setSpeed(speed) {
 }
 
 /**
- * One frame.
+ * One frame. The same two steps the logging screen takes, in the same order.
  *
- * The two things the logging screen does every tick, in the same order: ask where the block is and
- * draw it, then ask what has fallen due and record it. Asking in that order matters, because the
- * window a client is standing in is drawn before the one that just closed is written, which is
- * what keeps the screen ahead of the log rather than a frame behind it.
+ * Advance the clock and record what closed on the way, then draw where it ended up. Advance before
+ * draw is the order app.js uses and the reason js/emom.js splits the two: a draw that could write
+ * rows would make every redraw a thing with consequences.
  */
 function paint() {
-  const at = drawEmom(state.ui, state.block, state.elapsed, state.missed);
+  const moved = emomAdvance(state.block, state.cursor, state.clock);
+  state.cursor = moved.cursor;
 
-  for (const minute of emomDue(state.block, state.elapsed, state.written)) {
-    state.written += 1;
-    const short = state.missed.has(minute.index);
+  for (const minute of moved.due) {
     const row = document.createElement('li');
-    row.className = short ? 'rehearse__row rehearse__row--short' : 'rehearse__row';
+    row.className = 'rehearse__row';
     row.textContent =
       `min ${String(minute.index + 1).padStart(2, ' ')}  ` +
-      `r${minute.round + 1}  ${minute.station.name}  ` +
-      `${short ? 'short' : `${minute.station.reps} reps`}`;
+      `r${minute.round + 1}  ${minute.station.name}  ${minute.station.reps} reps`;
     el('written').append(row);
     el('written').scrollTop = el('written').scrollHeight;
   }
 
-  // The count of flagged windows lives HERE and not on the screen under test, and the line is
-  // worth drawing. This is a dev readout, so it can say things the client's screen may not: the
-  // no-guilt rule bars a running tally of what somebody missed from the app itself, and adding one
-  // to js/emom-view.js to make this page feel responsive would be letting the test change the
-  // thing it is testing. What it fixes is real though. Above 10x the button's own answer is gone
-  // before it can be read, so without this there is nowhere to see that a press did anything.
-  const short = state.missed.size ? `, ${state.missed.size} marked short` : '';
+  const at = emomWhere(state.block, state.cursor, state.clock);
+  drawEmom(state.ui, state.block, at);
+
+  const done = state.cursor.windowsDone;
   el('written-count').textContent = at.done
-    ? `${state.written} of ${state.block.minutes}. ${emomSummary(state.block, state.missed.size)}`
-    : `${state.written} of ${state.block.minutes}${short}`;
+    ? `${done} of ${state.block.minutes}. ${emomSummary(state.block)}`
+    : `${done} of ${state.block.minutes}${at.stretched ? ', extra minute running' : ''}`;
 }
 
 function frame(now) {
@@ -124,10 +120,10 @@ function frame(now) {
   state.last = now;
 
   if (state.running) {
-    const end = emomDurationMs(state.block);
-    // Clamped at the end rather than left to run on, so the page does not sit there counting up
-    // through a block that finished, and so `done` is reached exactly once.
-    state.elapsed = Math.min(end, state.elapsed + delta * state.speed);
+    // Not clamped to the block's nominal duration any more: adding a minute makes the block longer
+    // than emomDurationMs says, and clamping to that number would freeze the clock before the last
+    // window closed. The cursor decides when it is over.
+    state.clock += delta * state.speed;
     paint();
   }
 
@@ -137,12 +133,13 @@ function frame(now) {
 function start() {
   state.ui = mountEmomView(el('screen'));
 
-  state.ui.missed.addEventListener('click', () => {
-    // The index of the window currently on screen, asked of the same function that drew it.
-    const at = drawEmom(state.ui, state.block, state.elapsed, state.missed);
-    if (at.done) return;
-    if (state.missed.has(at.index)) state.missed.delete(at.index);
-    else state.missed.add(at.index);
+  state.ui.more.addEventListener('click', () => {
+    state.cursor = emomAddMinute(state.block, state.cursor, state.clock);
+    paint();
+  });
+
+  state.ui.start.addEventListener('click', () => {
+    state.cursor = emomStart(state.block, state.clock);
     paint();
   });
 
@@ -170,12 +167,13 @@ start();
 window.__emom = {
   state,
   jumpTo: (ms) => {
-    state.elapsed = ms;
+    state.clock = ms;
     paint();
   },
-  markMissed: (index) => {
-    state.missed.add(index);
+  addMinute: () => {
+    state.cursor = emomAddMinute(state.block, state.cursor, state.clock);
     paint();
   },
+  where: () => emomWhere(state.block, state.cursor, state.clock),
   rows: () => [...document.querySelectorAll('#written .rehearse__row')].map((r) => r.textContent),
 };

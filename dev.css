@@ -207,10 +207,3 @@ ul.dev__log {
   white-space: pre;
 }
 
-/* A window the client flagged. Dimmed rather than reddened: this is a dev readout, and the
- * no-guilt rule is about the client's screen, but there is no reason to teach the eye a colour
- * here that the real screen would never use. */
-.rehearse__row--short {
-  color: var(--muted);
-  font-style: italic;
-}

@@ -20,16 +20,39 @@
 // client cannot finish inside the window is a programming error rather than a thing this module
 // should handle: it will simply never leave them any rest.
 //
-// EVERYTHING HERE IS DERIVED FROM ELAPSED TIME. Nothing counts ticks, nothing accumulates, and no
-// function here is allowed to care how often it is called. That is not tidiness, it is the only
-// version that survives the phone this runs on: a backgrounded tab is throttled to something like
-// one callback a second and then not called at all when the screen locks, so a counter that adds a
-// minute per firing would drift and then stop. The rest timer already reads the wall clock for the
-// same reason. Here it matters more, because a drifting EMOM silently changes the workout.
+// NO FUNCTION HERE MAY CARE HOW OFTEN IT IS CALLED. That is not tidiness, it is the only version
+// that survives the phone this runs on: a backgrounded tab is throttled to something like one
+// callback a second and then not called at all when the screen locks, so anything that added a
+// minute per firing would drift and then stop, and a drifting EMOM silently changes the workout.
+//
+// The model is a CURSOR, and it replaced one that derived everything from a single elapsed time.
+// That earlier version was simpler and could not express the thing the coach asked for first: a
+// button that adds a minute, so somebody who has fallen behind can catch up. With one offset into
+// one uniform grid the station and the clock move together, so buying sixty seconds slid the block
+// back to the previous lift. A window has to be able to be longer than its neighbours, and that
+// means the schedule is a walk rather than a division.
+//
+// So a running block is three numbers:
+//
+//   windowsDone      how many windows have closed. Always equal to the rows written
+//   windowStartedAt  wall clock ms when the window now running began
+//   windowMs         how long the window now running gets: the block's window, plus any minute
+//                    added to this one
+//
+// Catching up is a loop rather than a subtraction, and it is still exact. emomAdvance walks forward
+// while the current window has ended, and every step moves windowStartedAt by a length this module
+// chose rather than by a delta it measured. Called once after four silent minutes it emits four
+// windows and lands exactly where four hundred calls would have. Nothing accumulates error because
+// nothing is accumulated from the clock.
+//
+// It also makes the resume exact and nearly free: windowStartedAt is the last row's logged_at and
+// windowsDone is the row count, so a reload reads the block's position straight off the append only
+// log instead of reconstructing it. See emomResume.
 //
 // The consequence worth stating out loud: locking the phone does not pause the block, and must
 // not. The clock in the room did not stop. A client who pockets their phone for ninety seconds
-// comes back two stations further on, which is exactly what happened to them in the gym.
+// comes back two stations further on, which is exactly what happened to them in the gym. Adding a
+// minute is the only thing that moves the clock, and it takes a deliberate press.
 
 import { instantOf } from './dates.js';
 
@@ -97,123 +120,171 @@ export function emomBlock(day, items, repsOf) {
   };
 }
 
-/** How long the whole block runs, in milliseconds. */
+
+/** How long the block runs if nobody adds a minute to it, in milliseconds. */
 export function emomDurationMs(block) {
   return block ? block.minutes * block.windowMs : 0;
 }
 
-/**
- * Where the block is, given how long it has been running.
- *
- * The single function the screen redraws from, and deliberately the only one that knows the
- * arithmetic. `elapsedMs` is now minus the moment the block started, and a negative value is
- * treated as zero rather than refused: a clock that has been set backwards is not a reason to
- * throw underneath somebody mid workout.
- *
- * `index` counts windows from zero across the whole block, so it keeps rising through the rounds
- * rather than resetting: minute seven of Emma's day is index 6, round 1, station 0.
- *
- * `done` is the block having run out of windows, which is a different question from whether every
- * minute has been logged. The screen asks the first and the logging asks the second, and conflating
- * them is how the last station of the last round gets dropped.
- */
-export function emomAt(block, elapsedMs) {
-  const total = block.minutes;
-  const elapsed = Math.max(0, elapsedMs);
-  const raw = Math.floor(elapsed / block.windowMs);
-
-  // Past the end, the last window is what stays on screen. Clamping rather than reporting station
-  // zero of round `rounds` means a summary drawn one frame late names the lift that was actually
-  // last, instead of sending the reader back to the top of the block.
-  const done = raw >= total;
-  const index = done ? total - 1 : raw;
-  const stationCount = block.stations.length;
-
-  const intoWindow = elapsed - raw * block.windowMs;
-  const remainingMs = done ? 0 : block.windowMs - intoWindow;
-
+/** Which station and which round a window index lands on. The block's whole geometry, in one place. */
+export function emomMinuteAt(block, index) {
+  const count = block.stations.length;
   return {
     index,
-    round: Math.floor(index / stationCount),
-    stationIndex: index % stationCount,
-    station: block.stations[index % stationCount],
-    remainingMs,
-    elapsedInWindowMs: done ? block.windowMs : intoWindow,
-    done,
-    // How many windows have finished. This is what decides what gets written, and it is a count
-    // rather than an event: see emomDue.
-    completed: Math.min(total, raw),
+    round: Math.floor(index / count),
+    stationIndex: index % count,
+    station: block.stations[index % count],
   };
 }
 
 /**
- * The minutes that have finished and have not been written yet.
+ * A block that has not started. The press of the start control is what turns this into a clock.
  *
- * Catch up rather than fire on a tick, and this is the heart of why the module looks like this. A
- * minute boundary is not an event this code can rely on being present for. The tab gets throttled,
- * the screen locks, the browser stops calling back entirely, and then the client picks the phone up
- * and everything has to be true again. Asking "which windows have ended that I have not logged"
- * answers that identically whether it has been called sixty times or once in four minutes, so a
- * locked phone comes back and writes the three stations it missed rather than losing them.
- *
- * `writtenCount` is how many of this block's minutes are already on disk. Rows, not a variable the
- * screen keeps: set_logs is append only and is the thing that survives a reload.
- *
- * Returns the minutes in order, each carrying the station and the round, so the caller writes rows
- * and does no arithmetic of its own.
+ * `windowStartedAt` is null rather than zero, so "not begun" cannot be confused with "begun at the
+ * epoch". Everything below refuses a cursor in that state rather than dividing by it.
  */
-export function emomDue(block, elapsedMs, writtenCount) {
-  const { completed } = emomAt(block, elapsedMs);
-  const from = Math.max(0, writtenCount);
-  const due = [];
-  const stationCount = block.stations.length;
+export function emomCursor() {
+  return { windowsDone: 0, windowStartedAt: null, windowMs: 0 };
+}
 
-  for (let index = from; index < completed; index += 1) {
-    due.push({
-      index,
-      round: Math.floor(index / stationCount),
-      stationIndex: index % stationCount,
-      station: block.stations[index % stationCount],
-    });
-  }
-  return due;
+/** Starts the clock now. Separate from emomCursor so the ready screen holds a real object. */
+export function emomStart(block, now) {
+  return { windowsDone: 0, windowStartedAt: now, windowMs: block.windowMs };
 }
 
 /**
- * When the block started, worked out from the rows it has already written.
+ * Picks a running block back up from the rows it has already written.
  *
- * A reload mid block must not restart the clock, and it must not trust a number the screen was
- * holding in memory, because that is the thing a reload destroys. Minute zero is written the
- * instant the first window ends, so the first row's `logged_at` is exactly one window after the
- * block began, and every row after it is one window further on. Reading the EARLIEST row and
- * subtracting one window is therefore exact, and it is exact from the append only log rather than
- * from anything mutable.
+ * Exact, and exact for free, which is the part worth keeping. A row is written the instant a window
+ * closes, so the newest row's `logged_at` IS the moment the window now running began, and the row
+ * count IS how many windows have closed. There is nothing to reconstruct and nothing to infer: a
+ * reload reads the block's position straight off the append only log, which is the only thing on
+ * the device a reload cannot destroy. Same principle as replaySession on the ordinary screen.
  *
- * The same trick js/session.js uses on the ordinary screen: the rows are enough to rebuild where
- * the client was, so nothing else needs to be durable.
+ * The one thing the rows cannot say is whether a minute had been added to the window that was
+ * running when the phone died. That window comes back at its ordinary length, which errs toward
+ * the clock the trainer prescribed rather than toward a bonus nobody can evidence.
  *
- * Returns null where nothing has been written yet. The caller holds the start time for that first
- * window and only that one, which is the only stretch of a block a reload can cost.
+ * Returns null where nothing has been written, which is a block that has not finished its first
+ * window. There is nothing to resume there: the caller starts it fresh.
  */
-export function emomStartedAt(block, rows) {
-  let earliest = null;
+export function emomResume(block, rows) {
+  let latest = null;
+  let count = 0;
+
   for (const row of rows ?? []) {
-    // Through instantOf rather than Date.parse, because logged_at reaches this module in two
-    // spellings and the Postgres one is rejected outright by the strict ISO path. js/dates.js has
-    // the measurement. Parsing it here by hand read every synced row as unparseable, which would
-    // have restarted a client's block from zero on the first reload after a sync.
+    // Through instantOf, because logged_at reaches this module in two spellings and the Postgres
+    // one is rejected outright by the strict ISO path. js/dates.js has the measurement.
     const at = instantOf(row?.logged_at);
     if (at === null) continue;
-    if (earliest === null || at < earliest) earliest = at;
+    count += 1;
+    if (latest === null || at > latest) latest = at;
   }
-  return earliest === null ? null : earliest - block.windowMs;
+
+  if (latest === null) return null;
+  return { windowsDone: Math.min(count, block.minutes), windowStartedAt: latest, windowMs: block.windowMs };
+}
+
+/**
+ * Gives the window now running one more window's worth of time.
+ *
+ * The whole of the catch up control. It lengthens the window somebody is standing in rather than
+ * inserting a new one, so the station does not change, the round does not change, the block still
+ * holds the same number of windows, and exactly one row is still written for this one. All that
+ * moves is when this window ends, and therefore when every window after it does.
+ *
+ * That is why the cursor carries a length instead of the schedule being a division: a uniform grid
+ * cannot hold one window that is longer than its neighbours, and every version of this that tried
+ * to fake it by shifting a global offset moved the client back to the previous lift.
+ *
+ * Refused once the block is over and refused before it starts, both because there is no window
+ * running to lengthen. Also refused when the window has already closed but nobody has drawn a frame
+ * since: the row for it is about to be written, and stretching a window whose row is already owed
+ * would hand the client a minute the log has no way to describe.
+ */
+export function emomAddMinute(block, cursor, now) {
+  if (cursor.windowStartedAt === null) return cursor;
+  if (cursor.windowsDone >= block.minutes) return cursor;
+  if (now >= cursor.windowStartedAt + cursor.windowMs) return cursor;
+  return { ...cursor, windowMs: cursor.windowMs + block.windowMs };
+}
+
+/**
+ * Walks the cursor forward to now, and says which windows closed on the way.
+ *
+ * The catch up, and the only function that moves a cursor with time. A loop rather than a division
+ * because windows are not all the same length once a minute has been added to one, and a loop
+ * because this may be the first call in four minutes: the screen locked, the tab stopped being
+ * called, and now everything has to be true again. Four windows closed while nobody was watching,
+ * so four come back, in order, each carrying its station and round so the caller writes rows and
+ * does no arithmetic of its own.
+ *
+ * Never drifts, however ragged the calls. Each step advances `windowStartedAt` by the length that
+ * window actually had, so positions come from lengths this module chose rather than from deltas it
+ * measured off the clock.
+ *
+ * Returns a NEW cursor. The caller holds one object and replaces it, so a half advanced cursor
+ * cannot be left behind by a throw in the middle of the loop.
+ */
+export function emomAdvance(block, cursor, now) {
+  if (cursor.windowStartedAt === null) return { cursor, due: [], done: false };
+
+  let { windowsDone, windowStartedAt, windowMs } = cursor;
+  const due = [];
+
+  while (windowsDone < block.minutes && now >= windowStartedAt + windowMs) {
+    due.push(emomMinuteAt(block, windowsDone));
+    windowStartedAt += windowMs;
+    windowsDone += 1;
+    // Any minute added applied to the window it was added to, and to no other.
+    windowMs = block.windowMs;
+  }
+
+  return {
+    cursor: { windowsDone, windowStartedAt, windowMs },
+    due,
+    done: windowsDone >= block.minutes,
+  };
+}
+
+/**
+ * Where the block is, for drawing. Reads the cursor and never moves it.
+ *
+ * Split from emomAdvance on purpose. Drawing happens far more often than the schedule moves, and a
+ * draw that could silently write rows would make every redraw a thing with consequences. The screen
+ * advances first and then draws what it advanced to.
+ *
+ * `stretched` is whether a minute has been added to the window now running, which the screen says
+ * out loud: a clock reading 1:47 on a block whose windows are a minute long is otherwise the app
+ * looking broken.
+ */
+export function emomWhere(block, cursor, now) {
+  const done = cursor.windowsDone >= block.minutes;
+  // Past the end, the last window is what stays on screen. Clamping rather than running off means a
+  // summary drawn a frame late names the lift that was actually last instead of sending the reader
+  // back to the top of the block.
+  const index = done ? block.minutes - 1 : cursor.windowsDone;
+  const minute = emomMinuteAt(block, index);
+
+  const started = cursor.windowStartedAt !== null;
+  const remainingMs =
+    done || !started ? 0 : Math.max(0, cursor.windowStartedAt + cursor.windowMs - now);
+
+  return {
+    ...minute,
+    remainingMs,
+    windowMs: started ? cursor.windowMs : block.windowMs,
+    stretched: started && !done && cursor.windowMs > block.windowMs,
+    running: started && !done,
+    done,
+  };
 }
 
 /**
  * What the clock reads, as m:ss.
  *
- * Rounded up, so a window shows 1:00 the moment it opens and never flashes a 0:59 that would make
- * a minute look short. The same reason tickRest ceils.
+ * Rounded up, so a window shows 1:00 the moment it opens and never flashes a 0:59 that would make a
+ * minute look short. The same reason tickRest ceils.
  */
 export function emomClock(remainingMs) {
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
@@ -223,8 +294,8 @@ export function emomClock(remainingMs) {
 /**
  * How long the block takes, said the way somebody reads it back in the builder.
  *
- * The number a trainer is actually checking when they set the rounds: six stations at five rounds
- * is half an hour, and that is the fact that tells them whether they meant five.
+ * The number a trainer is actually checking when they set the rounds: six stations at five rounds is
+ * half an hour, and that is the fact that tells them whether they meant five.
  */
 export function emomLength(block) {
   if (!block) return '';

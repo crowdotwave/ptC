@@ -454,36 +454,48 @@ six rows disagreeing about how many times round the block goes has no sensible r
 one station owning one window, in `order_index` order, and a round is one pass through all of them.
 Emma's day is six stations of a minute, five rounds, thirty windows.
 
-**Everything is derived from elapsed time and nothing counts ticks.** `js/emom.js` owns it and no
-function in it may care how often it is called. A backgrounded tab is throttled to about a callback
-a second and then not called at all once the screen locks, so a counter that added a minute per
-firing would drift and then stop, and a drifting EMOM silently changes the workout. `emomDue` asks
-which windows have ENDED and not been written, which answers identically whether it was called sixty
-times or once in four minutes: a locked phone comes back and writes the three stations it missed.
+**No function in `js/emom.js` may care how often it is called.** A backgrounded tab is throttled to
+about a callback a second and then not called at all once the screen locks, so anything that added a
+minute per firing would drift and then stop, and a drifting EMOM silently changes the workout.
+`emomAdvance` walks forward while the current window has ended, so called once after four silent
+minutes it emits four windows and lands exactly where four hundred calls would have. It never drifts
+because every step moves the cursor by a length this module chose, not by a delta it measured.
 The consequence, stated because it will look like a bug: **locking the phone does not pause the
 block, and must not.** The clock in the room did not stop. Measured on the real screen, a reload at
 minute three resumes at minute five, because the reload took two minutes.
 
-**A reload rebuilds the clock from the rows, never from anything in memory.** Window zero is written
-the instant the first window closes, so the earliest row's `logged_at` is exactly one window after
-the block began and `emomStartedAt` subtracts one window to get back to it. Same principle as
-`replaySession`: the rows are enough, and they are the only thing a reload cannot destroy. The first
-draft read `state.logged`, which a reload empties, and the block restarted from zero every time.
+**The model is a cursor, and it replaced one that divided a single elapsed time.** That earlier
+version was simpler and could not express the first thing the coach asked for: a button that adds a
+minute so somebody who has fallen behind can catch up. With one offset into one uniform grid the
+station and the clock are the same number, so buying sixty seconds slid the block back to the
+previous lift. A window has to be able to be longer than its neighbours, which makes the schedule a
+walk rather than a division. A running block is three numbers: how many windows have closed, when
+the window now running began, and how long it gets.
 
-**A window logs the prescribed reps, and a window the client marked short logs no rep count at
-all.** Zero is not available and the schema is right about that: `set_logs.reps` is `above: 0` and
-nullable exactly so a set with no rep count has somewhere to say so, and a zero would assert the
-client did none, which is not what Missed it means. Writing no row is the SKIP encoding and means
-the work was never attempted; this means they stood at that station for that minute and did not
-finish. Null is the honest third thing. It also has to be a row mechanically, or the count the
-resume is rebuilt from has a hole in it.
+**A reload reads the position straight off the rows.** A row is written the instant a window closes,
+so the newest row's `logged_at` IS when the current window began and the row count IS `windowsDone`.
+Nothing is reconstructed and nothing inferred. Same principle as `replaySession`: the rows are
+enough, and they are the only thing on the device a reload cannot destroy. The first draft read
+`state.logged`, which a reload empties, and the block restarted from zero every time.
 
-The one control while the block runs is not a stepper, because mid EMOM there is no time to dial a
-number: the honest thing somebody can say in two seconds is "not that one". The block starts on a
-deliberate press and never on arrival, since a clock that began when the screen loaded would spend
-the first window on walking to the rack, and there is no pausing it afterwards. It is scored in
-windows kept, never in volume: most of an EMOM is bodyweight, so a tonnage would read as almost
-nothing moved on the hardest day of the week.
+**Adding a minute lengthens the window somebody is standing in. It never inserts one.** The station
+does not change, the round does not change, the block still holds the same number of windows, and
+exactly one row is still written for that window. All that moves is when this window ends and
+therefore when every window after it does. The minute changes how long the client had, never what
+the program asked of them, which is why it writes nothing and cannot: the window is still open, so
+its row is not owed yet.
+
+It replaced a "Missed it" flag that marked a window short and wrote a row with no rep count. That
+was the wrong shape twice over: it asked the client to file a report about failing, on the screen in
+this app most tempted to grade somebody, and having done so it did nothing to help them. Adding a
+minute is the same situation answered usefully. **So there is no shortfall anywhere in this screen
+or its summary.** Every window of a block that ran to the end is a window the client stood through,
+and the summary counts windows, never volume: most of an EMOM is bodyweight, so a tonnage would read
+as almost nothing moved on the hardest day of the week.
+
+The block starts on a deliberate press and never on arrival, since a clock that began when the
+screen loaded would spend the first window on walking to the rack, and there is no pausing it
+afterwards.
 
 **No green on it.** `--done` is fenced to three places and "you are keeping up" would be a fourth
 meaning arriving on the screen most tempted to ask for one. What says a window is nearly out is the
@@ -498,7 +510,8 @@ written twice. None of those is visible in a screenshot and finding them at 1x c
 attempt. `emom-test.html` mounts the real `js/emom-view.js` and owns only the clock, so it can run a
 thirty minute block in seven seconds, and it lists the rows the logging screen WOULD have appended.
 A rehearsal that drew its own version of the screen would be a rehearsal of something no client ever
-sees. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
+sees. It opens at 10x rather than 60x, because the screen has a control on it and a window at 60x
+lasts one real second, which is not long enough to press anything and see what it did. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
 adapter, which is a different question and the one that puts sets on somebody's phone.
 
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no

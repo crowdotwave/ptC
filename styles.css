@@ -4408,8 +4408,13 @@ button.navlink:disabled {
 }
 
 /* Chrome, flat, and the only control on the screen while the block runs. Sized to its label with
- * the 44px target kept by a transparent ::after, same as every other chrome control. */
-.emom__missed {
+ * the 44px target kept by a transparent ::after, same as every other chrome control.
+ *
+ * It stays chrome rather than becoming a second lit slab beside the clock, and that is the whole
+ * lighting rule doing its job: the start action is lit because it is the one press this screen is
+ * about, and adding a minute is a thing you reach for when something has gone wrong. Two lit
+ * objects on a screen this sparse would make neither of them read as the primary. */
+.emom__more {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -4425,7 +4430,7 @@ button.navlink:disabled {
   cursor: pointer;
 }
 
-.emom__missed::after {
+.emom__more::after {
   content: '';
   position: absolute;
   left: 0;
@@ -4435,16 +4440,7 @@ button.navlink:disabled {
   transform: translateY(-50%);
 }
 
-/* Filled means chosen, which is the app's one selection signal and the reason this is not a
- * colour change. A flagged window reads as marked by having a face where the others have none. */
-.emom__missed[data-flagged='true'] {
-  background: var(--surface-raised);
-  border-color: var(--surface-raised-rim);
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.emom__missed:active {
+.emom__more:active {
   background: var(--chrome-face-press);
 }
 
@@ -4539,7 +4535,7 @@ button.navlink:disabled {
 }
 
 .emom__start[hidden],
-.emom__missed[hidden] {
+.emom__more[hidden] {
   display: none;
 }
 

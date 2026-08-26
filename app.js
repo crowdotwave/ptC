@@ -20,7 +20,9 @@ import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
-import { emomBlock, emomAt, emomDue, emomStartedAt } from './js/emom.js';
+import {
+  emomBlock, emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
+} from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
@@ -144,12 +146,13 @@ const state = {
   // clears the whole thing: a half torn down EMOM is an interval that keeps writing rows against
   // a session the client has moved on from.
   //
-  //   block      js/emom.js, frozen from the day's snapshot
-  //   startedAt  wall clock ms, or null before the first press. Never a counter: see js/emom.js
-  //   missed     window indices the client flagged, so a short window writes what it was
-  //   written    how many windows are on disk, which is what decides what is owed
-  //   view       the mounted js/emom-view.js handles
-  //   handle     the interval, cleared on every path out of this day
+  //   block   js/emom.js, frozen from the day's snapshot
+  //   cursor  where the clock is: windows done, when this window began, how long it gets. Null
+  //           windowStartedAt means the start control has not been pressed yet
+  //   rows    the set_logs rows this block has written, which is what a reload reads its position
+  //           back off. Not a count kept beside them: the rows are the count
+  //   view    the mounted js/emom-view.js handles
+  //   handle  the interval, cleared on every path out of this day
   emom: null,
 };
 
@@ -644,10 +647,7 @@ function renderDone() {
   ui.doneStat.textContent = !sets
     ? 'Open a set and log it when you are ready.'
     : isEmomDay()
-      // Counted from the rows rather than from the in-memory flags, so a summary read after a
-      // reload says the same thing as one read before it. A window with no rep count is one the
-      // client marked short: see logEmomWindow for why that is null and not zero.
-      ? emomSummary(state.emom.block, state.emom.rows.filter((row) => row.reps === null).length)
+      ? emomSummary(state.emom.block)
       : `${sets} working ${sets === 1 ? 'set' : 'sets'}${extra ? `, ${extra} added` : ''}, ` +
         `${Math.round(toDisplay(volume)).toLocaleString()} ${unit()} moved.`;
 
@@ -841,8 +841,9 @@ function tickRest() {
 //
 // The rest timer above counts the client's recovery and waits for them. This does the opposite: it
 // counts the window down and moves on regardless, which is what an EMOM is. Everything it decides
-// comes from js/emom.js and is derived from elapsed time, so this driver is allowed to be called
-// at any rate at all, including not at all for four minutes while the screen is locked.
+// comes from js/emom.js, which is written so that no function cares how often it is called, so this
+// driver is allowed to tick at any rate at all, including not at all for four minutes while the
+// screen is locked.
 
 /** How often the clock is asked where it is. Four times a second, same as the rest timer. */
 const EMOM_TICK_MS = 250;
@@ -850,16 +851,14 @@ const EMOM_TICK_MS = 250;
 /**
  * Builds the block for a day, or clears it.
  *
- * Called on every path that changes the day, including the day picker and the resume path, and
- * clearing is as important as building: an interval left running against a day the client has left
- * would keep appending rows to a session that has moved on.
+ * Called on every path that changes the day, and clearing matters as much as building: an interval
+ * left running against a day the client has left would keep appending rows to a session that has
+ * moved on.
  */
 function setEmomDay(day) {
   stopEmom();
   const block = emomBlock(day, sortedItems(day), (item) => item.target_reps_low ?? 0);
-  state.emom = block
-    ? { block, startedAt: null, missed: new Set(), written: 0, view: null, handle: null, rows: [] }
-    : null;
+  state.emom = block ? { block, cursor: emomCursor(), rows: [], view: null, handle: null } : null;
 }
 
 function stopEmom() {
@@ -874,61 +873,58 @@ function isEmomDay() {
 
 /** What the day chip says on a clock-led day: the block before it starts, the round once it has. */
 function emomPositionLine() {
-  const emom = state.emom;
-  if (emom.startedAt === null) return `${emom.block.minutes} windows`;
-  const at = emomAt(emom.block, Date.now() - emom.startedAt);
-  return at.done ? 'Done' : `Round ${at.round + 1} of ${emom.block.rounds}`;
+  const { block, cursor } = state.emom;
+  if (cursor.windowStartedAt === null) return `${block.minutes} windows`;
+  const at = emomWhere(block, cursor, Date.now());
+  return at.done ? 'Done' : `Round ${at.round + 1} of ${block.rounds}`;
 }
 
 /**
  * Begins the block, or picks a running one back up after a reload.
  *
- * The start time is rebuilt from the rows wherever there are any, per js/emom.js emomStartedAt, so
- * a client whose phone died at minute nine comes back into minute nine rather than to a fresh
- * clock. The clock in the room did not restart, and neither does this one.
+ * The position comes from the rows wherever there are any, per js/emom.js emomResume, so a client
+ * whose phone died at minute nine comes back into minute nine rather than to a fresh clock. The
+ * clock in the room did not restart, and neither does this one.
  */
 function startEmom() {
   const emom = state.emom;
-  if (!emom || emom.startedAt !== null) return;
+  if (!emom || emom.cursor.windowStartedAt !== null) return;
 
-  const rebuilt = emomStartedAt(emom.block, emom.rows);
-  emom.startedAt = rebuilt ?? Date.now();
-  emom.written = rebuilt === null ? 0 : emom.rows.length;
-
+  emom.cursor = emomResume(emom.block, emom.rows) ?? emomStart(emom.block, Date.now());
   emom.handle = setInterval(tickEmom, EMOM_TICK_MS);
   tickEmom();
 }
 
 /**
- * One tick: draw where the block is, then write whatever windows have closed.
+ * One tick: move the clock to now, write whatever closed on the way, then draw where it left off.
  *
- * Draw first, so the window the client is standing in is on screen before the one that just ended
- * is filed. Writing first would leave the screen a frame behind the log, which on the one screen
- * whose whole job is telling somebody what to do right now is the wrong way round.
+ * Advance before draw, and the order is the whole reason these are two functions in js/emom.js. A
+ * draw that could write rows would make every redraw a thing with consequences, and drawing first
+ * would put the screen a window behind the log at exactly the moment the client is looking at it to
+ * find out what to do next.
  */
 function tickEmom() {
   const emom = state.emom;
-  if (!emom || emom.startedAt === null || !emom.view) return;
+  if (!emom || emom.cursor.windowStartedAt === null || !emom.view) return;
 
-  const elapsed = Date.now() - emom.startedAt;
-  const at = drawEmom(emom.view, emom.block, elapsed, emom.missed);
+  const now = Date.now();
+  const moved = emomAdvance(emom.block, emom.cursor, now);
+  emom.cursor = moved.cursor;
+  for (const minute of moved.due) logEmomWindow(minute);
+
+  drawEmom(emom.view, emom.block, emomWhere(emom.block, emom.cursor, now));
   // The chip carries the round, so it has to move with the clock rather than only when something
   // is rendered. Cheap: on this day it is one string and two attribute writes.
   renderHeader();
 
-  for (const minute of emomDue(emom.block, elapsed, emom.written)) {
-    emom.written += 1;
-    logEmomWindow(minute, emom.missed.has(minute.index));
-  }
-
-  if (at.done) {
+  if (moved.done) {
     stopEmom();
-    // The block running out IS the end of the day, so the session closes itself rather than
-    // waiting for a tap the client has no reason to expect. Everything else on this screen ends
-    // when the last set is logged; this ends when the clock does.
+    // The block running out IS the end of the day, so the session closes itself rather than waiting
+    // for a tap the client has no reason to expect. Everything else on this screen ends when the
+    // last set is logged; this ends when the clock does.
     //
-    // The second render is not redundant. endSession renders before it sets sessionClosed, which
-    // is correct for every other day and wrong here: this screen's branch runs while that flag is
+    // The second render is not redundant. endSession renders before it sets sessionClosed, which is
+    // correct for every other day and wrong here: this screen's branch runs while that flag is
     // false, so without a redraw afterwards the summary never replaces the finished clock.
     endSession();
     render();
@@ -936,38 +932,44 @@ function tickEmom() {
 }
 
 /**
+ * Gives the window now running one more minute.
+ *
+ * The one control while the block is going, and it replaced a "Missed it" flag that asked the
+ * client to file a report about failing and then did nothing to help them. This is the same
+ * situation answered usefully: somebody who has fallen behind takes the extra window, catches up,
+ * and rejoins the block on the next minute, which is exactly what they would do with a clock on the
+ * wall.
+ *
+ * It writes nothing and it cannot: the window is still open, so its row is not owed yet, and when
+ * that row is written it will say what it always would have. The minute changes how long the client
+ * had, never what the program asked of them.
+ */
+function addEmomMinute() {
+  const emom = state.emom;
+  if (!emom || emom.cursor.windowStartedAt === null) return;
+  emom.cursor = emomAddMinute(emom.block, emom.cursor, Date.now());
+  tickEmom();
+}
+
+/**
  * One window, as a set_logs row.
  *
  * A window is a set: the station's exercise, at the round's index, carrying the reps that were
- * asked for. That is what the client chose when they picked the "log the prescribed reps" shape,
- * and it is the only shape that costs zero taps, which is the whole point of a screen where there
- * is no time to tap.
+ * asked for. Zero taps, which is the whole point of a screen where there is no time to tap.
  *
- * A flagged window writes a row with NO rep count rather than a row of zero or no row at all, and
- * the schema is right to have forced the question. `set_logs.reps` is `above: 0` and nullable
- * precisely so that a set with no rep count has somewhere to say so: zero would assert that the
- * client did none, which is not what Missed it means, and it is the same zero migration 0009 was
- * written to stop a hold becoming. No row at all would be the skip encoding, and a skip means the
- * work was never attempted, where this means the client stood at that station for that minute and
- * did not finish. Null is the honest third thing: present, and no number captured.
- *
- * It also has to be a row for a mechanical reason. The block's start time is rebuilt from these
- * rows on a reload, so a window that wrote nothing would leave a hole in the count and the resume
- * would replay windows that had already happened.
+ * set_index is the ROUND, so a station's five windows are set 1 to 5 of that lift, which is what
+ * every chart downstream already understands a set index to mean.
  */
-function logEmomWindow(minute, short) {
+function logEmomWindow(minute) {
   const session = ensureSessionRecord();
   const item = minute.station.item;
-  const reps = short ? null : minute.station.reps;
 
   const record = makeRecord('set_logs', {
     session_id: session.id,
     exercise_id: item.exercise_id,
-    // The round, so a station's five windows are set 1 to 5 of that lift, which is what every
-    // chart downstream already understands a set index to mean.
     set_index: minute.round,
     weight_kg: 0,
-    reps,
+    reps: minute.station.reps > 0 ? minute.station.reps : null,
     rounds: null,
     hold_seconds: null,
     rpe: null,
@@ -985,14 +987,14 @@ function logEmomWindow(minute, short) {
     exerciseId: item.exercise_id,
     setIndex: minute.round,
     weightKg: 0,
-    reps,
+    reps: record.reps,
     logMode: 'bodyweight_reps',
     isWarmup: false,
     isExtra: false,
     previousBest: state.best.get(item.exercise_id),
   });
 
-  // The block's own list, which is what the start time is rebuilt from. Kept alongside the record
+  // The block's own list, which is what a reload reads its position from. Kept alongside the record
   // rather than re-queried, so the count is right the instant the row exists rather than once the
   // optimistic write has drained.
   state.emom.rows.push(record);
@@ -1016,48 +1018,29 @@ function renderEmom() {
   ui.rest.hidden = true;
   ui.lastTime.hidden = true;
   ui.emomHost.hidden = false;
-  // Same trick the overview panel uses: the spacer exists to push the controls into the thumb
-  // arc, and with the controls gone it is a third of a screen of nothing above the clock.
+  // Same trick the overview panel uses: the spacer exists to push the controls into the thumb arc,
+  // and with the controls gone it is a third of a screen of nothing above the clock.
   ui.screen.classList.add('is-emom');
 
   if (!emom.view) {
     emom.view = mountEmomView(ui.emomHost);
     emom.view.start.addEventListener('click', startEmom);
-    emom.view.missed.addEventListener('click', flagEmomWindow);
+    emom.view.more.addEventListener('click', addEmomMinute);
   }
 
   ui.exerciseName.textContent = dayTitle(state.day);
   // The small line, not the big one. `.context__set` is the 28px band that says "Set 3 of 4", and
-  // "Every minute on the minute" put in there wrapped to three lines on a 390px phone and pushed
-  // the clock into the tab bar. What this screen is is a caption, not a position.
+  // "Every minute on the minute" put in there wrapped to three lines on a 390px phone and pushed the
+  // clock into the tab bar. What this screen is is a caption, not a position.
   ui.setPosition.textContent = '';
   ui.target.hidden = false;
   ui.target.textContent = 'Every minute on the minute';
 
-  if (emom.startedAt === null) {
+  if (emom.cursor.windowStartedAt === null) {
     readyEmom(emom.view, emom.block, emom.rows.length > 0);
     return;
   }
-  drawEmom(emom.view, emom.block, Date.now() - emom.startedAt, emom.missed);
-}
-
-/**
- * Marks the window on screen as one the client did not finish.
- *
- * Toggles, because the tap is made in a hurry and a mis-tap must cost one more tap rather than a
- * wrong row. It only reaches a row if the window has not closed yet: once a window is written, the
- * row is on disk and append only, so changing it is a correction rather than a flag, and this
- * screen is not where somebody makes one.
- */
-function flagEmomWindow() {
-  const emom = state.emom;
-  if (!emom || emom.startedAt === null) return;
-
-  const at = emomAt(emom.block, Date.now() - emom.startedAt);
-  if (at.done) return;
-  if (emom.missed.has(at.index)) emom.missed.delete(at.index);
-  else emom.missed.add(at.index);
-  tickEmom();
+  drawEmom(emom.view, emom.block, emomWhere(emom.block, emom.cursor, Date.now()));
 }
 
 // ------------------------------------------------------------------ actions
@@ -1650,8 +1633,8 @@ async function openDayOn(day, sessions, session) {
   // A clock-led day is not replayed against a cursor, because it has no cursor: the block decides
   // what is next and the rows are the record of what the clock has already been through. So they
   // go to the block, which rebuilds its own start time from them, and the plan below is left
-  // alone. Sorted here rather than trusted, since emomStartedAt wants the earliest and a query
-  // makes no promise about order.
+  // alone. Sorted here rather than trusted, since emomResume wants the newest and a query makes
+  // no promise about order.
   if (isEmomDay()) {
     state.emom.rows = [...rows].sort((a, b) => String(a.logged_at).localeCompare(String(b.logged_at)));
     // Enough for the summary to count what the session holds. Nothing on this day reads an entry.
