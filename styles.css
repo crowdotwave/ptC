@@ -54,16 +54,40 @@
    * bottom is shaded, and the top edge catches a rim. --surface-raised is the face and stays
    * the single token for borders, tracks, and flat fills. The other two exist so a gradient
    * never has to invent a colour at the use site. */
-  --surface-base: #000000;
-  --surface-raised: #613e80; /*        2.51 vs base. The lit face */
-  --surface-raised-shade: #583875; /*  2.24 vs base. The shaded face, far end of the fall */
-  --surface-raised-rim: #7a4fa0; /*    1.38 vs the face. The lit top edge, and selected fills */
+  /* REVAMP. The thesis, because every other change here follows from it.
+   *
+   * The incumbent world is pitch black, a saturated violet slab, a hot orange, and a bright cyan,
+   * separated by zero offset coloured haloes. It is legible and it reads raw: closer to a HUD than
+   * to an instrument. The use scene is unchanged and still decides the big call, so this stays
+   * dark. What changes is everything the scene did not force.
+   *
+   * Pure black is the one decision the rest was hostage to. The incumbent file states the trap
+   * exactly and then lives inside it: a black drop shadow on a black base separates nothing, so
+   * depth had to come from light thrown outward, so every lifted object carried a coloured glow,
+   * so surfaces had to separate by luminance alone and --surface-raised was pinned between a 7:1
+   * text floor and a 2.51 glare gap with only hue and chroma left free.
+   *
+   * Tinting the ground pays for all of it at once. #0C0E12 is a graphite that still reads as black
+   * in a dark gym, but it is a surface a shadow can fall on. Real elevation, offset and blurred,
+   * then takes over the job the 2.51 luminance gap was doing, which frees the raised surface to
+   * sit lower and quieter: this one is 2.23 against the base, under the incumbent gap, and it is
+   * told apart by its own shadow rather than by being brighter. --text-primary still clears 7:1
+   * on it, measured, because that floor was never the negotiable half.
+   *
+   * The violet goes because it was chosen under that constraint: hue and chroma were the only
+   * axes left, so it took all the chroma it could get, which is why the slabs read as toy purple.
+   * A steel indigo at the same job, desaturated, reads as a machined face. Same lighting model,
+   * same three tokens, same rule that this is the single token for borders, tracks and fills. */
+  --surface-base: #0c0e12;
+  --surface-raised: #434b63; /*        2.23 vs base. The lit face. Text on it 7.51, measured */
+  --surface-raised-shade: #3a4157; /*  1.91 vs base. The shaded face. Text on it 8.79 */
+  --surface-raised-rim: #5e6987; /*    1.59 vs the face. The lit top edge, and selected fills */
 
   /* The lit top of a key sitting in a raised surface, grading down toward --surface-base. Same
    * hue. Lifted from #180F21 so the plus and the minus read as keys rather than as holes cut
    * through the slab: at 2.03 against the lit face they are still obviously darker, and
    * --text-primary reads 14.70 on them, so the glyphs give up nothing for it. */
-  --surface-base-lit: #241634;
+  --surface-base-lit: #1a1e28; /*      1.92 vs the face, so the keys still read as keys. Text 14.46 */
 
   /* ---------------------------------------------------------------- veils
    *
@@ -181,7 +205,7 @@
    * It also measures BETTER than the grey it replaced, in both conditions that matter: 4.67
    * against the base at full brightness where the grey read 3.09, and 1.55 at fifteen percent
    * where the grey read 1.31. Striking and legible are the same change here, not a trade. */
-  --chrome-edge: #9859cf; /*  4.67 / 1.55 at 15 percent brightness. Ground hue, 272deg */
+  --chrome-edge: #8592b8; /*  6.26  ground hue, 225deg. Steel not violet, and brighter than the 4.67 it replaced */
 
   /* The fold between rows inside a card. Lighter than it was, and for the reason above rather than
    * for looks: it was --surface-raised-rim at 20 percent, which is a dark line on a dark card and
@@ -230,9 +254,9 @@
    * stays --accent-action-pressed and stays flat, because a flat fill is what a depressed slab
    * looks like. Black ink reads 7.41 on the shade, so the darkest point of that gradient still
    * clears the between sets floor even though the label only owes 4.5. */
-  --accent-action: #ff8a45; /*  8.97 / 3.58  fill only */
-  --accent-action-shade: #f2762f; /*  7.41 / 2.95  fill only */
-  --accent-action-pressed: #d9682a; /*  5.96 / 2.38  fill only */
+  --accent-action: #ffb020; /*  sodium amber, 38deg. fill only. Base ink on it 10.56 */
+  --accent-action-shade: #ef9c0c; /*  fill only, far end of the gradient. Base ink 8.67 */
+  --accent-action-pressed: #cf870b; /*  fill only, flat when depressed. Base ink 6.55 */
 
   /* The data and progress axis, complementary to the action orange at 165 degrees.
    *
@@ -442,6 +466,22 @@
   --glow-strength-rest: 32%;
   --glow-strength-celebrate: 62%;
 
+  /* Elevation, which is what the tinted ground bought.
+   *
+   * A shadow needs somewhere to fall. On #000 it had nowhere, which is why the incumbent world
+   * threw light outward instead and every lifted object wore a coloured halo. On graphite a black
+   * shadow is a real thing again, so depth is depth: an offset, a soft blur, and a second tighter
+   * layer for the contact edge. Two steps, matching the two the lighting model already has.
+   *
+   * Neutral on purpose. A coloured blurred shadow on a dark ground is the same decoration the halo
+   * was, wearing an offset. The colour on this screen belongs to the fills. */
+  --elev-1:
+    0 1px 2px -1px rgb(0 0 0 / 0.7),
+    0 4px 12px -4px rgb(0 0 0 / 0.55);
+  --elev-2:
+    0 2px 4px -1px rgb(0 0 0 / 0.75),
+    0 12px 28px -8px rgb(0 0 0 / 0.6);
+
   /* Reading distance, in centimetres. This is the retune point.
    *
    * 65 is a phone resting on a bench or the floor next to the rack. If it turns out to sit
@@ -543,13 +583,21 @@ button {
  *
  * HARD RULE: fills, borders, container edges, and chart strokes only. Never on or behind text
  * read mid set. Charts will reuse the same radii through filter: drop-shadow(). */
+/* The log action and the rest fill lift off the ground instead of glowing on it. Same two objects,
+ * same claim about which things in this app are liftable, drawn the way the ground now allows. */
 .log,
 .rest__fill {
-  box-shadow: 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+  box-shadow: var(--elev-2);
 }
 
+/* The record is the exception, and it is the brief's own exception rather than a default reached
+ * for. Everything else here gets neutral depth; this one moment is allowed to emit, because it is
+ * the single thing the whole product exists to deliver and it lasts a few seconds. It is elevation
+ * FIRST and bloom second, so it still belongs to the same depth system as everything around it. */
 .pr {
-  box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
+  box-shadow:
+    var(--elev-2),
+    0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
 }
 
 /* ---------------------------------------------------------------- veiled cards
@@ -649,10 +697,10 @@ button {
 @keyframes pr-pulse {
   0%,
   100% {
-    box-shadow: 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+    box-shadow: var(--elev-2), 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
   }
   50% {
-    box-shadow: 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
+    box-shadow: var(--elev-2), 0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
   }
 }
 
@@ -1475,10 +1523,9 @@ button.worknav__row:active {
  * fill while only owing 4.5 at 28px and 700. The glow still mixes from --accent-action alone:
  * it is light thrown by the button, not a second copy of the fill.
  *
- * This is the one element that restates its glow rather than taking it from the shared rule near
- * the top of the file, because it also carries the lit top edge and box-shadow is one property.
- * The radius and the strength are still the shared primitives, so there is nothing here to drift
- * out of step with the rest. */
+ * This is the one element that restates its elevation rather than taking it from the shared rule
+ * near the top of the file, because it also carries the lit top edge and box-shadow is one
+ * property. The step itself is still the shared token, so there is nothing here to drift. */
 .log {
   min-height: 6.5rem;
   border-radius: var(--radius);
@@ -1492,10 +1539,9 @@ button.worknav__row:active {
   align-items: center;
   justify-content: center;
   gap: var(--s-1);
-  --glow-tint: color-mix(in srgb, var(--accent-action) var(--glow-strength-rest), transparent);
   box-shadow:
     inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit-strong), transparent),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+    var(--elev-2);
 }
 
 /* Pressed loses the lit edge and gains an inner shadow, so the biggest target on the screen is
@@ -1503,10 +1549,9 @@ button.worknav__row:active {
  * button is still lit, just pushed in. */
 .log:active {
   background: var(--accent-action-pressed);
-  --glow-tint: color-mix(in srgb, var(--accent-action-pressed) var(--glow-strength-rest), transparent);
   box-shadow:
     inset 0 2px 6px -1px color-mix(in srgb, var(--surface-base) var(--shade-drop), transparent),
-    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+    var(--elev-1);
 }
 
 .log__sub {
