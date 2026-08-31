@@ -27,6 +27,7 @@
 // and the track emptying, which is size and position rather than hue.
 
 import { emomClock, emomLength } from './emom.js';
+import { trackFill } from './track.js';
 
 /**
  * The markup, once. Everything that changes per frame is addressed below rather than rebuilt,
@@ -97,7 +98,7 @@ export function readyEmom(ui, block, resumable) {
   ui.lift.textContent = block.stations[0].name;
   ui.reps.textContent = block.stations[0].reps ? `${block.stations[0].reps} reps` : '';
   ui.time.textContent = emomClock(block.windowMs);
-  ui.fill.style.width = '100%';
+  ui.fill.style.transform = trackFill(100);
   ui.next.textContent = block.stations.length > 1 ? `Next: ${block.stations[1].name}` : '';
   ui.more.hidden = true;
   ui.start.hidden = false;
@@ -122,7 +123,7 @@ export function drawEmom(ui, block, at) {
   // Empties as the window runs out, so the track is shortest when the pressure is highest. Measured
   // against this window's own length, so a window with a minute added drains across the whole of
   // its longer self rather than filling past the end of the track.
-  ui.fill.style.width = at.done ? '0%' : `${(at.remainingMs / at.windowMs) * 100}%`;
+  ui.fill.style.transform = trackFill(at.done ? 0 : (at.remainingMs / at.windowMs) * 100);
 
   // The next station, so the last seconds of a window are spent moving rather than reading. The
   // block's last window says so instead: "Next" pointing back at the top of a block that is about

@@ -479,6 +479,16 @@
   --tap: 44px;
   --rest-track-height: 8px;
 
+  /* The platform's own UI face, deliberately, and no webfont. A webfont is a network dependency,
+   * and this app is used in basements: the screen that must survive having no network is the one
+   * being read mid set. There is also no build step here to subset or self host one with.
+   *
+   * The detector flags this stack and cannot stop flagging it, which is worth knowing before
+   * somebody edits it to make the warning go away. It reports whichever face the SCANNING machine
+   * resolves the stack to, so it named Roboto from Linux and named Helvetica once Roboto was
+   * removed. Both are on its overused list, as is every fallback a system stack can end in. The
+   * finding under it is real and is not about this line: it says no typeface has been chosen. That
+   * is a live decision, and it is in tension with offline first rather than with this token. */
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -698,12 +708,17 @@ button {
 .rest__fill {
   display: block;
   height: 100%;
-  width: 0%;
+  width: 100%;
   background: var(--accent-data);
   /* Glow site two. Legal because the track is below the text, never behind it. The shadow
    * itself is composed in the glow rules near the top of this file. */
   --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
-  transition: width 0.25s linear;
+  /* Full width, and it drains by sliding out to the left rather than by shrinking. Note that this
+   * only reads correctly because .rest clips: what leaves on the left is cut off there. The
+   * reasoning, including why it slides rather than scales given the glow above, is in
+   * js/track.js, which owns the other half of it. */
+  transform: translateX(-100%);
+  transition: transform 0.25s linear;
 }
 
 .rest__label {
@@ -4389,7 +4404,10 @@ button.navlink:disabled {
   /* Glow site three, legal on the same terms as the rest timer's: the track sits below the
    * numerals and never behind them. */
   --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
-  transition: width 0.25s linear;
+  /* Drains by sliding, same as .rest__fill, and clipped by .emom__clock the same way. See
+   * js/track.js. It matters more here: this track redraws against a clock nobody can pause. */
+  transform: translateX(0);
+  transition: transform 0.25s linear;
 }
 
 /* No transition across a window boundary. The fill goes from empty back to full in one frame, and

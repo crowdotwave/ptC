@@ -4899,15 +4899,17 @@ test('the track empties across whatever length this window has', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
   let { cursor } = runTo(b, T0);
+  // Read as a translation rather than a width: the bar is full width and slid out to the left, so
+  // a full track sits at 0 and an empty one is a whole length off screen. See .emom__fill.
   drawAt(ui, b, cursor, T0);
-  eq(ui.fill.style.width, '100%');
+  eq(ui.fill.style.transform, 'translateX(0%)');
   drawAt(ui, b, cursor, T0 + 30_000);
-  eq(ui.fill.style.width, '50%');
+  eq(ui.fill.style.transform, 'translateX(-50%)');
 
   // A window with a minute added drains across two minutes, not past the end of the track.
   cursor = emomAddMinute(b, cursor, T0 + 30_000);
   drawAt(ui, b, cursor, T0 + 30_000);
-  eq(ui.fill.style.width, '75%', 'ninety of a hundred and twenty seconds left');
+  eq(ui.fill.style.transform, 'translateX(-25%)', 'ninety of a hundred and twenty seconds left');
 });
 
 test('a window with a minute added says so, and it outranks the next lift', () => {

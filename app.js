@@ -28,6 +28,7 @@ import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import { publishSync } from './js/sync-status.js';
+import { trackFill } from './js/track.js';
 import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
 import {
   unit,
@@ -815,7 +816,7 @@ function stopRest() {
   ui.rest.dataset.state = 'idle';
   ui.restLabel.textContent = 'Rest';
   ui.restTime.textContent = '0:00';
-  ui.restFill.style.width = '0%';
+  ui.restFill.style.transform = trackFill(0);
 }
 
 // Reads the wall clock rather than counting ticks, so a backgrounded tab comes back correct.
@@ -823,7 +824,7 @@ function tickRest() {
   const remaining = Math.max(0, state.restEndsAt - Date.now());
   const seconds = Math.ceil(remaining / 1000);
   ui.restTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  ui.restFill.style.width = state.restTotal ? `${(remaining / (state.restTotal * 1000)) * 100}%` : '0%';
+  ui.restFill.style.transform = trackFill(state.restTotal ? (remaining / (state.restTotal * 1000)) * 100 : 0);
 
   if (remaining <= 0) {
     clearInterval(state.restHandle);
