@@ -553,6 +553,37 @@ body {
   overscroll-behavior: none;
 }
 
+/* The two surfaces the browser draws for us, which shipped in whatever colour the UA picked.
+ *
+ * Selection took the default blue. That is a hue this palette does not contain, arriving on the
+ * one screen a trainer actually selects text on, and it lands nearest --deload at 224, which is
+ * the one colour here that means "planned, and not an alarm". The palette already owns a pair for
+ * exactly this job: --surface-raised is the lit face and --text-primary is the only text token
+ * legal on it, measured at 7.26. A selection is a small lit slab with a word on it, so it is that
+ * pair and needed no new token.
+ *
+ * The caret took white. Cyan because it sits in a field being typed into and --accent-data is
+ * already this palette's voice for informational text. Not orange: that one is fenced to fills. */
+::selection {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+input,
+textarea {
+  caret-color: var(--accent-data);
+}
+
+/* A heading that wraps should break evenly rather than dropping one word onto a line of its own.
+ * "Barbell Back Squat" is 32px at a 360px viewport and wraps on the progress screen no matter what
+ * is done to the layout, which is fine there because that screen scrolls. What is not fine is the
+ * orphan. Costs nothing and the browser caps it well short of body copy. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
 /* Every number on this screen is tabular, so a stepper does not reflow when 95 becomes 100
  * and the thumb does not miss on the second tap. */
 .num {
@@ -1017,12 +1048,28 @@ button {
 /* Underlined rather than boxed. It is a link in every way that matters, and a button shape here
  * would give a once a year setting more weight than sign out has. */
 .unitset__swap {
+  position: relative;
   padding: var(--s-1) 0;
   color: var(--text-secondary);
   font-size: var(--t-small);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* The 44px this was owed and did not have. It measured 157x28 in the footer, which is the quietest
+ * type in the app sitting on a target well under the floor, and quiet is a reason to make a control
+ * small to LOOK at rather than small to hit. Same transparent extender the secondary buttons use,
+ * for the same reason: the ink and the target are two separate decisions and both get written
+ * down. Its neighbour is Sign out, so this one is worth getting right. */
+.unitset__swap::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--tap);
+  transform: translateY(-50%);
 }
 
 .unitset__swap:active {
@@ -1889,12 +1936,30 @@ button.worknav__row:active {
   padding: var(--s-4) var(--s-3);
 }
 
+/* Stacked on a phone, and side by side only where both actually fit.
+ *
+ * These are a 17px label and a number at the mid set tier, 28px, and they were a baseline aligned
+ * row with space-between at every width. Measured at 390px and again at 360, neither one fitted:
+ * "Work per session" broke after "per" and "19,335 lb" put its unit on a second line, so the one
+ * number the reader opened this card for was the thing on screen that was hardest to read. A row
+ * that only works on a viewport this app does not target is not a row.
+ *
+ * The label goes above because the number is the headline, not the caption. */
 .chart__head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s-3);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-1);
   padding-inline: var(--s-1);
+}
+
+@media (min-width: 480px) {
+  .chart__head {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-3);
+  }
 }
 
 .chart__title {
@@ -1909,6 +1974,9 @@ button.worknav__row:active {
   font-weight: 700;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  /* A weight and its unit are one token to read. Wrapping between them turns a glance into a
+   * two line parse, and tabular-nums above is pointless if the number can break anyway. */
+  white-space: nowrap;
 }
 
 .chart__caption {
@@ -2571,10 +2639,21 @@ button.row:active {
 
 /* Joined, not two loose buttons. One control moving one view, so the shared edge says so, the same
  * argument the unit switch makes at the other end of the header. */
+/* The height is the tap floor, and it has to be declared here rather than left to the buttons.
+ *
+ * These are .button-secondary, so they carry the transparent 44px ::after every other secondary
+ * button uses. It does not work here: this pill sets overflow hidden to clip its square cornered
+ * children into the round shape, and that clips the extender too, silently. Measured, the arrows
+ * owned 36x38 and a probe 21px above centre hit the card behind them.
+ *
+ * Same failure CLAUDE.md already records one section down, where the cells take an inset focus
+ * ring because the outward one is clipped by the scroller. An outward affordance inside a clipping
+ * container is the recurring shape of it, and the fix is the same: make the container carry it. */
 .cal__nav {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
+  min-height: var(--tap);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -2583,8 +2662,11 @@ button.row:active {
   display: none;
 }
 
+/* 44px wide as well as tall. The floor is a thumb, and a thumb is round: 44 in one axis and 36 in
+ * the other is a target that only works if the press lands on the long way through it. These are
+ * the only way to reach another month, so they are worth the 16px. */
 .cal__step {
-  width: 2.25rem;
+  width: var(--tap);
   min-width: 0;
   padding: 0;
   border-radius: 0;

@@ -48,9 +48,15 @@ row that needs a look will be drawn the same way.
 ## Not waived, and left visible on purpose
 
 - **`monotonous-spacing`**, reported as roughly 4px in about 91% of sampled values, on every page.
-  Unverified. This project does define a spacing scale (`--s-1` through `--s-6`), so the finding
-  and the code disagree and the disagreement has not been chased down yet. Left reporting rather
-  than waived, because waiving a finding nobody has checked is how a detector stops being read.
+  Checked, and it is wrong. The scale is in real use across all six steps: `--s-2` appears 73
+  times in `styles.css`, `--s-3` 64, `--s-4` and `--s-1` 41 each, `--s-5` ten and `--s-6` once.
+  That is a distribution, not one value repeated. The rule reports an identical ratio on pages as
+  different as the login screen and the trainer view, which is the tell that it samples a narrow
+  fixed set of computed values rather than the page's own rhythm.
+
+  Still not waived. It costs one line of noise per page and it is the only rule here anybody has
+  had to argue with, so leaving it visible keeps the argument in front of whoever reads this next.
+  Waive it if it starts drowning a real finding.
 - **`overused-font`** is waived only for the two faces a system stack resolves to on the machines
   this has been scanned from. The rule stays live, so an actual webfont choice would still be
   reported and would still deserve the argument. See the `--font` token in `styles.css`.
