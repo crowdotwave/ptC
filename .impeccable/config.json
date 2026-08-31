@@ -1,0 +1,25 @@
+{
+  "detector": {
+    "ignoreRules": [
+      "dark-glow",
+      "side-tab"
+    ],
+    "ignoreFiles": [
+      ".claude/skills/impeccable/**"
+    ],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "roboto",
+        "createdAt": "2026-08-31T21:53:31.049Z",
+        "reason": "System font stack, not a type choice. See the --font token in styles.css: the detector reports whichever face the scanning machine resolves ui-sans-serif/system-ui to, and every fallback a system stack ends in is on this list."
+      },
+      {
+        "rule": "overused-font",
+        "value": "helvetica",
+        "createdAt": "2026-08-31T21:53:31.719Z",
+        "reason": "Same system font stack as roboto above, resolved on a different machine."
+      }
+    ]
+  }
+}
