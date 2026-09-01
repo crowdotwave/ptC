@@ -3,7 +3,8 @@
   "permissions": {
     "allow": [
       "mcp__b606a61a-5d55-4d9d-bf9d-9321ae1975ec",
-      "mcp__supabase"
+      "mcp__supabase",
+      "Bash(npx impeccable *)"
     ]
   }
 }

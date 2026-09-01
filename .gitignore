@@ -1,0 +1,6 @@
+# impeccable-ignore-start
+# The detector is run on demand with `npx impeccable detect`. There is no skill and no hook
+# installed here, so the only thing it writes is a local override nobody else should inherit.
+.impeccable/config.local.json
+.impeccable/*.png
+# impeccable-ignore-end
