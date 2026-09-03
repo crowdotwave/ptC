@@ -29,6 +29,12 @@
 // A page has to have been loaded online once for it to be available offline, which is the whole of
 // the cost of not precaching. Signing in and receiving a program both require a network, so by the
 // time somebody is training the pages they train with have been fetched.
+//
+// That bound applies to the 5xx fallback below just as much as to being offline, and it is worth
+// naming the one moment it does not cover: a first sign in. auth.html has been fetched by then and
+// index.html has not, so a server error on the hop straight after a code is verified has nothing on
+// the device to fall back to. Closing that would mean precaching, which the paragraph above rejects
+// for reasons that still hold. It is a known gap, not an oversight.
 
 const CACHE = 'ptc-runtime';
 
@@ -60,6 +66,21 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/**
+ * The copy on the device, if this page has ever been fetched successfully. Shared by the two
+ * places that fall back to it, a server error and no network at all, so the rule below is stated
+ * once.
+ *
+ * ignoreSearch, because a query string never changes what this server returns: every file here is
+ * static. Matching on the full URL meant index.html?local=1 missed the index.html sitting in the
+ * cache, and the same would go for auth.html?next=, for a link somebody shared with a tracking
+ * parameter on it, and for any cache buster ever appended to a module. Each of those would be a
+ * fresh miss and, offline, a browser error over a file that is already on the device.
+ */
+function cached(request) {
+  return caches.match(request, { ignoreSearch: true });
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
@@ -87,16 +108,27 @@ self.addEventListener('fetch', (event) => {
           // Not awaited: the page gets its bytes now and the cache catches up. A failed write here
           // costs a future offline load, never this one.
           caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+          return response;
+        }
+
+        // A server error is not an answer about this file, so the copy on the device is still the
+        // best one there is. A 5xx does not throw, so before this branch existed the catch below
+        // never ran, the cache was never asked, and the error body was returned as though it were
+        // the file: a client signing in got GitHub's own 500 page filling a standalone home screen
+        // app, with no URL bar to reload from. Pages is fronted by a CDN, and one unhealthy edge
+        // serves a few people an error while the status page stays green. From in here that is
+        // indistinguishable from being offline, so it is answered the same way.
+        //
+        // 5xx only. A 404 still passes straight through, because that one IS an answer about the
+        // file: it is not in the deploy any more, and serving a cached copy over it is how a
+        // device stays pinned to a module that no longer exists.
+        if (response.status >= 500) {
+          const stale = await cached(request);
+          if (stale) return stale;
         }
         return response;
       } catch (offline) {
-        // ignoreSearch, because a query string never changes what this server returns: every file
-        // here is static. Matching on the full URL meant index.html?local=1 missed the index.html
-        // sitting in the cache, and the same would go for auth.html?next=, for a link somebody
-        // shared with a tracking parameter on it, and for any cache buster ever appended to a
-        // module. Each of those would be a fresh miss and, offline, a browser error over a file
-        // that is already on the device.
-        const hit = await caches.match(request, { ignoreSearch: true });
+        const hit = await cached(request);
         if (hit) return hit;
         // Nothing cached and nothing reachable. Rethrowing gives the browser's own error, which is
         // what would have happened with no worker installed at all: this file's job is to make
