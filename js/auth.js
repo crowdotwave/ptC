@@ -8,15 +8,20 @@
 /**
  * Supabase makes one address wait this long between sends. Mirrored here so the button can
  * refuse locally instead of spending a send to be told no.
+ *
+ * Mirrored, so it can drift: this is a dashboard setting and nothing checks that the two agree.
+ * Too high is the worse direction, because the button then refuses a send Supabase would have
+ * accepted, on the one screen nobody can get past. describeAuthError reads the real wait out of
+ * the refusal when one comes back, so a send that goes out anyway still reports the truth.
  */
 export const RESEND_COOLDOWN_S = 60;
 
 /**
  * How long a code stays good, matching Supabase's default email OTP expiry.
  *
- * This number is why a rate limit is not a lockout. The send limit and the code lifetime are
- * both an hour, so somebody who has been cut off almost always has a live code already sitting
- * in their inbox. The screen has to let them type it.
+ * This number is why a rate limit is not a lockout. The quota window and the code lifetime are
+ * both an hour, whatever the quota itself is set to, so somebody who has been cut off almost
+ * always has a live code already sitting in their inbox. The screen has to let them type it.
  */
 export const CODE_LIFETIME_S = 3600;
 
