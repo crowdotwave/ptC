@@ -24,7 +24,7 @@ import { syncMessage, publishSync } from './js/sync-status.js';
 import { mountShell } from './js/nav.js';
 import { createStorage } from './js/storage.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
-import { can, staysSignedIn } from './js/boot.js';
+import { can, staysSignedIn, routeWithoutSession } from './js/boot.js';
 import {
   describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
@@ -2565,6 +2565,52 @@ test('an identity with nobody attached to it is not enough', () => {
   // Signed in once, and whoami never landed. There is no actor to hand a screen, so this falls
   // through to the sign in screen rather than opening on a null.
   ok(!staysSignedIn({ client: null, identity: 'auth:user-1', actor: null }));
+});
+
+// ------------------------------------------------------- a failure is not a request for the demo
+//
+// routeWithoutSession. The seeded data is somebody's whole training as far as every screen is
+// concerned, so the question of when to open it is worth its own function.
+//
+// The bug: a first time visitor whose CDN did not answer was seeded rather than sent to the sign
+// in screen. getSupabase() returns null for a phone with one bar, a blocker that eats jsdelivr,
+// and a bad minute at the CDN, and the fallback read all three as "show the fake data". A stranger
+// opening https://.../index.html got Emma's program, her history and her charts, with no sign in
+// anywhere on screen.
+
+const stranger = { flagged: false, configured: true, client: null, identity: null, actor: null };
+
+test('a library that did not load is not a request for the seeded data', () => {
+  eq(routeWithoutSession(stranger), 'signed-out');
+});
+
+test('a stranger with the library goes to the sign in screen too', () => {
+  eq(routeWithoutSession({ ...stranger, client: {} }), 'signed-out');
+});
+
+test('the flag is the way in, and it does not need a network', () => {
+  eq(routeWithoutSession({ ...stranger, flagged: true }), 'seeded');
+  eq(routeWithoutSession({ ...stranger, flagged: true, client: {} }), 'seeded');
+});
+
+test('a build with no project in it has nothing else to show', () => {
+  // The one arm besides the flag, and it is allowed because it cannot differ between two loads of
+  // the same page the way a fetch can.
+  eq(routeWithoutSession({ ...stranger, configured: false }), 'seeded');
+});
+
+test('a signed in device with no library stays signed in, and is not seeded', () => {
+  eq(routeWithoutSession({ ...stranger, ...onDisk }), 'offline');
+});
+
+test('asking for the seed by hand outranks the disk', () => {
+  // The one case where wiping a signed in device's mirror is the intent.
+  eq(routeWithoutSession({ ...stranger, ...onDisk, flagged: true }), 'seeded');
+});
+
+test('a page that refuses the seed refuses it even when asked', () => {
+  eq(routeWithoutSession({ ...stranger, flagged: true, allowLocal: false }), 'signed-out');
+  eq(routeWithoutSession({ ...stranger, ...onDisk, allowLocal: false }), 'offline', 'offline first');
 });
 
 // The regression this replaced. The dev switch used to hand a client their coach's trainer id,

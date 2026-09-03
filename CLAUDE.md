@@ -957,6 +957,16 @@ a chart. Real accounts have a handful of sets between them, and will for months.
 a real client has a few blocks logged and the progress screens can be developed against those.
 `?local=0` turns it off. It is sticky for the browser session, so following a link keeps it.
 
+**The flag is the only way in, and a failure is never a second one.** `routeWithoutSession` in
+`js/boot.js` decides this, and the two things it will open the seed for are the flag and a build
+with no project in `config.js`, which is a fact about the deploy rather than about the minute. It
+used to open it for a null supabase client as well, and that is a network fault: `getSupabase()`
+answers null for a phone with one bar, a blocker that eats jsdelivr, or a bad minute at the CDN. So
+a stranger loading `index.html` was handed the seeded client's program, history and charts with no
+sign in anywhere on screen, and every tap wrote into a database that a real sign in then wipes. A
+library that did not load is signed out, which sends them to `auth.html`, which already says that
+the library did not load and asks them to reload.
+
 ## Build order
 
 1. Storage adapter plus seeded fake data. No backend.

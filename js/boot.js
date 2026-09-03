@@ -86,6 +86,35 @@ export function staysSignedIn({ client, identity, actor }) {
   return Boolean(actor);
 }
 
+/**
+ * What a load with no session actually is. One of:
+ *
+ *   offline      signed in on this device before, and the library simply did not load
+ *   seeded       asked for the fake data, or a build with no backend in it at all
+ *   signed-out   nobody here yet, so the sign in screen is the answer
+ *
+ * Pure, and the whole decision in one place, because the arms of it have very different costs and
+ * they are only comparable side by side: one of them wipes the database and hands over somebody
+ * else's training.
+ *
+ * `client` is the library, and it is read for the offline arm and deliberately not for the seeded
+ * one. That asymmetry is the bug this function was extracted to pin down. A CDN that did not
+ * answer is a network fact, so it can say "this device is offline" alongside what is on the disk,
+ * and it can never say "this person came for the demo": a first time visitor with one bar used to
+ * be seeded, silently, and shown a stranger's program in place of the sign in screen. `configured`
+ * is the other half of that, and it is allowed to route to seeded because it is a fact about the
+ * build rather than about the minute: it cannot differ between two loads of the same page.
+ */
+export function routeWithoutSession({
+  flagged, configured, client, identity, actor, allowLocal = true,
+}) {
+  // The explicit flag wins over the disk. Somebody who asked for the seeded data by hand is not
+  // somebody this needs to protect from it, and that is the one case where the wipe is the intent.
+  if (!flagged && staysSignedIn({ client, identity, actor })) return 'offline';
+  if (!allowLocal) return 'signed-out';
+  return flagged || !configured ? 'seeded' : 'signed-out';
+}
+
 // Where each role belongs when it turns up somewhere it does not. The client logging screen and
 // the trainer view are different products sharing a deploy, not two tabs of one thing.
 const HOME = { trainer: 'trainer.html', client: 'index.html' };
@@ -127,14 +156,21 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   // No session. Either run on fake data because somebody asked for it, or say so and let the
   // page redirect. Never quietly show a seeded trainer to a person who expected their own data.
   if (!session) {
-    // Checked before anything else, because everything below this either redirects to the sign in
-    // screen or wipes the database, and neither is the right answer for a phone that is merely off
+    // Read before anything is decided, because two of the three answers below either redirect to
+    // the sign in screen or wipe the database, and neither is right for a phone that is merely off
     // the network. See staysSignedIn: this device knows whose it is without asking the server.
     const identity = await storage.getMeta(IDENTITY_KEY);
     const known = await storage.getMeta(ACTOR_KEY);
-    // The explicit flag still wins. Somebody who asked for the seeded data by hand is not somebody
-    // this needs to protect from it, and that is the one case where the wipe is the intent.
-    if (!stickyFlag('local') && staysSignedIn({ client, identity, actor: known })) {
+    const route = routeWithoutSession({
+      flagged: stickyFlag('local'),
+      configured: hasConfig(),
+      client,
+      identity,
+      actor: known,
+      allowLocal,
+    });
+
+    if (route === 'offline') {
       if (misrouted(role, known)) {
         return { mode: 'wrong-role', storage, client: null, session: null, actor: known, error: null };
       }
@@ -143,8 +179,10 @@ export async function boot({ allowLocal = true, role = null } = {}) {
       return { mode: 'offline', storage, client: null, session: null, actor: known, error: null };
     }
 
-    const wantsLocal = stickyFlag('local') || !hasConfig() || !client;
-    if (!wantsLocal || !allowLocal) {
+    // Nobody here yet. gate() sends them to auth.html, which already says the true thing about a
+    // library that did not load and offers a reload, rather than seeding a stranger's training
+    // over the top of the question they came to answer.
+    if (route === 'signed-out') {
       return { mode: 'signed-out', storage, client, session: null, actor: null, error: null };
     }
     await alignIdentity(storage, 'local');
