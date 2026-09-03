@@ -14,10 +14,16 @@ whoever fetches it first. That is the scanner, on delivery, before the phone has
 person taps a link that is already dead and reads `otp_expired`, which the app used to relay as
 "Email link is invalid or has expired". So they ask for another one.
 
-That second ask is what turned one client's bad afternoon into an outage for everybody. Supabase's
-built in sender allows **two auth emails per hour for the whole project**, and there is a further
-60 seconds between sends for one address. Two dead links and the project has nothing left to send,
-to anyone.
+That second ask is what turned one client's bad afternoon into an outage for everybody. The project
+was on Supabase's built in sender then, which allowed **two auth emails per hour for the whole
+project**, and a further wait of about a minute between sends to one address. Two dead links and
+there was nothing left to send, to anyone.
+
+Step 1 below moves the project off that sender, so two an hour is not the ceiling any more. What it
+is now lives in the dashboard under Authentication, Rate Limits, and that is the only place worth
+reading it: nothing in this repo mirrors the number, on purpose. The shape is what the app is built
+against, and the shape is unchanged: a per address wait, a project wide hourly ceiling, and a code
+that outlives both.
 
 **The code is not a second token, it is the same token in a form a scanner cannot spend.** This is
 the part that is easy to get wrong: adding `{{ .Token }}` while leaving `{{ .ConfirmationURL }}` in
@@ -44,8 +50,9 @@ through a new sender can land in junk. Check there before concluding it did not 
 **2. Authentication, SMTP Settings.** Enable custom SMTP and paste those in. The template editors
 unlock once this is on, which may need a reload.
 
-**3. Authentication, Rate Limits.** Off the floor of two an hour. The default once SMTP is
-configured is 30 an hour and it is adjustable.
+**3. Authentication, Rate Limits.** Off the floor of two an hour. Configuring SMTP both raises the
+default and makes it adjustable, so set it deliberately rather than accepting whatever appears
+there. The dashboard is the authority on the current value.
 
 **4. Authentication, Emails.** Paste `sign-in-code.html` into **both** Confirm signup and Magic
 Link, subject something like `Your ptC sign in code`. Confirm no `{{ .ConfirmationURL }}` survives

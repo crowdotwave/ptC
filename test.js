@@ -2973,9 +2973,9 @@ test('the summary counts what a trainer is about to create', () => {
 // ------------------------------------------------------------------ being told no, usefully
 //
 // Outlook fetches links to scan them, which spends a single use sign in link before the person
-// taps it. The resends that follow exhaust a sending quota of two an hour, and the raw Supabase
-// message for that states a fact about our project rather than the thing to do, which is to type
-// the code from the email they already have.
+// taps it. The resends that follow exhaust the project's hourly sending quota, whatever the
+// dashboard has it set to, and the raw Supabase message for that states a fact about our project
+// rather than the thing to do, which is to type the code from the email they already have.
 
 test('a per address cooldown is read out of the message and carries its own count', () => {
   const d = describeAuthError({ message: 'For security purposes, you can only request this after 51 seconds.' });

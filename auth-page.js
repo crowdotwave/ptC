@@ -6,8 +6,16 @@
 // A code is the only way in, and there is no link anywhere, which is the reverse of how this
 // started. The reason is Outlook. Outlook fetches every link it delivers, to scan it. A Supabase
 // sign in link is spent by whoever fetches it first, so the scanner spent it and the person tapped
-// a link that was already dead. They sent another. The built in sender allows two auth emails an
-// hour for the whole project, so the second dead link locked out every account, not just theirs.
+// a link that was already dead. They sent another. The project was on Supabase's built in sender
+// then, which allowed two auth emails an hour for the whole project, so the second dead link locked
+// out every account, not just theirs.
+//
+// That figure is history, not a current constraint. The project sends through custom SMTP now, so
+// the ceiling is whatever Authentication, Rate Limits holds, and this file deliberately does not
+// name it: a number written down here is one nobody re-reads when the dashboard moves, which is how
+// this comment came to describe a limit the project had already left behind. The shape is what the
+// screen depends on and the shape has not changed: a per address wait between sends, a project wide
+// ceiling per hour, and a code that outlives both.
 //
 // The emails now carry six digits and no link at all, because the link and the code are one token
 // and a scanner following the link spends the code with it. That lives in the Supabase templates
