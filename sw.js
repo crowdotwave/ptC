@@ -12,7 +12,8 @@
 // should not add it here. Getting sets off the phone sooner is js/storage.js push() and the
 // listeners in js/boot.js, which run in the page.
 //
-// Network first, cache as the fallback, and nothing precached. Three consequences, all wanted:
+// Network first, cache as the fallback, and the whole app warmed on install. Three consequences,
+// all wanted:
 //
 //   - A deploy is picked up on the next load, with no version to bump. This repo has no build
 //     step, so a versioned precache would mean a human remembering to edit a constant, and the
@@ -26,15 +27,20 @@
 //   - It is not a speed optimisation and is not meant to be. The network is still asked first
 //     every time.
 //
-// A page has to have been loaded online once for it to be available offline, which is the whole of
-// the cost of not precaching. Signing in and receiving a program both require a network, so by the
-// time somebody is training the pages they train with have been fetched.
+// This file used to precache nothing, and the note here called the gap that left a known one: a
+// device only ever held the pages it had already been to, so a first sign in had auth.html on it
+// and nothing else, and the hop straight after a code was verified had nothing to fall back to.
 //
-// That bound applies to the 5xx fallback below just as much as to being offline, and it is worth
-// naming the one moment it does not cover: a first sign in. auth.html has been fetched by then and
-// index.html has not, so a server error on the hop straight after a code is verified has nothing on
-// the device to fall back to. Closing that would mean precaching, which the paragraph above rejects
-// for reasons that still hold. It is a known gap, not an oversight.
+// It was worse than that in practice, because js/worker.js was not called from the sign in screen
+// at all. So the FIRST load, on a phone that has never been here, ran with no worker and an empty
+// cache, and GitHub answered it with its 503 unicorn page. A client trying to sign in got that
+// instead of this app, and there was no version of these rules under which she would not have.
+//
+// Both halves are closed now: the worker installs from the sign in screen, and it warms the whole
+// shell rather than one page. One successful load of any page in this app now leaves every page of
+// it on the device. Nothing about the freshness argument above changes, because SHELL carries no
+// versions and pins nothing: every request still goes to the network first and the warm copies are
+// only ever a fallback, refreshed by every successful fetch.
 
 const CACHE = 'ptc-runtime';
 
@@ -46,10 +52,105 @@ const CACHE = 'ptc-runtime';
 // the ordinary signed in route is taken, offline and all.
 const LIBRARY_ORIGIN = 'https://cdn.jsdelivr.net';
 
+// Every file the five shipped pages reach for, which is what has to be on the device for any of
+// them to open when the host will not answer. The dev pages are deliberately absent: test.html,
+// dev.html, emom-test.html and local.html are ours, and a client's phone should not carry them.
+//
+// Written out by hand because there is no build step to generate it, and kept honest by a test
+// rather than by discipline: test.js walks the same graph these pages actually import and fails
+// when this list has fallen behind. A missing entry is not a broken app, since the runtime caching
+// below stores whatever a page successfully fetched, but it is a file a first sign in would not
+// have when the host answers with an error, which is the failure this list exists for.
+const SHELL = [
+  'index.html',
+  'auth.html',
+  'progress.html',
+  'trainer.html',
+  'builder.html',
+  'app.js',
+  'auth-page.js',
+  'progress.js',
+  'trainer.js',
+  'builder.js',
+  'config.js',
+  'styles.css',
+  'manifest.webmanifest',
+  'apple-touch-icon.png',
+  'js/auth.js',
+  'js/boot.js',
+  'js/charts.js',
+  'js/consistency-view.js',
+  'js/consistency.js',
+  'js/dates.js',
+  'js/emom-view.js',
+  'js/emom.js',
+  'js/feel.js',
+  'js/history.js',
+  'js/hold.js',
+  'js/import-program.js',
+  'js/import-ui.js',
+  'js/lift-picker.js',
+  'js/nav.js',
+  'js/plan.js',
+  'js/prefill.js',
+  'js/program-view.js',
+  'js/program.js',
+  'js/progression.js',
+  'js/remote.js',
+  'js/schema.js',
+  'js/seed.js',
+  'js/session-readout.js',
+  'js/session-view.js',
+  'js/session-volume.js',
+  'js/session.js',
+  'js/snapshot.js',
+  'js/storage-indexeddb.js',
+  'js/storage.js',
+  'js/supabase.js',
+  'js/sync-status.js',
+  'js/track.js',
+  'js/units.js',
+  'js/worker.js',
+  'js/workout-view.js',
+  'js/xlsx.js',
+];
+
+/**
+ * Fills the cache with the shell, one file at a time and forgiving every failure.
+ *
+ * Not cache.addAll, which rejects the whole batch if a single entry 404s: one stale line in SHELL
+ * would then mean a device with nothing cached at all, which is the state this is here to end.
+ * Whatever arrives is stored and whatever does not is left to the runtime caching below.
+ *
+ * `cache: 'reload'` so these come from the network rather than from an HTTP cache that may be
+ * holding the copies this deploy replaced. Wrapped, because a Request built with that option is
+ * not supported everywhere and a warm cache is worth more than a perfectly fresh one.
+ */
+async function warm() {
+  const cache = await caches.open(CACHE);
+  await Promise.allSettled(
+    SHELL.map(async (path) => {
+      const url = new URL(path, self.location.href).href;
+      let response;
+      try {
+        response = await fetch(url, { cache: 'reload' });
+      } catch {
+        response = await fetch(url);
+      }
+      if (response.ok) await cache.put(url, response);
+    }),
+  );
+}
+
 self.addEventListener('install', (event) => {
-  // Nothing to precache, so there is nothing to wait for. Taking over immediately is safe here in
-  // a way it would not be for a versioned bundle: this worker pins no particular copy of anything.
-  event.waitUntil(self.skipWaiting());
+  // Taking over immediately is safe here in a way it would not be for a versioned bundle: this
+  // worker pins no particular copy of anything, so a page half loaded from the network and half
+  // from this cache is still one coherent deploy.
+  //
+  // The warm up is awaited so the worker stays alive until it finishes, and it is allowed to fail:
+  // an install that threw would leave the device with no worker at all, which is strictly worse
+  // than one with a partly filled cache.
+  event.waitUntil(Promise.all([self.skipWaiting(), warm().catch(() => {})]));
 });
 
 self.addEventListener('activate', (event) => {

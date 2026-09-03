@@ -42,12 +42,27 @@ in the UI. UI-level filtering is a bug, not an implementation.
 - IndexedDB for local-first writes. Every write lands locally first and syncs in the
   background. The app must be fully usable with no network.
 - Deployed as static files. GitHub Pages is fine.
-- `sw.js` is a service worker, and its only job is making the page itself load with no network.
-  Network first, cache as the fallback, nothing precached, so a deploy is picked up on the next
-  load and there is no version constant for anyone to forget to bump. It does **not** sync in the
+- `sw.js` is a service worker, and its only job is making the page itself load when the network or
+  the host will not answer. Network first, cache as the fallback, and no version constant for
+  anyone to forget to bump, so a deploy is picked up on the next load. It does **not** sync in the
   background: the Background Sync API is not implemented in WebKit, so on the phones this app is
   used on there is no such thing as flushing the outbox while the app is closed. Getting sets off
   the phone sooner is `push()` and the listeners in `js/boot.js`, which run in the page.
+- **The whole shell is warmed on install, and the sign in screen is what installs it.** This
+  reverses "nothing precached", which was written as a freshness argument and cost a client the
+  only first impression she will ever have of this product: GitHub Pages answered her first request
+  with its own 503 unicorn page, and her phone held nothing to serve instead. It could not have.
+  `installWorker` lived in `js/boot.js`, and `auth.html` is the one page that does not boot the app,
+  so the worker was installed no earlier than the first load of `index.html`, which happens after
+  somebody has already signed in. The first load, for every client, was the one load with no
+  fallback. So registration moved to `js/worker.js` and the sign in screen calls it before it
+  checks anything else, and `SHELL` in `sw.js` names every file the five shipped pages reach for.
+  Freshness is untouched by this: `SHELL` pins no versions, every request still goes to the network
+  first, and a warm copy is only ever the fallback. The list is hand written because there is no
+  build step, and it is kept honest by a test rather than by discipline, which walks the pages'
+  real imports and fails on anything reachable that the list has not got. Pages is fronted by a
+  CDN and one unhealthy edge serves an error while the status page stays green, so this will
+  happen again, and the only question is what is already on the phone when it does.
 
 **Offline is not signed out, and getting that wrong deletes somebody's training.** `getSupabase()`
 answers null when the CDN cannot be fetched, and reading a session needs the library, so with no

@@ -23,6 +23,7 @@
 //      is how the quota went in the first place.
 
 import { getSupabase, hasConfig } from './js/supabase.js';
+import { installWorker } from './js/worker.js';
 import {
   currentSession, sendSignInEmail, verifyCode, describeAuthError, cooldownLeft,
   RESEND_COOLDOWN_S,
@@ -124,6 +125,13 @@ function land() {
 }
 
 async function main() {
+  // First, before the config is even checked, and not awaited. This is the first page anybody in
+  // this app ever loads, so it is the first chance there is to put a copy of the app on the device,
+  // and until it ran here there was none: a client's very first load was also the only load with
+  // nothing to fall back on, which is exactly when GitHub served her its 503 page instead of this
+  // one. Nothing below depends on it.
+  installWorker();
+
   if (!hasConfig()) {
     lede.textContent = 'This build has no backend configured.';
     say('Add a project to config.js, or open the app with ?local=1 to use seeded data.', 'fail');

@@ -2613,6 +2613,94 @@ test('a page that refuses the seed refuses it even when asked', () => {
   eq(routeWithoutSession({ ...stranger, ...onDisk, allowLocal: false }), 'offline', 'offline first');
 });
 
+// --------------------------------------------------------- the shell the worker has to have warm
+//
+// sw.js SHELL against what the shipped pages actually import.
+//
+// The failure this guards is not hypothetical and it is not small. A client opened the app to sign
+// in, GitHub Pages answered her first ever request with its 503 page, and her phone had nothing
+// cached to serve instead, so what she saw of this product was a unicorn and an apology from
+// somebody else. The worker now warms the whole app on install, which is only true for as long as
+// SHELL names the whole app.
+//
+// So this walks the same graph a browser walks, from the five shipped pages outward, and fails on
+// anything reachable that the list has not got. Hand maintained lists rot, and the shape of the rot
+// here is silent: the app keeps working, every page still loads from the network, and the only
+// symptom is a file missing from a device on the one day the host is down.
+//
+// Over http, because that is how the app is served and how this suite is meant to be opened. On
+// file:// the fetches cannot run and the test says so rather than passing quietly.
+
+const SHIPPED_PAGES = [
+  'index.html', 'auth.html', 'progress.html', 'trainer.html', 'builder.html',
+];
+
+/** Everything a file asks the browser for, as written. Relative paths only. */
+function referencesIn(source, isHtml) {
+  const pattern = isHtml
+    ? /(?:src|href)="([^"]+)"/g
+    : /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
+  return [...source.matchAll(pattern)]
+    .map((match) => match[1])
+    .filter((ref) => !/^(?:https?:|data:|mailto:|#)/.test(ref));
+}
+
+/** Resolves a reference the way the browser does, and hands back a repo relative path. */
+function resolveFrom(file, ref) {
+  const base = new URL(file, location.href);
+  return new URL(ref, base).href.replace(new URL('./', location.href).href, '');
+}
+
+test('the precache list holds every file the shipped pages reach for', async () => {
+  const swSource = await (await fetch('sw.js')).text();
+  const block = swSource.match(/const SHELL = \[([\s\S]*?)\];/);
+  ok(block, 'sw.js no longer declares a SHELL list');
+  const shell = new Set([...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]));
+
+  const walked = new Set();
+  const queue = [...SHIPPED_PAGES];
+  const missing = [];
+
+  while (queue.length) {
+    const file = queue.shift();
+    if (walked.has(file)) continue;
+    walked.add(file);
+    if (!shell.has(file)) missing.push(file);
+    if (!/\.(html|js)$/.test(file)) continue;
+
+    const response = await fetch(file);
+    ok(response.ok, `${file} is referenced but does not exist`);
+    for (const ref of referencesIn(await response.text(), file.endsWith('.html'))) {
+      const target = resolveFrom(file, ref);
+      if (!walked.has(target)) queue.push(target);
+    }
+  }
+
+  eq(missing, [], 'files a page loads that sw.js would not have warmed:');
+  ok(walked.size > 20, 'the walk found almost nothing, so it is not walking');
+});
+
+test('the precache list carries nothing that is not there', async () => {
+  // The other direction. A renamed or deleted file left in SHELL is a 404 on every install, and
+  // warm() swallows those by design, so nothing else would ever say.
+  const swSource = await (await fetch('sw.js')).text();
+  const block = swSource.match(/const SHELL = \[([\s\S]*?)\];/);
+  const shell = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const checked = await Promise.all(
+    shell.map(async (path) => [path, (await fetch(path, { method: 'GET' })).ok]),
+  );
+  eq(checked.filter(([, exists]) => !exists).map(([path]) => path), [], 'listed but missing:');
+});
+
+test('no dev page is on a client phone', async () => {
+  const swSource = await (await fetch('sw.js')).text();
+  const block = swSource.match(/const SHELL = \[([\s\S]*?)\];/);
+  const shell = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const ours = ['test.html', 'test.js', 'dev.html', 'dev.js', 'dev.css', 'emom-test.html',
+    'emom-test.js', 'local.html', 'manifest-local.webmanifest'];
+  eq(shell.filter((path) => ours.includes(path)), [], 'these are ours, not a client\'s:');
+});
+
 // The regression this replaced. The dev switch used to hand a client their coach's trainer id,
 // which under a capability check would show every client the coaching navigation.
 test('a coach id belonging to somebody else is not a capability', () => {

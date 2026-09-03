@@ -17,6 +17,7 @@ import { currentSession, signOut } from './auth.js';
 import { createRemote } from './remote.js';
 import { seed, isSeeded, getDefaultClientId } from './seed.js';
 import { publishSync } from './sync-status.js';
+import { installWorker } from './worker.js';
 
 // What the local database currently holds. Either 'local' for seeded fake data, or the auth
 // user whose rows are mirrored here.
@@ -282,24 +283,6 @@ export async function boot({ allowLocal = true, role = null } = {}) {
  * Best effort by construction. A flush that the browser kills on the way out loses nothing, the
  * outbox is on disk and keeps every entry the server did not take.
  */
-/**
- * Installs the service worker, whose entire job is making the app open with no network.
- *
- * Resolved against this module rather than the page, so it registers the same worker and claims
- * the same scope from any of the five pages that import this file, and on a deploy under a
- * subpath rather than a domain root. Registering 'sw.js' relative to the page would work only
- * while every page sits in one directory.
- *
- * Failure is ignored on purpose. No worker means no offline loading, which is exactly where this
- * app was until now, and there is nothing a person holding a phone could do about it anyway.
- * file:// has no service workers at all, and neither does a private window in some browsers.
- */
-function installWorker() {
-  if (!('serviceWorker' in navigator)) return;
-  if (!location.protocol.startsWith('http')) return;
-  navigator.serviceWorker.register(new URL('../sw.js', import.meta.url)).catch(() => {});
-}
-
 function watchConnectivity(storage) {
   const flush = () => {
     storage.push().then(publishSync, () => {});
