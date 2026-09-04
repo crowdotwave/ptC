@@ -76,7 +76,7 @@ function renderCell(cell) {
 
   return (
     `<td class="cal__cell${today}"${cell.isToday ? ' aria-current="date"' : ''}>` +
-    `<button type="button" class="cal__day is-bar-${cell.barSlot}` +
+    `<button type="button" class="cal__day` +
     `${cell.isDeload ? ' is-deload' : ''}${cell.isRecord ? ' is-record' : ''}" ` +
     `style="${dayStyle(cell.colours)}" ` +
     `data-day="${esc(cell.day)}" aria-label="${esc(label)}">` +

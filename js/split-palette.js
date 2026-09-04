@@ -62,6 +62,12 @@ const BLOCK_HUES = [
 ];
 
 /**
+ * The band a day falls in when this palette has run out of honest answers: no hue, and saying so.
+ * Reached by a program with four blocks, and by a session logged with no program behind it at all.
+ */
+export const NEUTRAL_BLOCK = BLOCK_HUES.length - 1;
+
+/**
  * The face lightness window, in oklch L.
  *
  * This is the one number that is not free. CLAUDE.md fixes the ceiling at the exact 7:1 boundary
@@ -72,18 +78,18 @@ const BLOCK_HUES = [
  *
  * Days inside a block are spread across it from the top down, so the first day of a block is its
  * brightest. That gives the within block ordering a direction rather than a scatter.
+ *
+ * Set by measurement, and the measurement had to be fixed first. An earlier pass read the ratio off
+ * getComputedStyle, which hands an oklch() colour straight back, so three numbers were parsed as RGB
+ * with the HUE landing in the blue channel: it reported a confident 5.54 for every face on the grid
+ * and the correction made from it was worthless. The check paints a pixel now.
+ *
+ * Measured properly the band runs Y 0.031 to 0.070, against that 0.0801 ceiling and a soft floor
+ * near 0.030 below which a cell stops reading as filled at all. The TOP is set by the brightest hue
+ * rather than by an average: green carries most of the luminance in sRGB, so at one oklch L the
+ * emerald block measures about a sixth brighter than the rose one, and pinning the top to the rose
+ * would put every B day over the line.
  */
-// Set by measurement, and the measurement had to be fixed first. An earlier pass read the ratio off
-// getComputedStyle, which hands an oklch() colour straight back, so three numbers were parsed as
-// RGB with the HUE landing in the blue channel: it reported a confident 5.54 for every face on the
-// grid and the correction made from it was worthless. The check paints a pixel now.
-//
-// Measured properly, the band runs from Y 0.032 to about Y 0.078 against a ceiling of 0.0801, which
-// is CLAUDE.md's exact 7:1 boundary for --text-primary on a cell face, and a soft floor near 0.030
-// below which a cell stops reading as filled at all. The TOP is set by the brightest hue rather
-// than by an average: green carries most of the luminance in sRGB, so at one oklch L the emerald
-// block measures about a sixth brighter than the rose one, and pinning the top to the rose would
-// put every B day over the line.
 const FACE_L_TOP = 0.405;
 const FACE_L_BOTTOM = 0.325;
 

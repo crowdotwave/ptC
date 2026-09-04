@@ -31,7 +31,7 @@ import {
 import { validate, OUTBOX_STORE } from './js/schema.js';
 import { loadLabel, loadValue, unit, setUnit } from './js/units.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
-import { buildConsistency, splitGlyphs, SPLIT_SLOTS } from './js/consistency.js';
+import { buildConsistency, splitGlyphs } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
 import { smoothPath, renderRepsAtLoadChart } from './js/charts.js';
 import { planForItem, setCountOf, countOf, nextSteppers, incrementOf } from './js/plan.js';
@@ -1504,7 +1504,7 @@ test('a day carries the split the client actually did, read off the frozen progr
   });
   const cell = cellFor(built, '2026-08-03');
   eq(cell.label, 'LOWER A');
-  eq(cell.indexInBlock ?? cell.barSlot - 1, 1, 'second day of the rotation, second bar position');
+  eq(cell.orderInBlock, 1, 'second day of the rotation');
 });
 
 test('the split comes from that session\'s own assignment, not from the current one', () => {
@@ -1653,7 +1653,7 @@ test('a session pointing at an assignment that is not there is still a session',
   const cell = cellFor(built, '2026-08-03');
   eq(cell.sessionIds, ['s1'], 'not dropped for failing to fit the model');
   eq(cell.label, 'Unprogrammed');
-  eq(cell.barSlot, 4, 'the colourless band');
+  ok(cell.colours.face.includes('oklch'), 'still drawn, in the colourless band');
 });
 
 // ---------------------------------------------------------------- blocks, and the key that lied

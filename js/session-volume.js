@@ -116,7 +116,7 @@ export function buildSessionVolume({ sessions = [], setLogs = [], assignments = 
     if (!byLabel.has(who.label)) {
       byLabel.set(who.label, {
         key: who.label, label: who.label, glyph: who.glyph, block: who.block,
-        colours: who.colours, barSlot: who.barSlot, points: [], byDay: new Map(),
+        colours: who.colours, orderInBlock: who.orderInBlock, points: [], byDay: new Map(),
       });
     }
     const line = byLabel.get(who.label);
@@ -168,7 +168,7 @@ export function buildSessionVolume({ sessions = [], setLogs = [], assignments = 
     .sort(
       (a, b) =>
         String(a.block ?? '~').localeCompare(String(b.block ?? '~')) ||
-        a.barSlot - b.barSlot ||
+        a.orderInBlock - b.orderInBlock ||
         a.label.localeCompare(b.label),
     );
   const hidden = all.filter((line) => !kept.has(line.key));

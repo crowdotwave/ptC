@@ -665,13 +665,31 @@ Constraints:
   recoloured. That is the steppers, the log action, the rest timer and the record celebration, and
   it is not negotiable for them: a 1px neutral outline around a coloured slab reads as an
   unfinished border, which is what the steppers looked like with a `--muted` edge on violet.
-  Everything else is chrome, and chrome is flat: `--chrome-face`, no gradient, no lit edge, no
-  drop, no rest glow. Menus, list rows, cards, headers, secondary buttons, the tab bar.
-  The reason is scale rather than taste. A fall of light is how ONE object reads as liftable from a
-  metre away; it is not how a list of forty is drawn. Applying it per row gave the lift picker
-  eight bordered, gradient filled, glowing slabs stacked with gaps, which read as clutter at a
-  glance even though every row obeyed the rule. Before lighting a new control, ask which side of
-  that line it is on.
+  Everything else is chrome. **Chrome is not flat, it is quiet, and the line between them is
+  repetition rather than importance.** This rule used to read "chrome is flat: no gradient, no lit
+  edge, no drop", and it overshot its own argument. The argument, which is still the right one, is
+  scale: a fall of light is how ONE object reads as liftable from a metre away, and it is not how a
+  list of forty is drawn. Applying it per row gave the lift picker eight bordered, gradient filled,
+  glowing slabs stacked with gaps, which read as clutter at a glance even though every row obeyed
+  the rule. That says nothing about a control that appears once.
+  So chrome has two tiers, and the question to ask about a new control is how many of it are on
+  screen at a time:
+    - **A singular control**, one of its kind in view and usually the way into something: the day
+      chip, the lift picker's opener, the month stepper. It takes the lit top edge, a shallow face
+      gradient, and one soft specular pass. It never takes a glow, and it never takes the mid set
+      strengths, so it stays obviously quieter than the log action.
+    - **A repeated one**, appearing in a row or a list: secondary buttons, list rows, calendar
+      cells, tabs. Flat face, no gradient, no specular. Repetition is what makes light read as
+      clutter, and nothing about that has changed.
+  **Both tiers take light DIRECTION on the edge, and that part is universal.** Every chrome outline
+  is `--chrome-edge` on the top and `--chrome-edge-low` on the other three sides, never one even
+  hairline all the way round. This file already made that argument for veiled cards and then drew
+  every control the way the argument says not to: "a hairline of even weight all the way round is a
+  box drawn on a screen rather than an object sitting on one". A row of secondary buttons outlined
+  evenly in one violet is exactly the box being described.
+  The dimming rule below survives all of this, because it is the LIT edge that carries a control on
+  a phone turned down, and the lit edge is untouched at full strength. Only the three sides the
+  light was never claimed to reach are allowed to drop.
 - **A dimmed screen, not a badly lit gym, is what breaks a control.** This corrects a claim made
   throughout this file. Bad lighting means glare, which is ambient light on the glass ADDING a
   constant to everything: that is the 0.05 flare term in the contrast formula and it is why the

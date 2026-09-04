@@ -23,16 +23,7 @@
 import { localDayOf, monthKey, localMidnight, isoDate } from './dates.js';
 import { sortedDays, dayTitle } from './snapshot.js';
 import { weekIndexOf } from './progression.js';
-import { assignBlocks, dayColours } from './split-palette.js';
-
-/**
- * How many identity colours the grid has. Slot 4 is the colourless one and is also the overflow,
- * so a six day program puts days four, five and six all in it and lets the glyph separate them.
- *
- * Matches the --split-N-* token count in styles.css, where the hue arithmetic for why it is four
- * and not six lives.
- */
-export const SPLIT_SLOTS = 4;
+import { assignBlocks, dayColours, NEUTRAL_BLOCK } from './split-palette.js';
 
 /** Monday, matching every other week boundary in the app. */
 const WEEK_START = 1;
@@ -115,10 +106,10 @@ function daysOfAssignment(assignment) {
       // Every day carries its own colour now, rather than an index into four of them. See
       // js/split-palette.js for what broke and why hue moved from the day to the block.
       colours: dayColours(placing),
-      // Kept, and it no longer picks the colour. It is the position of the lit bar on the cell's
-      // top edge, which is the channel that has to keep working when two days of one block sit
-      // twenty degrees apart, so it counts within the block rather than across the program.
-      barSlot: Math.min(placing.indexInBlock, SPLIT_SLOTS - 1) + 1,
+      // Ordering only, now that the lit bar it used to position is gone. Uncapped, unlike the bar
+      // slot it replaced: that was clamped to four because there were four bar positions, which
+      // silently made the fifth and sixth day of a block sort equal to the fourth.
+      orderInBlock: placing.indexInBlock,
     };
   });
 }
@@ -166,9 +157,10 @@ export function identifySessions({ sessions = [], assignments = [] } = {}) {
       glyph: programDay ? programDay.glyph : '.',
       block: programDay ? programDay.block : null,
       // A session with no program behind it is still a session. It takes the colourless band and
-      // says so, rather than being dropped for not fitting the model.
-      colours: programDay ? programDay.colours : dayColours({ blockIndex: 3 }),
-      barSlot: programDay ? programDay.barSlot : SPLIT_SLOTS,
+      // says so, rather than being dropped for not fitting the model, and sorts after everything
+      // that does belong to a program.
+      colours: programDay ? programDay.colours : dayColours({ blockIndex: NEUTRAL_BLOCK }),
+      orderInBlock: programDay ? programDay.orderInBlock : Number.MAX_SAFE_INTEGER,
       weekIndex: week,
       isDeload: week !== null && deloadWeeks.includes(week),
     });
@@ -315,7 +307,7 @@ function buildMonth(year, month, byDay, today) {
         glyph: first ? first.glyph : null,
         block: first ? first.block : null,
         colours: first ? first.colours : null,
-        barSlot: first ? first.barSlot : null,
+        orderInBlock: first ? first.orderInBlock : null,
         isDeload: entries.some((e) => e.isDeload),
         isRecord: entries.some((e) => e.isRecord),
       });
@@ -328,7 +320,7 @@ function buildMonth(year, month, byDay, today) {
             glyph: entry.glyph,
             block: entry.block,
             colours: entry.colours,
-            barSlot: entry.barSlot,
+            orderInBlock: entry.orderInBlock,
           });
         }
         if (entry.isDeload) {
@@ -357,7 +349,7 @@ function buildMonth(year, month, byDay, today) {
     legend: [...legendByDay.values()].sort(
       (a, b) =>
         String(a.block ?? '~').localeCompare(String(b.block ?? '~')) ||
-        a.barSlot - b.barSlot ||
+        a.orderInBlock - b.orderInBlock ||
         a.label.localeCompare(b.label),
     ),
   };

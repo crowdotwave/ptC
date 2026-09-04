@@ -183,6 +183,21 @@
    * where the grey read 1.31. Striking and legible are the same change here, not a trade. */
   --chrome-edge: #9859cf; /*  4.67 / 1.55 at 15 percent brightness. Ground hue, 272deg */
 
+  /* The same edge, on the three sides the light does not hit.
+   *
+   * This file already makes the argument, one section up, about veiled cards: a hairline of even
+   * weight all the way round is a box drawn on a screen rather than an object sitting on one, which
+   * is why --veil-edge sits on the top and --veil-edge-low around the rest. Chrome never got the
+   * same treatment and every control in the app was outlined in one uniform line.
+   *
+   * The ratio matches the veil pair rather than being picked fresh: 13 against 38 is about 34
+   * percent, and this is 45, a little stronger because a control is small and its sides are short.
+   *
+   * The dimming argument in the lighting section survives this. What keeps a control readable on a
+   * phone turned down is the LIT edge, and the lit edge is untouched at full strength: it is only
+   * the three sides the light was never claimed to reach that drop. */
+  --chrome-edge-low: color-mix(in srgb, var(--chrome-edge) 45%, transparent);
+
   /* The fold between rows inside a card. Lighter than it was, and for the reason above rather than
    * for looks: it was --surface-raised-rim at 20 percent, which is a dark line on a dark card and
    * therefore not a line at all on a dimmed phone. Weaker than --chrome-edge, because that is the
@@ -801,7 +816,8 @@ button {
    * The 44px TAP target is kept, and kept honestly: see the ::after below. */
   min-height: 2.375rem;
   padding: var(--s-2) var(--s-3);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: var(--radius-control);
   color: var(--text-primary);
   font-size: var(--t-small);
@@ -1052,9 +1068,19 @@ button {
   max-width: 100%;
   min-height: 2.375rem;
   padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: 999px;
-  background: var(--chrome-face);
+  /* Singular control, so it takes the quiet tier: a shallow face gradient and one soft specular
+   * pass, on top of the edge direction every chrome outline now carries. No glow and none of the
+   * mid set strengths, so it stays obviously below the log action. See the lighting rule in
+   * CLAUDE.md for why "singular" is the test rather than "important". */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 5%, var(--chrome-face)) 0%,
+    var(--chrome-face) 55%,
+    color-mix(in srgb, var(--surface-base) 22%, var(--chrome-face)) 100%
+  );
 }
 
 /* Same tap target as every other chrome control, extended past the ink. */
@@ -1198,7 +1224,8 @@ button {
   padding: 0;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   overflow: hidden;
   list-style: none;
 }
@@ -2273,7 +2300,8 @@ button.worknav__row:active {
   flex-direction: column;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   /* The card clips, so the first and last rows take its corners without either of them having to
    * know it is first or last. */
   overflow: hidden;
@@ -2403,10 +2431,41 @@ button.row:active {
   display: block;
   width: 100%;
   padding: 0;
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: var(--radius-control);
-  background: var(--chrome-face);
   text-align: left;
+  /* Singular control, so it takes the quiet tier: a shallow face gradient and one soft specular
+   * pass, on top of the edge direction every chrome outline now carries. No glow and none of the
+   * mid set strengths, so it stays obviously below the log action. See the lighting rule in
+   * CLAUDE.md for why "singular" is the test rather than "important". */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 5%, var(--chrome-face)) 0%,
+    var(--chrome-face) 55%,
+    color-mix(in srgb, var(--surface-base) 22%, var(--chrome-face)) 100%
+  );
+}
+
+/* The specular pass the singular tier gets: wide, faint, sitting in the top half and gone well
+ * before the bottom. Big and soft on purpose, because a small bright spot reads as a glare artifact
+ * rather than as the shape of a thing catching light. Inert to the pointer. */
+.dayjump::before,
+.liftpick__open::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 40% 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 100% at 50% 0%,
+    color-mix(in srgb, var(--text-primary) 11%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+.liftpick__open {
+  position: relative;
 }
 
 .liftpick__open:active {
@@ -2620,7 +2679,8 @@ button.row:active {
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: 999px;
   overflow: hidden;
   background: linear-gradient(
@@ -2922,15 +2982,20 @@ button.row:active {
  * of the top edge: at an 11px radius that run is 11px to 35px on a 46px cell, and the four
  * positions below all land in it. The bar is also at top: 0 rather than -1px, so it sits under the
  * border rather than over it, and the border keeps its own unbroken line. */
-.cal__day::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  height: 3px;
-  border-radius: 0 0 3px 3px;
-  background: var(--cal-rim);
-  box-shadow: 0 0 8px 0 var(--glow-tint);
-}
+/* The slot bar is gone, and the rule is kept as a headstone because the reasoning is worth having.
+ *
+ * It was signal three: a lit segment on the top edge, positioned by slot, there to carry identity
+ * when the hues ran out. On a phone a cell is 46px, so that segment was about 9px long and 3px
+ * tall, carrying a glow. Nothing at that size reads as a POSITION along an edge. What it read as,
+ * to the person using the app, was a notch bitten out of the top of the tile, and it got flagged
+ * as damage twice before anybody looked at what it was.
+ *
+ * It is not needed now. Hue says which block, lightness says which day inside it, the glyph names
+ * the day exactly and fill says trained at all: four channels, which is what the encoding rules
+ * ask for. A fifth that cannot be decoded at the size it ships at is not a channel.
+ *
+ * If a positional channel is ever wanted back here, it has to be something a 46px tile can hold.
+ */
 
 /* --cal-line is the stroke value, and it is carried on the same class as the slab values so a cell
  * and the line for that same day cannot be given different slots by two different rules. */
@@ -2956,10 +3021,7 @@ button.row:active {
  * difference, so this is the channel carrying that distinction at a glance. Left and right stay
  * inside the flat run of the top edge, clear of the corner radius, for the reason written under
  * .cal__day::before. */
-.cal__day.is-bar-1::before { left: 24%; right: 56%; }
-.cal__day.is-bar-2::before { left: 40%; right: 40%; }
-.cal__day.is-bar-3::before { left: 56%; right: 24%; }
-.cal__day.is-bar-4::before { left: 24%; right: 24%; }
+
 
 /* The one focus ring in this app that faces inward.
  *
@@ -3397,7 +3459,8 @@ button.navlink:disabled {
   flex-direction: column;
   border-radius: var(--radius-sheet);
   background: var(--chrome-face);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   overflow: hidden;
 }
 
@@ -3956,7 +4019,8 @@ button.navlink:disabled {
 .said {
   margin: 0 0 var(--s-4);
   padding: var(--s-3);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: var(--radius);
   color: var(--text-primary);
   font-size: var(--t-small);
@@ -4428,14 +4492,31 @@ button.navlink:disabled {
   gap: var(--s-1);
   padding: var(--s-1) var(--s-2) calc(var(--s-1) + env(safe-area-inset-bottom, 0px));
   background: var(--surface-base);
+  /* The one edge this object has, so it is the lit one. */
   border-top: 1px solid var(--veil-edge);
 }
 
+/* Frosted, and it has to actually frost.
+ *
+ * This was 72 percent opaque with an 18px blur and saturate(160%), and over the progress screen it
+ * did not read as glass. It read as a window: the chart's vertical bars survived the blur as
+ * legible stripes and the axis numbers could be made out through the left of the bar.
+ *
+ * Two of those three settings were working against it. A blur only hides structure that is SMALLER
+ * than its radius, and the thing behind this bar is a chart whose bars and gridlines are tens of
+ * pixels apart, so 18px was never going to close them up. And saturate above 100 percent does the
+ * opposite of what a receding surface wants: it lifts the chroma of whatever is behind, which is
+ * exactly what made the cyan series read through as coloured banding. That setting is borrowed from
+ * platform bars that sit on light backgrounds, where the boost stops blurred content going grey.
+ * On a black bar over a saturated series it amplifies the thing being hidden.
+ *
+ * So: a radius wider than the features behind it, a slightly desaturating pass, and enough tint
+ * that the blur is a finish rather than the whole of the separation. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   .tabbar {
-    background: color-mix(in srgb, var(--surface-base) 72%, transparent);
-    -webkit-backdrop-filter: blur(var(--veil-blur)) saturate(160%);
-    backdrop-filter: blur(var(--veil-blur)) saturate(160%);
+    background: color-mix(in srgb, var(--surface-base) 86%, transparent);
+    -webkit-backdrop-filter: blur(30px) saturate(92%);
+    backdrop-filter: blur(30px) saturate(92%);
   }
 }
 
@@ -4625,7 +4706,8 @@ button.navlink:disabled {
   justify-content: center;
   min-height: 38px;
   padding: var(--s-2) var(--s-4);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: var(--radius);
   background: var(--chrome-face);
   color: var(--text-secondary);
@@ -4653,7 +4735,8 @@ button.navlink:disabled {
 .emomset {
   margin: 0 0 var(--s-3);
   padding: var(--s-3);
-  border: 1px solid var(--chrome-edge);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
   border-radius: var(--radius);
 }
 
