@@ -1504,7 +1504,7 @@ test('a day carries the split the client actually did, read off the frozen progr
   });
   const cell = cellFor(built, '2026-08-03');
   eq(cell.label, 'LOWER A');
-  eq(cell.slot, 2, 'second day of the rotation takes the second colour');
+  eq(cell.indexInBlock ?? cell.barSlot - 1, 1, 'second day of the rotation, second bar position');
 });
 
 test('the split comes from that session\'s own assignment, not from the current one', () => {
@@ -1532,7 +1532,7 @@ test('a colour keys on the position in the rotation, so renaming a day does not 
     assignments: [cassign('a1', '2026-08-03', [cday(0, 'CHEST AND BACK'), cday(1, 'LOWER A')])],
     sessionIdsWithWork: new Set(['s1']), today: '2026-08-07',
   });
-  eq(cellFor(before, '2026-08-03').slot, cellFor(after, '2026-08-03').slot, 'same slot, new words');
+  eq(cellFor(before, '2026-08-03').colours.face, cellFor(after, '2026-08-03').colours.face, 'same colour, new words');
 });
 
 test('a new assignment does not reshuffle the colours on months already on screen', () => {
@@ -1549,7 +1549,7 @@ test('a new assignment does not reshuffle the colours on months already on scree
     ],
     sessionIdsWithWork: new Set(['s1', 's2']), today: '2026-09-07',
   });
-  eq(cellFor(one, '2026-08-03').slot, cellFor(two, '2026-08-03').slot, 'August did not move');
+  eq(cellFor(one, '2026-08-03').colours.face, cellFor(two, '2026-08-03').colours.face, 'August did not move');
 });
 
 test('a session nobody logged a set in is not a trained day', () => {
@@ -1574,7 +1574,7 @@ test('an untrained day carries nothing a caller could render as a failure', () =
   eq(empty.sessionIds, []);
   eq(empty.label, null);
   eq(empty.glyph, null);
-  eq(empty.slot, null);
+  eq(empty.colours, null);
   eq(empty.isDeload, false, 'no state at all, not even a quiet one');
   ok(!('expected' in empty) && !('missed' in empty), 'and nothing that says a session was due');
 });
@@ -1653,7 +1653,98 @@ test('a session pointing at an assignment that is not there is still a session',
   const cell = cellFor(built, '2026-08-03');
   eq(cell.sessionIds, ['s1'], 'not dropped for failing to fit the model');
   eq(cell.label, 'Unprogrammed');
-  eq(cell.slot, 4, 'the colourless slot');
+  eq(cell.barSlot, 4, 'the colourless band');
+});
+
+// ---------------------------------------------------------------- blocks, and the key that lied
+//
+// The bug these cover, found on a real client: the palette had four slots and assigned
+// min(position, 3) + 1, so every day from the fourth on took the same colourless face. On a ten day
+// program that was seven days sharing one grey. The legend then keyed on the SLOT, so it printed a
+// single row for that grey and labelled it with whichever day was seen first: the screen said grey
+// meant A5 UNILATERAL while B5 and B2 drew the same grey and appeared in the key nowhere.
+
+const tenDayBlocks = () =>
+  cassign('a1', '2026-08-03', [
+    cday(0, 'A1 PUSH'), cday(1, 'A2 LOWER'), cday(2, 'A3 PULL'), cday(3, 'A4 UPPER'), cday(4, 'A5 UNILATERAL'),
+    cday(5, 'B1 PUSH'), cday(6, 'B2 PUSH/PULL'), cday(7, 'B3 LOWER'), cday(8, 'B4 UPPER'), cday(9, 'B5 CARRY'),
+  ]);
+
+const blocksBuilt = (dayIndexes) => {
+  const sessions = dayIndexes.map((di, n) =>
+    csession(`s${n}`, at(2026, 8, 3 + n), { day_index: di }));
+  return buildConsistency({
+    sessions,
+    assignments: [tenDayBlocks()],
+    sessionIdsWithWork: new Set(sessions.map((x) => x.id)),
+    today: '2026-08-28',
+  });
+};
+
+test('every day in the month gets its own legend row, however many days the program has', () => {
+  const built = blocksBuilt([1, 2, 4, 6, 9]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  eq(month.legend.length, 5, 'five distinct days trained, five rows');
+  const labels = month.legend.map((e) => e.label).sort();
+  eq(labels, ['A2 LOWER', 'A3 PULL', 'A5 UNILATERAL', 'B2 PUSH/PULL', 'B5 CARRY']);
+});
+
+test('no two days of one program are drawn the same colour', () => {
+  const built = blocksBuilt([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  const faces = month.legend.map((e) => e.colours.face);
+  eq(new Set(faces).size, faces.length, 'ten days, ten distinct faces');
+});
+
+test('hue says which block, so an A day and a B day are never near each other', () => {
+  const built = blocksBuilt([1, 6]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  const hueOf = (entry) => Number(/oklch\([\d.]+ [\d.]+ ([\d.]+)\)/.exec(entry.colours.face)[1]);
+  const a = month.legend.find((e) => e.label.startsWith('A2'));
+  const b = month.legend.find((e) => e.label.startsWith('B2'));
+  const apart = Math.abs(hueOf(a) - hueOf(b));
+  ok(Math.min(apart, 360 - apart) > 90, `blocks are ${apart.toFixed(0)} degrees apart, want over 90`);
+});
+
+test('a program that never claimed blocks is not split into them', () => {
+  const built = buildConsistency({
+    sessions: [csession('s1', at(2026, 8, 3), { day_index: 0 }), csession('s2', at(2026, 8, 5), { day_index: 1 })],
+    assignments: [cassign('a1', '2026-08-03', [cday(0, 'UPPER A'), cday(1, 'LOWER A')])],
+    sessionIdsWithWork: new Set(['s1', 's2']),
+    today: '2026-08-07',
+  });
+  const month = built.months.find((m) => m.key === '2026-08');
+  eq(month.legend.length, 2);
+  // "UPPER A" ends with a variant letter rather than starting with a block one, so both days stay
+  // in the first band. Reading that A as a block would split the commonest four day split in half.
+  eq(month.legend.every((e) => e.block === null), true, 'no block was claimed, so none was invented');
+});
+
+test('every generated cell face still clears 7:1 for the text sitting on it', () => {
+  // The ceiling CLAUDE.md fixes for these faces, checked against the real rendered colour rather
+  // than against the oklch numbers, because the browser is what resolves them.
+  const built = blocksBuilt([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  // Through a canvas, not through getComputedStyle. Chrome serialises a computed oklch() colour
+  // back as oklch(), so reading three numbers out of it and calling them RGB parses the HUE as the
+  // blue channel. That is not a hypothetical: the first version of this test did exactly that and
+  // reported a confident, stable, meaningless 5.54 for every face on the grid. Painting a pixel is
+  // what forces the browser to resolve the colour into sRGB, which is the space the ratio is in.
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const lumOf = (colour) => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return 0.2126 * lin(r / 255) + 0.7152 * lin(g / 255) + 0.0722 * lin(b / 255);
+  };
+  const textY = lumOf(getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim());
+  for (const entry of month.legend) {
+    const faceY = lumOf(entry.colours.face);
+    const ratio = (textY + 0.05) / (faceY + 0.05);
+    ok(ratio >= 7, `${entry.label} face reads ${ratio.toFixed(2)}, needs 7`);
+  }
 });
 
 test('a day_index the snapshot does not contain does not blank the cell', () => {
@@ -4168,7 +4259,7 @@ test('the grid and the chart cannot disagree about which day a session was', () 
     sessions, assignments, sessionIdsWithWork: new Set(['s1']), today: '2026-07-05',
   });
   const cell = cellFor(grid, '2026-07-03');
-  eq(b.lines[0].slot, cell.slot, 'same slot, so the line is the colour the cell is');
+  eq(b.lines[0].colours.line, cell.colours.line, 'same colour, so the line is the colour the cell is');
   eq(b.lines[0].glyph, cell.glyph);
   eq(b.lines[0].label, cell.label);
 });

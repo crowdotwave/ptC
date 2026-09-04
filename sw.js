@@ -104,6 +104,7 @@ const SHELL = [
   'js/session-volume.js',
   'js/session.js',
   'js/snapshot.js',
+  'js/split-palette.js',
   'js/storage-indexeddb.js',
   'js/storage.js',
   'js/supabase.js',

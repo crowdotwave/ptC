@@ -52,19 +52,24 @@
 // than no chart. No guilt is a rule about words and colour, not about moving the data.
 
 import { activeSetLogs } from './history.js';
-import { identifySessions, SPLIT_SLOTS } from './consistency.js';
+import { identifySessions } from './consistency.js';
 import { evidenceLevel, changeBetween } from './progression.js';
 import { localDayOf } from './dates.js';
 
 /**
  * How many lines this chart will draw before it starts folding days into a note.
  *
- * Four is the slot count, and it is a cap on legibility rather than on colour. Slot 4 is the
- * palette's overflow, so a five day program would put days four and five in the same face and the
- * only thing separating those two lines would be the glyph at the end of each. That is survivable
- * for one pair and not for three, and a chart with seven lines through it is a chart nobody reads.
+ * It used to be the palette's slot count, on the argument that a fifth line would be a colour
+ * already in use. That reason is gone: every day now generates its own colour, so this is a cap on
+ * LEGIBILITY alone and nothing else, and it is stated as its own number rather than borrowed from
+ * a constant that no longer means what it did.
+ *
+ * Still four, deliberately, and it is the number to argue with rather than change quietly. A ten
+ * day program folds six days into the note under the chart, which is a lot to hide; but ten lines
+ * through one phone width chart is not a chart, and the honest fix for a client with that many days
+ * is probably not more lines.
  */
-export const MAX_DAY_LINES = SPLIT_SLOTS;
+export const MAX_DAY_LINES = 4;
 
 /** Volume is weight times reps. A row with no reps has no volume, and no invented one either. */
 const counted = (row) =>
@@ -110,7 +115,8 @@ export function buildSessionVolume({ sessions = [], setLogs = [], assignments = 
     const day = localDayOf(session.started_at);
     if (!byLabel.has(who.label)) {
       byLabel.set(who.label, {
-        key: who.label, label: who.label, glyph: who.glyph, slot: who.slot, points: [], byDay: new Map(),
+        key: who.label, label: who.label, glyph: who.glyph, block: who.block,
+        colours: who.colours, barSlot: who.barSlot, points: [], byDay: new Map(),
       });
     }
     const line = byLabel.get(who.label);
@@ -155,11 +161,16 @@ export function buildSessionVolume({ sessions = [], setLogs = [], assignments = 
   );
   const kept = new Set(ranked.slice(0, MAX_DAY_LINES).map((line) => line.key));
 
-  // Back into slot order for drawing, so the lines read in the rotation's own order and match both
-  // the grid's legend and the day picker on the logging screen.
+  // Back into block then within-block order for drawing, so the lines read in the rotation's own
+  // order and match both the grid's legend and the day picker on the logging screen.
   const lines = all
     .filter((line) => kept.has(line.key))
-    .sort((a, b) => a.slot - b.slot || a.label.localeCompare(b.label));
+    .sort(
+      (a, b) =>
+        String(a.block ?? '~').localeCompare(String(b.block ?? '~')) ||
+        a.barSlot - b.barSlot ||
+        a.label.localeCompare(b.label),
+    );
   const hidden = all.filter((line) => !kept.has(line.key));
 
   // Every point on the chart, in time order, whichever line it belongs to. Off `all` rather than
@@ -188,7 +199,7 @@ export function buildSessionVolume({ sessions = [], setLogs = [], assignments = 
     totalSessions: sessionCount,
     totalPoints: points.length,
     latest: points.length ? points[points.length - 1] : null,
-    lead: lead ? { label: lead.label, glyph: lead.glyph, slot: lead.slot } : null,
+    lead: lead ? { label: lead.label, glyph: lead.glyph, colours: lead.colours } : null,
     evidence: evidenceLevel(working.length),
     change: changeBetween(working.map((p) => p.volumeKg)),
     hasDeload: points.length > 0 && lines.some((line) => line.points.some((p) => p.isDeload)),

@@ -16,6 +16,7 @@
 //                   the month caption because a 40px cell has no room for them.
 
 import { dayTitle } from './snapshot.js';
+import { dayStyle } from './split-palette.js';
 
 // Local, matching the four private copies already in charts.js, program-view.js, import-ui.js and
 // app.js. Split labels are free text a trainer typed, so nothing here may skip it.
@@ -75,8 +76,9 @@ function renderCell(cell) {
 
   return (
     `<td class="cal__cell${today}"${cell.isToday ? ' aria-current="date"' : ''}>` +
-    `<button type="button" class="cal__day is-slot-${cell.slot}` +
+    `<button type="button" class="cal__day is-bar-${cell.barSlot}` +
     `${cell.isDeload ? ' is-deload' : ''}${cell.isRecord ? ' is-record' : ''}" ` +
+    `style="${dayStyle(cell.colours)}" ` +
     `data-day="${esc(cell.day)}" aria-label="${esc(label)}">` +
     num +
     `<span class="cal__glyph" aria-hidden="true">${esc(cell.glyph)}</span>` +
@@ -102,8 +104,8 @@ function renderLegend(month) {
     month.legend
       .map(
         (entry) =>
-          `<li class="cal__key"><span class="cal__keymark is-slot-${entry.slot}" aria-hidden="true">` +
-          `${esc(entry.glyph)}</span>${esc(entry.label)}</li>`,
+          `<li class="cal__key"><span class="cal__keymark" style="${dayStyle(entry.colours)}" ` +
+          `aria-hidden="true">${esc(entry.glyph)}</span>${esc(entry.label)}</li>`,
       )
       .join('') +
     '</ul>'

@@ -23,6 +23,7 @@
 import { localDayOf, monthKey, localMidnight, isoDate } from './dates.js';
 import { sortedDays, dayTitle } from './snapshot.js';
 import { weekIndexOf } from './progression.js';
+import { assignBlocks, dayColours } from './split-palette.js';
 
 /**
  * How many identity colours the grid has. Slot 4 is the colourless one and is also the overflow,
@@ -99,15 +100,27 @@ function daysOfAssignment(assignment) {
   const days = sortedDays(assignment?.snapshot);
   const labels = days.map((day) => dayTitle(day));
   const glyphs = splitGlyphs(labels);
+  const placings = assignBlocks(labels);
 
-  return days.map((day, position) => ({
-    dayIndex: day.day_index,
-    label: labels[position],
-    glyph: glyphs[position],
-    // Position in the rotation rather than the raw day_index, so a program whose days are
-    // numbered 0, 3, 7 still fills slots 1, 2, 3 instead of leaving gaps in the palette.
-    slot: Math.min(position, SPLIT_SLOTS - 1) + 1,
-  }));
+  return days.map((day, position) => {
+    const placing = placings[position];
+    return {
+      dayIndex: day.day_index,
+      label: labels[position],
+      glyph: glyphs[position],
+      block: placing.block,
+      blockIndex: placing.blockIndex,
+      indexInBlock: placing.indexInBlock,
+      daysInBlock: placing.daysInBlock,
+      // Every day carries its own colour now, rather than an index into four of them. See
+      // js/split-palette.js for what broke and why hue moved from the day to the block.
+      colours: dayColours(placing),
+      // Kept, and it no longer picks the colour. It is the position of the lit bar on the cell's
+      // top edge, which is the channel that has to keep working when two days of one block sit
+      // twenty degrees apart, so it counts within the block rather than across the program.
+      barSlot: Math.min(placing.indexInBlock, SPLIT_SLOTS - 1) + 1,
+    };
+  });
 }
 
 /**
@@ -151,7 +164,11 @@ export function identifySessions({ sessions = [], assignments = [] } = {}) {
       // and says so, rather than being dropped for not fitting the model.
       label: programDay ? programDay.label : 'Unprogrammed',
       glyph: programDay ? programDay.glyph : '.',
-      slot: programDay ? programDay.slot : SPLIT_SLOTS,
+      block: programDay ? programDay.block : null,
+      // A session with no program behind it is still a session. It takes the colourless band and
+      // says so, rather than being dropped for not fitting the model.
+      colours: programDay ? programDay.colours : dayColours({ blockIndex: 3 }),
+      barSlot: programDay ? programDay.barSlot : SPLIT_SLOTS,
       weekIndex: week,
       isDeload: week !== null && deloadWeeks.includes(week),
     });
@@ -267,7 +284,11 @@ function buildMonth(year, month, byDay, today) {
   const lastOfMonth = new Date(year, month + 1, 0);
 
   const weeks = [];
-  const legendBySlot = new Map();
+  // Keyed by the day's LABEL, not by its colour. Keying on the colour is what printed one row for
+  // a grey that three different days were drawing, labelled with whichever of them was seen first,
+  // so the key told the reader that grey meant A5 while B5 and B2 sat on the calendar in the same
+  // grey and appeared nowhere. A key with a row missing is worse than no key.
+  const legendByDay = new Map();
   let sessions = 0;
   let deloads = 0;
   let records = 0;
@@ -292,15 +313,23 @@ function buildMonth(year, month, byDay, today) {
         sessionIds: entries.map((e) => e.sessionId),
         label: first ? first.label : null,
         glyph: first ? first.glyph : null,
-        slot: first ? first.slot : null,
+        block: first ? first.block : null,
+        colours: first ? first.colours : null,
+        barSlot: first ? first.barSlot : null,
         isDeload: entries.some((e) => e.isDeload),
         isRecord: entries.some((e) => e.isRecord),
       });
 
       sessions += entries.length;
       for (const entry of entries) {
-        if (!legendBySlot.has(entry.slot)) {
-          legendBySlot.set(entry.slot, { slot: entry.slot, label: entry.label, glyph: entry.glyph });
+        if (!legendByDay.has(entry.label)) {
+          legendByDay.set(entry.label, {
+            label: entry.label,
+            glyph: entry.glyph,
+            block: entry.block,
+            colours: entry.colours,
+            barSlot: entry.barSlot,
+          });
         }
         if (entry.isDeload) {
           week.isDeload = true;
@@ -322,8 +351,14 @@ function buildMonth(year, month, byDay, today) {
     sessions,
     hasDeload: deloads > 0,
     hasRecord: records > 0,
-    // Slot order rather than first seen order, so the legend reads in the rotation's own order
-    // and matches the day picker the client already knows from the logging screen.
-    legend: [...legendBySlot.values()].sort((a, b) => a.slot - b.slot),
+    // Block, then position inside it, rather than order of first appearance, so the key reads in
+    // the rotation's own order and matches the day picker the client already knows from the
+    // logging screen. Every day that appears in the month gets its own row.
+    legend: [...legendByDay.values()].sort(
+      (a, b) =>
+        String(a.block ?? '~').localeCompare(String(b.block ?? '~')) ||
+        a.barSlot - b.barSlot ||
+        a.label.localeCompare(b.label),
+    ),
   };
 }

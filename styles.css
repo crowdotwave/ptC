@@ -2847,15 +2847,32 @@ button.row:active {
 
 /* --cal-line is the stroke value, and it is carried on the same class as the slab values so a cell
  * and the line for that same day cannot be given different slots by two different rules. */
-.is-slot-1 { --cal-face: var(--split-1-face); --cal-shade: var(--split-1-shade); --cal-rim: var(--split-1-rim); --cal-line: var(--split-1-line); }
-.is-slot-2 { --cal-face: var(--split-2-face); --cal-shade: var(--split-2-shade); --cal-rim: var(--split-2-rim); --cal-line: var(--split-2-line); }
-.is-slot-3 { --cal-face: var(--split-3-face); --cal-shade: var(--split-3-shade); --cal-rim: var(--split-3-rim); --cal-line: var(--split-3-line); }
-.is-slot-4 { --cal-face: var(--split-4-face); --cal-shade: var(--split-4-shade); --cal-rim: var(--split-4-rim); --cal-line: var(--split-4-line); }
+/* The four values arrive inline now, from js/split-palette.js, because a program has as many days
+ * as the trainer wrote and this file cannot hold a token set per day. The --split-N-* tokens above
+ * are what those generated values are anchored to: same lit slab treatment, same ceiling.
+ *
+ * The fallback is the colourless band, so a cell that somehow renders without its inline values is
+ * grey rather than transparent. */
+.cal__day,
+.cal__keymark,
+.chart__curve,
+.chart__node,
+.chart__keymark {
+  --cal-face: var(--split-4-face);
+  --cal-shade: var(--split-4-shade);
+  --cal-rim: var(--split-4-rim);
+  --cal-line: var(--split-4-line);
+}
 
-.cal__day.is-slot-1::before { left: 24%; right: 56%; }
-.cal__day.is-slot-2::before { left: 40%; right: 40%; }
-.cal__day.is-slot-3::before { left: 56%; right: 24%; }
-.cal__day.is-slot-4::before { left: 24%; right: 24%; }
+/* The lit segment on the top edge, positioned by the day's place INSIDE its block rather than by
+ * its colour. Two days of one block sit twenty degrees apart, which is a deliberately quiet
+ * difference, so this is the channel carrying that distinction at a glance. Left and right stay
+ * inside the flat run of the top edge, clear of the corner radius, for the reason written under
+ * .cal__day::before. */
+.cal__day.is-bar-1::before { left: 24%; right: 56%; }
+.cal__day.is-bar-2::before { left: 40%; right: 40%; }
+.cal__day.is-bar-3::before { left: 56%; right: 24%; }
+.cal__day.is-bar-4::before { left: 24%; right: 24%; }
 
 /* The one focus ring in this app that faces inward.
  *

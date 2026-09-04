@@ -27,6 +27,7 @@
 const NS = 'http://www.w3.org/2000/svg';
 
 import { weightLabel, toDisplay } from './units.js';
+import { dayStyle } from './split-palette.js';
 
 /**
  * Axis ticks are bare numbers, so they convert without gaining a unit: the headline above the
@@ -480,7 +481,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   out += '<defs>';
   lines.forEach((line, index) => {
     out +=
-      `<linearGradient id="${washId(index)}" class="is-slot-${line.slot}" x1="0" y1="0" x2="0" y2="1">` +
+      `<linearGradient id="${washId(index)}" style="${dayStyle(line.colours)}" x1="0" y1="0" x2="0" y2="1">` +
       '<stop class="chart__wash-top" offset="0" /><stop class="chart__wash-base" offset="1" />' +
       '</linearGradient>';
   });
@@ -515,7 +516,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   lines.forEach((line, index) => {
     const plotted = plottedByLine[index];
     if (plotted.length > 1) {
-      out += `<path class="chart__curve is-slot-${line.slot}" d="${smoothPath(plotted)}" />`;
+      out += `<path class="chart__curve" style="${dayStyle(line.colours)}" d="${smoothPath(plotted)}" />`;
     }
 
     for (const point of line.points) {
@@ -528,7 +529,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
           `<rect class="chart__mark is-deload" x="${(cx - 3.5).toFixed(1)}" y="${(cy - 3.5).toFixed(1)}" ` +
           `width="7" height="7" />`;
       } else {
-        out += `<circle class="chart__node is-slot-${line.slot}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" />`;
+        out += `<circle class="chart__node" style="${dayStyle(line.colours)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.5" />`;
       }
     }
   });
@@ -575,7 +576,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
       .map((line) => {
         const last = line.points[line.points.length - 1];
         return (
-          `<li class="chart__key"><span class="chart__keymark is-slot-${line.slot}" aria-hidden="true">` +
+          `<li class="chart__key"><span class="chart__keymark" style="${dayStyle(line.colours)}" aria-hidden="true">` +
           `${esc(line.glyph)}</span>${esc(line.label)} ` +
           `<b class="num">${esc(axisNum(at(last)))}</b></li>`
         );
