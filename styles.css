@@ -2594,43 +2594,130 @@ button.row:active {
 
 /* Joined, not two loose buttons. One control moving one view, so the shared edge says so, the same
  * argument the unit switch makes at the other end of the header. */
-/* The height is the tap floor, and it has to be declared here rather than left to the buttons.
+/* The month stepper. One object, and it is drawn as one object.
  *
- * These are .button-secondary, so they carry the transparent 44px ::after every other secondary
- * button uses. It does not work here: this pill sets overflow hidden to clip its square cornered
- * children into the round shape, and that clips the extender too, silently. Measured, the arrows
- * owned 36x38 and a probe 21px above centre hit the card behind them.
+ * It used to be two .button-secondary children inside a clipping pill, and both halves of that were
+ * wrong. The children each carried their own 1px border and a square radius, so the pill's
+ * overflow:hidden sliced those borders off at the two rounded ends: the control read as cut off
+ * because it literally was. And the 44px tap extender .button-secondary hangs outside itself was
+ * clipped by the same mask, so the arrows owned 36x38 and a probe 21px above centre hit the card
+ * behind them.
  *
- * Same failure CLAUDE.md already records one section down, where the cells take an inset focus
- * ring because the outward one is clipped by the scroller. An outward affordance inside a clipping
- * container is the recurring shape of it, and the fix is the same: make the container carry it. */
+ * Both go away by moving the border, the radius and the fill up to the group and leaving the
+ * children as transparent hit areas. Nothing is clipped except the pressed fill, which is the one
+ * thing that SHOULD follow the pill's curve. An element's own border is not clipped by its own
+ * overflow, so the outline stays whole.
+ *
+ * THE SHINE IS A DELIBERATE EXCEPTION and CLAUDE.md should be read before it is copied. That file
+ * says chrome is flat and the lit treatment belongs to mid set controls, and it gives the reason as
+ * scale: a fall of light is how ONE object reads as liftable, and it is not how a list of forty is
+ * drawn. This is one object, on a screen read at normal distance, and it is the only way to reach
+ * another month. So it takes the app's own --edge-lit at its quietest setting plus a soft specular
+ * pass, rather than a new vocabulary. If this spreads to a third control the rule has been
+ * repealed rather than excepted, and that is a decision to make on purpose. */
 .cal__nav {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  min-height: var(--tap);
+  border: 1px solid var(--chrome-edge);
   border-radius: 999px;
   overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 5%, var(--chrome-face)) 0%,
+    var(--chrome-face) 55%,
+    color-mix(in srgb, var(--surface-base) 22%, var(--chrome-face)) 100%
+  );
+  /* Light along the top inside edge, shade along the bottom one. Same two directions every lit
+   * thing in this app uses, at the quieter of the two strengths. */
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--text-primary) var(--edge-lit), transparent),
+    inset 0 -1px 0 0 color-mix(in srgb, var(--surface-base) 40%, transparent);
+}
+
+/* The specular pass: a wide, very soft highlight sitting in the top half and fading out well before
+ * the bottom, which is what separates a lit surface from a surface with a line on it. It is huge
+ * and faint on purpose. A small bright spot would read as a glare artifact rather than as the shape
+ * of the thing catching light, and this control is 88px wide.
+ *
+ * Inert to the pointer, so it cannot eat a press meant for either arrow. */
+.cal__nav::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 35% 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(
+    120% 100% at 50% 0%,
+    color-mix(in srgb, var(--text-primary) 13%, transparent) 0%,
+    transparent 70%
+  );
 }
 
 .cal__nav:empty {
   display: none;
 }
 
-/* 44px wide as well as tall. The floor is a thumb, and a thumb is round: 44 in one axis and 36 in
- * the other is a target that only works if the press lands on the long way through it. These are
- * the only way to reach another month, so they are worth the 16px. */
+/* 44px in both axes. The floor is a thumb, and a thumb is round: 44 one way and 36 the other is a
+ * target that only works if the press lands on the long way through it. These are the only way to
+ * reach another month, so they are worth the 16px.
+ *
+ * No border, no radius and no fill of their own. The group above owns all three, which is what
+ * stops the pill from slicing them. */
 .cal__step {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: var(--tap);
+  /* The floor goes on the thing a thumb actually lands on. Putting it on the group instead reads
+   * as the same number and is not: every box here is border-box, so a 44px group with a 1px border
+   * each side leaves the buttons 42, and the probe that checks this caught exactly that. */
+  min-height: var(--tap);
   min-width: 0;
   padding: 0;
+  border: 0;
   border-radius: 0;
-  font-size: var(--t-body);
-  line-height: 1;
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
-.cal__step + .cal__step {
-  border-left-width: 0;
+/* The divider, drawn once by the second half rather than borrowed from the first half's border.
+ * It fades at both ends: a full height line inside a pill is a chord across a curve, and it reads
+ * as a seam. Brightest where the two faces actually meet. */
+.cal__step + .cal__step::before {
+  content: '';
+  position: absolute;
+  inset: 18% auto 18% 0;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, var(--chrome-edge) 55%, transparent) 30%,
+    color-mix(in srgb, var(--chrome-edge) 55%, transparent) 70%,
+    transparent 100%
+  );
+}
+
+.cal__chev {
+  width: 20px;
+  height: 20px;
+  /* Slightly quieter than the month name it steps, since it is the control and not the answer. The
+   * press brings it to full. */
+  opacity: 0.78;
+}
+
+/* Pressed reads as the face going in: the fill darkens and the specular pass does not move with it,
+ * which is what makes one half look depressed rather than merely recoloured. Clipped to the pill by
+ * the group's overflow, so the depressed half keeps the round outer end. */
+.cal__step:active {
+  background: color-mix(in srgb, var(--surface-base) 45%, transparent);
+}
+
+.cal__step:active .cal__chev {
+  opacity: 1;
 }
 
 /* Full bleed across the card, and no horizontal padding of its own. Both halves of that matter.

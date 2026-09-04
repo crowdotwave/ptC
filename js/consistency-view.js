@@ -154,11 +154,29 @@ export function renderMonth(month) {
  * kept in step with the scroll position. See monthInView in progress.js on why this screen keeps
  * exactly one.
  */
+/**
+ * A chevron, drawn, in the same system the tab bar icons use: a 20 unit box, 1.6 stroke, round caps
+ * and joins, painted in currentColor.
+ *
+ * These were &lsaquo; and &rsaquo;, which are punctuation rather than icons. A guillemet takes
+ * whatever weight and optical centring the system face decides to give it, matches nothing else in
+ * the app, and sat noticeably lighter than the tab bar icons an inch below it. Two paths cost
+ * nothing and put these in the same family as every other mark on screen.
+ */
+function chevron(d) {
+  return (
+    `<svg class="cal__chev" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" ` +
+    `stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${d}" /></svg>`
+  );
+}
+
 export function renderMonthNav(built) {
   if (built.months.length < 2) return '';
   return (
-    `<button type="button" class="button-secondary cal__step" data-step="-1" aria-label="Previous month">&lsaquo;</button>` +
-    `<button type="button" class="button-secondary cal__step" data-step="1" aria-label="Next month">&rsaquo;</button>`
+    `<button type="button" class="cal__step" data-step="-1" aria-label="Previous month">` +
+    `${chevron('M12 5 7 10l5 5')}</button>` +
+    `<button type="button" class="cal__step" data-step="1" aria-label="Next month">` +
+    `${chevron('M8 5l5 5-5 5')}</button>`
   );
 }
 
