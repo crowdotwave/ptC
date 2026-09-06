@@ -130,6 +130,7 @@ function showClientForm(client) {
   state.confirmDelete = null;
 
   el('list-view').hidden = true;
+  el('client-actions').hidden = true;
   el('detail-view').hidden = true;
   el('client-form-view').hidden = false;
   el('client-form-error').hidden = true;
@@ -457,7 +458,12 @@ async function openClient(clientId) {
   el('view-note').textContent = 'Read only. Program editing is not built yet.';
   el('list-view').hidden = true;
   el('client-form-view').hidden = true;
+  el('client-actions').hidden = false;
   el('detail-view').hidden = false;
+  // Set before the early return below, so a client with nothing logged yet can still be walked
+  // through. That client is the whole point of the control: their first session is the one screen
+  // in this app nobody has ever looked at.
+  el('rehearse-program').href = `index.html?rehearse=${encodeURIComponent(state.client.id)}`;
   // The session list, and with it anything the client said about how a session felt. Charts cannot
   // draw that half, and it is the half a coach reads before changing next week.
   el('see-sessions').href = `progress.html?client=${encodeURIComponent(state.client.id)}`;
@@ -483,6 +489,7 @@ async function openClient(clientId) {
 
 function showList() {
   el('list-view').hidden = false;
+  el('client-actions').hidden = true;
   el('detail-view').hidden = true;
   el('client-form-view').hidden = true;
   el('view-title').textContent = 'Clients';

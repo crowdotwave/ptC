@@ -15,6 +15,17 @@
   </head>
   <body>
     <main class="screen">
+      <!-- A trainer walking a client's program, against a storage adapter made of memory. It says
+           so permanently rather than in the notice band, because the notice band is for things that
+           just happened and this is a fact about the whole screen for as long as it is open. A
+           logging screen that is indistinguishable from the real one, with somebody else's name on
+           it, is a trap: the trainer has to be able to tell at a glance, at any moment, that the
+           sets they are tapping out are not that person's training. See js/rehearse.js. -->
+      <div class="rehearse" id="rehearse-bar" hidden>
+        <p class="rehearse__what" id="rehearse-what"></p>
+        <a class="rehearse__out" id="rehearse-out" href="trainer.html">Leave</a>
+      </div>
+
       <!-- Top third. Reading material, with one control in it: the way into the whole workout.
            On a 6.7 inch phone this band is out of the reach of the thumb of the hand holding it,
            which is why nothing here logs a set, and why the one control that is here is a between

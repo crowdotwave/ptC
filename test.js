@@ -29,6 +29,8 @@ import {
   describeAuthError, cooldownLeft, verifyCode, CODE_TYPES, RESEND_COOLDOWN_S,
 } from './js/auth.js';
 import { validate, OUTBOX_STORE } from './js/schema.js';
+import { createMemoryDriver } from './js/storage-memory.js';
+import { rehearsalTarget, openRehearsal } from './js/rehearse.js';
 import { loadLabel, loadValue, unit, setUnit } from './js/units.js';
 import { isoDate, localDayOf, monthKey, localMidnight } from './js/dates.js';
 import { buildConsistency, splitGlyphs } from './js/consistency.js';
@@ -5417,6 +5419,124 @@ test('a block under a minute says its seconds and not zero minutes', () => {
   eq(emomLength(quick), '4 rounds, 4 stations, 32 sec');
   const odd = emomBlock(emomDay(3, 50), [station('A', 5)], (i) => i.reps);
   eq(emomLength(odd), '3 rounds, 1 station, 2 min 30 sec');
+});
+
+// ------------------------------------------------------------------ walking somebody's program
+//
+// js/rehearse.js and js/storage-memory.js. A trainer opens a client's real program on the real
+// logging screen, and nothing written there is allowed to exist anywhere afterwards. That claim is
+// the whole feature, so it is tested as a property rather than as a flag: sets are logged through
+// the adapter the screen actually uses, and then the source is asked whether it noticed.
+
+const rehearsalClient = {
+  id: 'client-em', trainer_id: 't1', display_name: 'Emma', email: 'emma@example.com',
+  status: 'active', weight_unit: 'kg', auth_user_id: null, created_at: '2026-01-01T00:00:00.000Z',
+};
+
+const rehearsalSnapshot = {
+  days: [{
+    id: 'd1', day_index: 0, name: 'LOWER A', emom: null,
+    items: [{
+      id: 'i1', exercise_id: 'ex-squat', order_index: 0, target_sets: 3, target_reps_low: 5,
+      rest_seconds: 120, starting_weight_kg: 60, exercise: { name: 'Squat', increment_kg: 2.5 },
+    }],
+  }],
+};
+
+const rehearsalRows = () => ({
+  clients: [rehearsalClient],
+  assignments: [{
+    id: 'a1', client_id: 'client-em', template_id: 'tpl1', snapshot: rehearsalSnapshot,
+    starts_on: '2026-08-01', ends_on: null, created_at: '2026-08-01T00:00:00.000Z',
+  }],
+  exercises: [{ id: 'ex-squat', name: 'Squat', increment_kg: 2.5, equipment: 'barbell' }],
+});
+
+const sourceStorage = (rows = rehearsalRows()) => createStorage(createMemoryDriver(rows));
+
+test('the rehearsal flag is read off the URL and never remembered', () => {
+  eq(rehearsalTarget('?rehearse=client-em'), 'client-em');
+  eq(rehearsalTarget('?rehearse=client-em&local=1'), 'client-em');
+  eq(rehearsalTarget(''), null);
+  eq(rehearsalTarget('?local=1'), null, 'the seeded flag is a different question');
+  // Unlike ?local=1 this is deliberately not sticky. A throwaway that followed somebody from
+  // screen to screen is how a trainer ends up believing they logged something.
+  eq(rehearsalTarget('?rehearse='), null, 'and an empty one is not a client');
+});
+
+test('a rehearsal carries the program and none of the training', async () => {
+  const rehearsal = await openRehearsal(sourceStorage(), 'client-em');
+  eq(rehearsal.client.display_name, 'Emma');
+  eq(rehearsal.assignment.snapshot.days[0].name, 'LOWER A');
+  eq((await rehearsal.storage.query('exercises', {})).length, 1, 'the library, for increments');
+  eq((await rehearsal.storage.query('sessions', {})).length, 0);
+  eq((await rehearsal.storage.query('set_logs', {})).length, 0,
+     'no history, so every lift opens where the trainer said and says so');
+});
+
+test('there is nothing to rehearse without a client or a program', async () => {
+  eq(await openRehearsal(sourceStorage(), 'nobody'), null);
+  const noProgram = sourceStorage({ ...rehearsalRows(), assignments: [] });
+  eq(await openRehearsal(noProgram, 'client-em'), null, 'a client with no program yet');
+});
+
+// The claim the bar on that screen makes, tested against the thing it is a claim about.
+test('a set logged in a rehearsal reaches nothing', async () => {
+  const source = sourceStorage();
+  const { storage } = await openRehearsal(source, 'client-em');
+
+  await storage.put('sessions', {
+    id: '00000000-0000-4000-8000-00000000000a',
+    client_id: '00000000-0000-4000-8000-0000000000c1',
+    assignment_id: null,
+    day_index: 0, started_at: '2026-09-06T18:00:00.000Z', completed_at: null, client_note: null,
+    discarded_at: null, created_at: '2026-09-06T18:00:00.000Z',
+    updated_at: '2026-09-06T18:00:00.000Z',
+  });
+  await storage.put('set_logs', setRow({
+    id: '00000000-0000-4000-8000-00000000000b',
+    session_id: '00000000-0000-4000-8000-00000000000a',
+  }));
+
+  eq((await storage.query('set_logs', {})).length, 1, 'the screen sees what it just logged');
+  eq((await source.query('set_logs', {})).length, 0, 'and the device it was copied from does not');
+  eq((await source.query('sessions', {})).length, 0);
+
+  // No remote was ever attached, so the queue those writes made has nowhere to drain to. This is
+  // what makes "nothing is saved" a fact about the shape of it rather than a promise.
+  const flushed = await storage.push();
+  eq(flushed.pushed, 0, 'a rehearsal cannot reach a server it was never given');
+  eq((await source.query('set_logs', {})).length, 0);
+});
+
+// storage.query hands an indexed field to the driver and then stops filtering on it itself, so a
+// driver that took the index and scanned anyway would answer with rows the query excluded and
+// every caller would believe it.
+test('the memory driver applies an index as the filter it is', async () => {
+  const storage = createStorage(createMemoryDriver());
+  const one = '00000000-0000-4000-8000-0000000000e1';
+  const two = '00000000-0000-4000-8000-0000000000e2';
+  await storage.put('set_logs', setRow({
+    id: '00000000-0000-4000-8000-00000000000c', session_id: one,
+  }));
+  await storage.put('set_logs', setRow({
+    id: '00000000-0000-4000-8000-00000000000d', session_id: two, set_index: 1,
+  }));
+
+  eq((await storage.query('set_logs', {})).length, 2);
+  eq((await storage.query('set_logs', { session_id: one })).length, 1, 'not both of them');
+  eq((await storage.query('set_logs', { session_id: two })).length, 1);
+  eq((await storage.query('set_logs', {
+    session_id: '00000000-0000-4000-8000-0000000000e3',
+  })).length, 0, 'and an index that matches nothing matches nothing');
+});
+
+test('the memory driver hands back copies, the way serialising one would', async () => {
+  const driver = createMemoryDriver({ clients: [rehearsalClient] });
+  const read = await driver.get('clients', 'client-em');
+  read.display_name = 'someone else';
+  eq((await driver.get('clients', 'client-em')).display_name, 'Emma',
+     'a caller mutating what it read cannot reach back into the database');
 });
 
 // ------------------------------------------------------------------ report

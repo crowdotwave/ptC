@@ -79,6 +79,16 @@ kind of thing adding a service worker does: it makes the offline paths real.
 All persistence goes through a single adapter interface so the local and remote layers stay
 swappable. Never call Supabase or IndexedDB directly from UI code.
 
+`createStorage(driver)` has taken its driver as an argument since it was written, and there are now
+two: `js/storage-indexeddb.js` and `js/storage-memory.js`. The second is what a trainer's rehearsal
+of a client's program runs on, and it is the payment for that rule finally arriving. No screen knows
+it is writing into a Map.
+
+One trap in writing a second driver, because it is silent: `query` picks an indexed field out of
+the filters, hands it to `driver.getAll`, and then does not filter on that field itself. A driver
+that accepts the index and scans anyway answers `query('set_logs', { session_id: x })` with every
+set log there is, and every caller believes it.
+
 ```
 storage.get(table, id)
 storage.query(table, filters)
@@ -1039,6 +1049,56 @@ Canadian trainer and clients, so PIPEDA applies. Consequences:
 - **Never use em dashes** in code, comments, UI copy, commit messages, or documentation.
   Use commas, colons, parentheses, or restructure the sentence.
 - Commit messages: imperative mood, one line, no scope prefixes.
+
+## Walking a client's program
+
+`index.html?rehearse=<client id>`, reached from a client in the trainer view. It opens that
+person's current program on the real logging screen, with the far end of the storage adapter
+replaced by memory. `js/rehearse.js` builds it and `js/storage-memory.js` is the second driver
+`createStorage` has ever had.
+
+It exists because a trainer writes a day in an editor and then has no way to find out what it is
+like at arm's length: whether the rep target reads at a glance, whether a superset came out the way
+they meant, whether an EMOM's rounds add up to a block anybody can stand. The two things that could
+answer that before were the seed, which is somebody else's program, and assigning it to a real
+person and asking them.
+
+**Not a copy of the screen, and that is the whole design.** This argument is now in the file three
+times, about `?local=1` ("routed exactly like a real session, so this exercises the app people use
+rather than a variant of it"), about the EMOM rehearsal, and here. A preview that drew its own
+version of the logging screen would be a preview of something no client ever sees.
+
+**Not a role switch either**, which is the obvious objection to it and the rule directly below.
+Acting as somebody else means writing as them, and nothing here writes at all: no session, no set,
+no row anywhere, and no way to make one. The trainer is reading their own program on the screen it
+will be read on. Nothing about who can see whose data moves, so this adds **no policy, no grant, and
+no row to the write map**. It reads three things, `clients`, `assignments` and `exercises`, all of
+them rows the trainer already owns and already holds on the device.
+
+The safety is structural rather than a promise: the adapter it hands the page has no remote, so
+`push()` and `sync()` drain into nothing, and the driver imports neither IndexedDB nor Supabase.
+Measured against the seeded database, which holds 65 sessions and 943 sets: a full session logged
+inside a rehearsal leaves both counts unchanged and `push()` reports `remote: false, pushed: 0`.
+
+**The frozen snapshot, never the live template.** The question this is opened to answer is what is
+on her phone, and after a template edit that has not been sent those are two different programs.
+
+**No sessions and no set_logs are copied.** A rehearsal is not a simulation of somebody's history
+and must not pretend to be one. With no rows, every lift opens at the trainer's own
+`starting_weight_kg` or at the deliberately light equipment fallback, and every set says which it
+is rather than claiming a last time. That is the honest answer and also the more useful one: the
+first session with a new program is the one screen in this app nobody has ever been able to look at.
+
+**The flag is not sticky, and that is the one way it differs from `?local=1`.** That one is sticky
+because it chooses which dataset the whole app is looking at and has to survive moving between
+screens. This chooses a throwaway, and a throwaway that followed somebody around for the rest of a
+browser session is how a trainer ends up believing they logged something. Leaving the screen ends
+the rehearsal.
+
+A bar across the top says whose program it is and that nothing is saved, for as long as the screen
+is open, because a logging screen indistinguishable from the real one with somebody else's name on
+it is a trap. It is in the notice band's place but is not the notice band: that one is for things
+that just happened.
 
 ## Development data
 

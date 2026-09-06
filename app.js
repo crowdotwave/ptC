@@ -99,6 +99,8 @@ const ui = {
   logLabel: el('log-label'),
   logSub: el('log-sub'),
   emomHost: el('emom-host'),
+  rehearseBar: el('rehearse-bar'),
+  rehearseWhat: el('rehearse-what'),
 };
 
 const state = {
@@ -1840,6 +1842,20 @@ function nothingToLog(name) {
   ui.dayJump.hidden = true;
 }
 
+/**
+ * The bar that says this screen is not real training.
+ *
+ * Named, because "Rehearsal" alone does not say whose program is on screen and a trainer with six
+ * clients needs that more than they need the word. Possessive rather than "for Emma", so the
+ * sentence reads as a fact about the program rather than as an offer to log something on her
+ * behalf, which is the one thing this screen must never be mistaken for.
+ */
+function markRehearsal(client) {
+  const name = client.display_name ?? 'this client';
+  ui.rehearseBar.hidden = false;
+  ui.rehearseWhat.textContent = `Rehearsing ${name}’s program. Nothing here is saved.`;
+}
+
 async function main() {
   let booted;
   try {
@@ -1854,6 +1870,11 @@ async function main() {
   const { storage, actor, mode } = booted;
   state.storage = storage;
   mountShell(booted, 'log');
+
+  // Before the first render and before anything is read, so there is no frame of this screen that
+  // looks like somebody's real session. The storage is already memory by this point: the bar
+  // reports that fact, it does not cause it.
+  if (booted.rehearsing) markRehearsal(booted.rehearsing);
 
   // Before anything prints a weight. The viewer on this screen is always the client whose sets
   // these are, so their own row is both what is read and what a tap would write.

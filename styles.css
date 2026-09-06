@@ -1835,6 +1835,82 @@ button.worknav__row:active {
   display: none;
 }
 
+/* ---------------------------------------------------------------- the rehearsal bar */
+
+/* Says this screen is not real training, for as long as it is open.
+ *
+ * The hairline is DASHED, and that is borrowed thinking rather than decoration. This app already
+ * uses a dashed stroke for exactly one meaning, `--deload` on a chart, where the note under it says
+ * the dash and the words are what make a thing read as intentional rather than as an alarm. The
+ * same job here: a solid bar in any hue would read as a state of the workout, and this is not a
+ * state of the workout. It is the workout not being one.
+ *
+ * No hue of its own. Orange means act, cyan means data, emerald means logged, and this means none
+ * of those, so it takes the ground violet every other piece of chrome takes. What carries it is the
+ * dash and the sentence, per the no-hue-only rule.
+ *
+ * It costs a band on the one screen that must never scroll, which is paid for out of `.spacer`:
+ * that element exists to push the controls into the thumb arc and is the flexible one, so a bar
+ * above it moves the controls up rather than pushing anything off the bottom. Measured at 390x812,
+ * with the bar and a two line message: 812 against a viewport of 812, both on an ordinary day and
+ * on a clock-led one.
+ *
+ * The honest limit, because it was measured rather than assumed: the message is two lines at any
+ * width a phone has, and on a viewport only 640 tall the screen does then scroll. That one is
+ * accepted rather than fixed, and the reason is who is holding it. The never-scroll rule protects a
+ * client mid set, one handed, with a bar on their back. This bar exists only in a rehearsal, which
+ * is a trainer standing still reading a program they wrote, and it is never on a client's screen at
+ * all. Shortening the copy does not buy the line back either: every version that still says whose
+ * program it is and that nothing is saved runs past one line on a 360px phone. */
+.rehearse {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border: 1px dashed var(--chrome-edge);
+  border-radius: var(--radius);
+  background: var(--chrome-face);
+}
+
+.rehearse[hidden] {
+  display: none;
+}
+
+.rehearse__what {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--t-small);
+}
+
+/* The way out, and it is a link rather than a button because it goes somewhere: back to the screen
+ * this was opened from. Underlined, so it is not one more thing to tell apart from the controls
+ * below by colour alone. */
+.rehearse__out {
+  flex: 0 0 auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The 44px target, kept apart from the ink, the same way every tight control in this app does it. */
+.rehearse__out::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--s-3) * -1);
+  right: calc(var(--s-3) * -1);
+  top: 50%;
+  min-height: var(--tap);
+  transform: translateY(-50%);
+}
+
 [hidden] {
   display: none !important;
 }

@@ -59,13 +59,26 @@
         <p class="legend" id="client-danger-note"></p>
       </section>
 
-      <section id="detail-view" hidden>
+      <!-- Everything that is true of the client rather than of their charts, so it survives the
+           one case the charts do not: somebody with nothing logged yet, where the detail view below
+           hides itself entirely. That client is the one a trainer most wants to rehearse, since
+           their first session is the screen nobody has ever looked at, and until this row existed
+           opening them was a dead end with no way back to the list either. -->
+      <section id="client-actions" hidden>
         <!-- Same corner as the other two screens, measured from the top of this view rather than
              the page, because the header above it belongs to the client list as well. -->
         <div class="context__row">
           <p class="backlink"><a href="#" id="back-to-list">Back to clients</a></p>
         </div>
 
+        <!-- The program on this person's phone, walked through on this one, writing nothing. It is
+             the frozen assignment snapshot rather than the template, because after an edit that has
+             not been sent those are two different programs and only one of them is what she sees.
+             js/rehearse.js owns it. -->
+        <p class="backlink"><a href="#" id="rehearse-program">Walk through their program</a></p>
+      </section>
+
+      <section id="detail-view" hidden>
         <!-- Every session this client logged, including what they said about each one. That list
              lives on the progress screen, which already renders somebody else's training when a
              trainer opens it with ?client=, so this is a link rather than a second copy of it.

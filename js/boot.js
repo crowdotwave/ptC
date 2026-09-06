@@ -4,9 +4,10 @@
 // hands back a storage adapter that is ready to use. Pages call boot() and read the mode. They
 // do not ask about sessions, and they never import supabase.js or remote.js.
 //
-// Four modes, and each one is a real state rather than a failure:
+// Five modes, and each one is a real state rather than a failure:
 //
 //   connected   a session, and the database says which trainer or client it belongs to
+//   rehearsal   a trainer walking a client's program, against memory, reached with ?rehearse=
 //   local       no backend, seeded fake data, reached with ?local=1
 //   signed-out  no session, so the page should send the person to auth.html
 //   unbound     a session that resolves to neither a trainer nor a client
@@ -18,6 +19,7 @@ import { createRemote } from './remote.js';
 import { seed, isSeeded, getDefaultClientId } from './seed.js';
 import { publishSync } from './sync-status.js';
 import { installWorker } from './worker.js';
+import { rehearsalTarget, openRehearsal } from './rehearse.js';
 
 // What the local database currently holds. Either 'local' for seeded fake data, or the auth
 // user whose rows are mirrored here.
@@ -250,6 +252,41 @@ export async function boot({ allowLocal = true, role = null } = {}) {
     if (result.error && !error) error = result.error;
   } else {
     first.catch(() => {});
+  }
+
+  // A trainer walking one of their own clients' programs. Decided before the misroute check
+  // below, because a trainer on the logging screen is exactly what that check exists to stop, and
+  // this is the one time it is deliberate.
+  //
+  // The real storage stays open and keeps syncing: it is the trainer's own device and their own
+  // mirror, and this is where the program is read FROM. What the page gets back instead is a
+  // memory adapter holding a copy, so nothing the screen does can reach it. See js/rehearse.js.
+  // `role === 'client'` is the logging screen and nothing else, and the guard is deliberate rather
+  // than incidental. boot() is called by every page, so without it a stray ?rehearse= on Progress
+  // or the builder would swap that page's storage for an empty memory one and it would render as a
+  // client who has never trained. A rehearsal is a thing you do to the logging screen.
+  const rehearsing = role === 'client' ? rehearsalTarget() : null;
+  if (rehearsing && can(actor, 'trainer')) {
+    const rehearsal = await openRehearsal(storage, rehearsing);
+    // Nothing to walk through, so this falls through to the ordinary routing rather than opening
+    // an empty logging screen. A trainer who followed a link to a client with no program gets sent
+    // back to the trainer view, which is the screen that can say so and do something about it.
+    if (rehearsal) {
+      return {
+        mode: 'rehearsal',
+        storage: rehearsal.storage,
+        client,
+        session,
+        // Both capabilities, deliberately. The clients half is what lets this screen open at all
+        // and what makes the numbers print in the unit that person's phone shows, per the rule
+        // that a viewer holding both rows is read from the clients row. The trainers half is the
+        // way out: the shell keeps the trainer's own tab bar, so leaving is a tap rather than a
+        // back button somebody has to think of.
+        actor: { role: 'both', clientId: rehearsal.client.id, trainerId: actor.trainerId, isStaff: actor.isStaff },
+        rehearsing: rehearsal.client,
+        error,
+      };
+    }
   }
 
   // A trainer opening the client logging screen is a routing mistake, not a state to explain.
