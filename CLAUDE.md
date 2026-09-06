@@ -406,6 +406,18 @@ Requirements:
   steppers already sit. The added set is written with `set_logs.is_extra` true, recorded at log
   time rather than inferred later from the assignment snapshot, because the trainer needs
   prescribed and actual separated on every row a chart reads.
+  **It lasts for that session and does not come back as next week's program.** A plan built out of
+  every row of the last session read an added set as a prescribed one, so one good day where
+  somebody squeezed out a fifth set returned the following week as a five set prescription and the
+  week after that as six: the decay rule above running in the other direction, and worse in this
+  one, because it ratchets a program upward on the evidence of a client's best day and never asks
+  the trainer. `planForItem` skips `is_extra` rows when it reads history, so the count stays the
+  trainer's and the carry reads the last PRESCRIBED working set rather than the added one, which is
+  the same "never talk somebody down off their working weight" rule the prefill is careful about
+  everywhere else. Nothing about the record changes: the row keeps its flag and its place in
+  history, the summary counts it, and the trainer's chart still draws it as the pale band beyond the
+  plan. Somebody who wants five sets every week asks their trainer for five sets, and the trainer
+  changes the program, which is a new assignment and already works.
 - The first ever set on a lift prefills from `template_items.starting_weight_kg`, which the
   trainer sets when building the program. When it is blank, and it will be for a client nobody
   has watched lift, the app does not guess a working weight. It falls back to a fact about the

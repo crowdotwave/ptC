@@ -3399,13 +3399,47 @@ test('carrying reads the last working set, not the first', () => {
   eq(entries[2].reps, 10);
 });
 
-test('a fuller session than the program asked for is kept whole', () => {
+// The other direction of the decay above, and the one a client asked for by name: he wanted to log
+// that he got an extra set in without that becoming next week's program. Building the plan out of
+// every row of the last session ratcheted the prescription up on the evidence of somebody's best
+// day, and then up again the week after.
+test('a set the client added is not a set the program asks for next time', () => {
   const entries = planForItem(
     planItem({ target_sets: 2 }),
     prev([[0, row()], [1, row()], [2, row({ is_extra: true })]]),
     opening,
   );
-  eq(entries.length, 3, 'an added set stays in the plan rather than being trimmed back');
+  eq(entries.length, 2, 'the trainer asked for two and still asks for two');
+  eq(entries.map((e) => e.setIndex), [0, 1]);
+  ok(entries.every((e) => !e.isExtra), 'and nothing in the plan claims to be an extra');
+});
+
+test('an added set never becomes the number the next prescribed set opens at', () => {
+  // The added set was a heavy single. Carrying it into set three would be the app prescribing a
+  // weight nobody asked for, on the strength of one set the client chose to do.
+  const entries = planForItem(
+    planItem({ target_sets: 3 }),
+    prev([[0, row({ weight_kg: 60, reps: 12 })], [1, row({ weight_kg: 60, reps: 12 })],
+          [2, row({ weight_kg: 100, reps: 1, is_extra: true })]]),
+    opening,
+  );
+  eq(entries.length, 3);
+  eq(entries[2].weightKg, 60, 'carried from the last prescribed set, not the added one');
+  eq(entries[2].carriedFrom, { weightKg: 60, reps: 12 });
+});
+
+// Reachable through undo: the prescribed rows are retracted and the added one is not, so
+// lastPerformance hands back a session whose only surviving row is an extra.
+test('a lift whose only surviving row was added has no history to build on', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 2 }),
+    prev([[2, row({ weight_kg: 100, is_extra: true })]]),
+    opening,
+  );
+  eq(entries.length, 2);
+  eq(entries.map((e) => e.weightKg), [20, 20], 'the opening prefill, not the added set’s weight');
+  eq(entries[0].openingSource, 'bar');
+  eq(entries[0].lastWeightKg, null, 'and it claims no last time');
 });
 
 test('warmups do not count against the prescription', () => {

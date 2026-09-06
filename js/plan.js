@@ -109,14 +109,37 @@ export function setCountOf(item) {
  * Warmups are counted separately from the prescription. A trainer asking for four sets is asking
  * for four working sets, so a client who warms up twice gets six entries rather than four, and a
  * warmup logged last time keeps its place at the front.
+ *
+ * So are added sets, and for a stronger reason. A set the client ADDED last time is not a set the
+ * program asks for this time. It used to be: the plan was built out of every row of the last
+ * session, so one good day where somebody squeezed out a fifth set came back the following week as
+ * a five set prescription, and the week after that as six. That is the decay this file's header
+ * describes, running the other way, and it is worse in this direction, because it silently ratchets
+ * somebody's program upward on the evidence of their best day and never asks the trainer.
+ *
+ * An added set is a thing that was done and never a thing that is owed. Nothing about the record of
+ * it changes: the row keeps its is_extra flag and its place in history, the summary still counts
+ * it, and the trainer's chart still draws it as the pale band beyond the plan. What changes is that
+ * next week opens at what the program says. Somebody who wants five sets every week asks their
+ * trainer for five sets, and the trainer changes the program, which is a thing this app already
+ * does properly through a new assignment.
  */
 export function planForItem(item, previous, opening) {
   const logMode = item.log_mode ?? 'weight_reps';
   const setCount = setCountOf(item);
 
-  if (previous && previous.bySetIndex.size) {
-    const entries = [...previous.bySetIndex.entries()]
-      .sort((a, b) => a[0] - b[0])
+  // Filtered before the emptiness test rather than inside the branch, so a lift whose only
+  // surviving row from last time was an added one falls through to the opening prefill instead of
+  // building a plan around a set the program never asked for. Undo makes that reachable: retracting
+  // the prescribed sets and keeping the extra leaves exactly that.
+  const performed = previous
+    ? [...previous.bySetIndex.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .filter(([, row]) => row.is_extra !== true)
+    : [];
+
+  if (performed.length) {
+    const entries = performed
       .map(([setIndex, row]) => ({
         item,
         setIndex,
