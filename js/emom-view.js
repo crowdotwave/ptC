@@ -36,7 +36,7 @@
 // the overload that fence exists to prevent. What says a window is nearly out is the numeral falling
 // and the track emptying, which is size and position rather than hue.
 
-import { emomClock, emomLength, emomRoundFloor, EMOM_MAX_ROUNDS } from './emom.js';
+import { emomClock, emomShape, emomRoundFloor, EMOM_MAX_ROUNDS } from './emom.js';
 import { trackFill } from './track.js';
 
 /**
@@ -150,7 +150,10 @@ function drawRounds(ui, block, floor) {
  */
 export function readyEmom(ui, block, resume) {
   ui.root.dataset.state = 'ready';
-  ui.where.textContent = emomLength(block);
+  // Without the round count, because the dial directly above this line is already showing it and
+  // is the thing that changes it. Saying "4 rounds" twice in two inches invites somebody to check
+  // whether they are two different numbers.
+  ui.where.textContent = emomShape(block);
   ui.lift.textContent = block.stations[0].name;
   ui.reps.textContent = block.stations[0].reps ? `${block.stations[0].reps} reps` : '';
   ui.time.textContent = emomClock(block.windowMs);
@@ -164,7 +167,11 @@ export function readyEmom(ui, block, resume) {
   drawRounds(ui, block, resume ? emomRoundFloor(block, resume) : 1);
   ui.start.hidden = false;
   ui.startLabel.textContent = resume ? 'Pick the clock back up' : 'Start the clock';
-  ui.startSub.textContent = resume ? 'It kept running' : `${block.minutes} windows`;
+  // Only the resume has anything to add. It used to read "16 windows" on a fresh block, which the
+  // day chip at the top of the screen is already saying, word for word, and which the line above
+  // the button says again in minutes. A sub-label under a button exists to say what the press will
+  // do that the label does not; repeating a number off the header is not that.
+  ui.startSub.textContent = resume ? 'It kept running' : '';
 }
 
 /**

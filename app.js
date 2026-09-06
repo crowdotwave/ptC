@@ -51,8 +51,6 @@ const ui = {
   dayJumpLabel: el('day-jump-label'),
   dayJumpPos: el('day-jump-pos'),
   overview: el('overview'),
-  overviewTitle: el('overview-title'),
-  overviewPos: el('overview-pos'),
   overviewBody: el('overview-body'),
   returnBar: el('return-bar'),
   returnTo: el('return-to'),
@@ -505,9 +503,9 @@ function renderOverviewPanel() {
   // The day as well as the plan, so the rows the trainer marked as not logged are on the list. They
   // own no sets, so js/plan.js never built them, and until now that meant the panel showed a day
   // with exercises missing out of the middle of it.
+  // The panel names neither the day nor the position, because the chip that opened it is still on
+  // screen saying both. See index.html.
   const rows = overviewRows(state.plan, state.cursor, state.day);
-  ui.overviewTitle.textContent = dayTitle(state.day);
-  ui.overviewPos.textContent = positionLine(rows);
   ui.overviewBody.innerHTML = renderOverview(rows);
 
   // Always offered. It used to leave once a set was logged, because it could only have answered
@@ -1081,13 +1079,25 @@ function renderEmom() {
     emom.view.roundsUp.addEventListener('click', () => changeEmomRounds(1));
   }
 
-  ui.exerciseName.textContent = dayTitle(state.day);
-  // The small line, not the big one. `.context__set` is the 28px band that says "Set 3 of 4", and
-  // "Every minute on the minute" put in there wrapped to three lines on a 390px phone and pushed the
-  // clock into the tab bar. What this screen is is a caption, not a position.
+  // What this screen IS, in the slot that on every other day holds what you are doing right now.
+  //
+  // It held the day's name, which the chip immediately above it already carries, in the same words,
+  // beside the position. Two labels for one fact with nothing between them: the eye reads the
+  // second one looking for a new fact and finds the first one again. On an ordinary day these two
+  // slots answer different questions, the day and the lift, and there is nothing to fix. A clock-led
+  // day has no current lift to put here, because the lift changes every window and lives in the
+  // block where it can be read at a glance, so this slot had nothing of its own to say.
+  //
+  // The caption is what it should have been saying. On an EMOM the unit of work is the whole day
+  // rather than any one lift, so "Every minute on the minute" IS the answer to what you are doing
+  // right now, and promoting it costs no band because it takes the line it used to sit on.
+  ui.exerciseName.textContent = 'Every minute on the minute';
+  // `.context__set` is the 28px band that says "Set 3 of 4". A clock-led day's position is round
+  // and minute, which is in the block and on the chip, so this stays empty and the CSS collapses
+  // the row it sits in rather than reserving a tap target's height for nothing.
   ui.setPosition.textContent = '';
-  ui.target.hidden = false;
-  ui.target.textContent = 'Every minute on the minute';
+  ui.target.hidden = true;
+  ui.target.textContent = '';
 
   if (emom.cursor.windowStartedAt === null) {
     readyEmom(emom.view, emom.block, emomPickup());

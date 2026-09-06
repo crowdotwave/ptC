@@ -130,11 +130,13 @@
            for costing a focus trap, an outside click handler, an escape handler and a z-index to
            hold what a mode holds for free. The rest timer stays below it and keeps running, since
            the countdown is about the client's body and not about which lift they are looking at. -->
+      <!-- No heading of its own. It carried the day's name and the position in it, which is word
+           for word what the chip that opens this panel says, and that chip is still on screen forty
+           pixels above: the panel is a state of this screen rather than a layer over it, so nothing
+           it would reintroduce has gone away. A panel that repeats its own opener is the app asking
+           somebody to read the same two lines twice to find out they were the same two lines. The
+           region is named for a screen reader on the section itself. -->
       <section class="worknav" id="overview" hidden aria-label="This workout">
-        <header class="worknav__head">
-          <h2 class="worknav__day" id="overview-title"></h2>
-          <p class="worknav__pos num" id="overview-pos"></p>
-        </header>
         <!-- The client picks the day. A five day rotation is not done in order, so guessing from
              the last session and offering no way to change it is wrong. Only before the first set:
              after that the session row is already filed under a day. -->

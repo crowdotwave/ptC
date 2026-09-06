@@ -62,7 +62,7 @@ import { setLine, renderSessionReadout } from './js/session-readout.js';
 import {
   emomSettings, emomBlock, emomClock, emomLength, emomDurationMs, emomMinuteAt,
   emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
-  emomWithRounds, emomChangeRounds, emomRoundFloor, emomBlockFor, EMOM_MAX_ROUNDS,
+  emomWithRounds, emomChangeRounds, emomRoundFloor, emomBlockFor, emomShape, EMOM_MAX_ROUNDS,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 
@@ -5319,10 +5319,14 @@ test('the ready screen offers the block and the one press that starts it', () =>
   const b = emmaBlock();
   const { ui } = emomUi();
   readyEmom(ui, b, null);
-  eq(ui.where.textContent, '5 rounds, 6 stations, 30 min', 'the decision is half an hour, not one lift');
+  eq(ui.where.textContent, '6 stations, 30 min', 'the decision is half an hour, not one lift');
   eq(ui.lift.textContent, 'DB THRUSTERS', 'named so the client knows what to stand over');
   eq(ui.startLabel.textContent, 'Start the clock');
-  eq(ui.startSub.textContent, '30 windows');
+  // The round count is on the dial directly above this line, and the window count is on the day
+  // chip at the top of the screen. A number said twice within two inches invites somebody to check
+  // whether they are two different numbers.
+  ok(!ui.where.textContent.includes('round'), 'the dial above it is what says the rounds');
+  eq(ui.startSub.textContent, '', 'and the button adds nothing the header already said');
   ok(ui.more.hidden, 'nothing to catch up on before it begins');
 
   const rows = [1, 2, 3].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
@@ -5345,7 +5349,16 @@ test('the dial says how many rounds the block is set to, not where you are in it
   readyEmom(ui, one, null);
   eq(ui.roundsNum.textContent, '1');
   eq(ui.roundsWord.textContent, 'round', 'one round, singular');
-  eq(ui.where.textContent, '1 round, 6 stations, 6 min', 'and the block reads back as it now is');
+  eq(ui.where.textContent, '6 stations, 6 min', 'and what the block comes to follows the dial');
+});
+
+// emomLength still says the whole sentence, because the builder is SETTING the rounds and the
+// number they add up to is the fact a trainer is checking when they type one.
+test('the builder still reads the rounds back, and the ready screen does not', () => {
+  eq(emomLength(emmaBlock()), '5 rounds, 6 stations, 30 min');
+  eq(emomShape(emmaBlock()), '6 stations, 30 min');
+  eq(emomLength(null), '');
+  eq(emomShape(null), '');
 });
 
 test('the minus key greys on the round being run rather than refusing quietly', () => {

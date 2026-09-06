@@ -546,8 +546,15 @@ somebody is standing in the middle of. It only ever grows: a round taken OFF lea
 rows, the same way an added minute leaves none, and both come back at what the trainer prescribed
 rather than at a change nobody can evidence.
 
-**It sits directly above the line that names the rounds**, which is "4 rounds, 4 stations, 16 min"
-before the clock starts and "Round 2 of 5" once it is going. It was at the bottom of the block for
+The ready screen reads "4 stations, 16 min" rather than "4 rounds, 4 stations, 16 min", and the
+start button carries no sub-label on a fresh block. The rounds are on the dial an inch above and the
+window count is on the day chip at the top, and a number said twice within two inches invites
+somebody to check whether they are two different numbers. `emomShape` is that reading and
+`emomLength` is still the whole sentence, which the builder needs because setting the rounds is what
+it is for. See the label rule under the encoding rules.
+
+**It sits directly above the line that names the rounds**, which is "4 stations, 16 min" before the
+clock starts and "Round 2 of 5" once it is going. It was at the bottom of the block for
 one build, in a row beside "Add a minute", and that put the control that changes a number a screen
 away from the number it changes. Being beside what it moves is worth more than being in the thumb
 arc here, because another round is a between-rounds decision made standing still. The minute is the
@@ -845,6 +852,29 @@ z-index, no outside click handler, escape to close. `js/lift-picker.js` owns it 
 render from that one module. The day picker stays a chip row, because a rotation is five options
 and the half visible chip at the edge is a useful affordance when there is almost nothing behind
 it.
+
+**A label and the control that carries it are one fact, and the control keeps it.** A heading that
+repeats the control immediately above or below it costs a band of the screen and gains nothing: the
+eye reads the second one looking for a new fact and finds the first one again. Two of these shipped
+and both are gone. The logging screen's title held the day's name on a clock-led day, which the chip
+directly above it already said word for word, so it now says what the screen is instead ("Every
+minute on the minute"), which on an EMOM is the honest answer to what you are doing right now: the
+unit of work is the whole day and the lift changes every window. The workout panel opened with the
+day's name and the position in it, both of which are on the chip that opens the panel, and that chip
+stays on screen because the panel is a state of the screen rather than a layer over it.
+
+Three things are NOT this and must not be swept up in it:
+
+- **A chooser marking its selection.** The day picker fills the day you are on, and that is the
+  "selected means filled" rule doing its job.
+- **Per-row data in a list.** Eight rows reading "Not logged yet" is eight rows each stating their
+  own state, not one fact eight times.
+- **A closed control naming what it is set to**, which is the lift picker's whole argument: a
+  control with forty options behind it that does not say which one is showing is the failure the
+  segmented unit switch was built to avoid. That one is still live and still arguable, because the
+  heading above it and the control below it do both print the lift's name. It is left alone
+  deliberately rather than by oversight: removing the heading costs the per-lift half of the
+  progress screen its subject at heading size, and removing the name from the control costs more.
 
 **No intensity-only encoding either.** This one is measured, not assumed. The data axis is
 cyan, and cyan clusters at high luminance in sRGB, so an intensity ladder in it has very

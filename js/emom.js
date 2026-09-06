@@ -406,6 +406,23 @@ export function emomClock(remainingMs) {
  */
 export function emomLength(block) {
   if (!block) return '';
+  return `${block.rounds} round${block.rounds === 1 ? '' : 's'}, ${emomShape(block)}`;
+}
+
+/**
+ * The same fact with the round count left off: "6 stations, 30 min".
+ *
+ * For the one screen where the rounds are already on display directly above this line, in a control
+ * that changes them. "4 rounds" on a dial with "4 rounds, 4 stations, 16 min" underneath it is the
+ * app saying the same number twice in two inches and inviting somebody to wonder whether they are
+ * two different numbers.
+ *
+ * Split out rather than switched on a flag, so both readings are named things and emomLength is
+ * still the whole sentence for the builder, which is setting the rounds and therefore has to say
+ * what they came to.
+ */
+export function emomShape(block) {
+  if (!block) return '';
   const total = Math.round(emomDurationMs(block) / 1000);
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
@@ -414,5 +431,5 @@ export function emomLength(block) {
   // by whoever is checking this works.
   const clock = !minutes ? `${seconds} sec` : seconds ? `${minutes} min ${seconds} sec` : `${minutes} min`;
   const stations = `${block.stations.length} station${block.stations.length === 1 ? '' : 's'}`;
-  return `${block.rounds} round${block.rounds === 1 ? '' : 's'}, ${stations}, ${clock}`;
+  return `${stations}, ${clock}`;
 }

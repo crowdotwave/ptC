@@ -1160,43 +1160,20 @@ button {
  *
  * .screen.is-overview fixes the screen's height, which is what stops the page scrolling and makes
  * the overflow land inside .worknav__scroll. But a flex column distributes shrinkage across every
- * item that will take it, and the default is that they all will. So on a long day the head, the
- * day picker and the foot were each squeezed a little to make room, and the day picker is the one
- * that shows it: it carries overflow-y: hidden, so instead of overflowing visibly it sliced its
- * own chips in half. Measured on the seeded two day program, which is the SHORT case: a 393x852
- * viewport gave the picker 40px around a 46px row, 667 gave it 29, and 560 gave it 22. A real
- * seven day program does it on a full size phone.
+ * item that will take it, and the default is that they all will. So on a long day the day picker
+ * and the foot were each squeezed a little to make room, and the day picker is the one that shows
+ * it: it carries overflow-y: hidden, so instead of overflowing visibly it sliced its own chips in
+ * half. Measured on the seeded two day program, which is the SHORT case: a 393x852 viewport gave
+ * the picker 40px around a 46px row, 667 gave it 29, and 560 gave it 22. A real seven day program
+ * does it on a full size phone.
  *
- * flex: 0 0 auto on the three fixed parts, so .worknav__scroll is the only thing left that can
- * give, which is what it is for. */
-.worknav__head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  flex: 0 0 auto;
-}
-
+ * flex: 0 0 auto on both fixed parts, so .worknav__scroll is the only thing left that can give,
+ * which is what it is for. There was a third, a heading repeating the chip that opens this panel,
+ * and removing it gave the list back the band it was taking. */
 /* The day picker inside the panel. Same rule, stated separately because .daypicker is shared with
  * the builder, where it is not inside a fixed height column and has nothing to shrink against. */
 .worknav > .daypicker {
   flex: 0 0 auto;
-}
-
-.worknav__day {
-  margin: 0;
-  font-size: var(--t-sm);
-  font-weight: 650;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
-}
-
-/* Cyan, because it is the prescription talking: this is the day, and this is where in it you
- * are. Same token and same job as the load line on the program view. */
-.worknav__pos {
-  margin: 0;
-  color: var(--accent-data);
-  font-size: var(--t-body);
-  font-weight: 700;
 }
 
 .worknav__scroll {
@@ -5031,6 +5008,13 @@ button.navlink:disabled {
   font-size: var(--t-small);
   font-weight: 500;
   opacity: 0.85;
+}
+
+/* A fresh block has nothing to add under the label, and an empty span still earns its margin and
+ * pushes the word off centre inside the button. Removed in CSS rather than by toggling hidden, the
+ * same way .stepper__unit:empty is, so there is no ordering rule for a caller to remember. */
+.emom__startsub:empty {
+  display: none;
 }
 
 .emom__start[hidden],
