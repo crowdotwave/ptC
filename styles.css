@@ -1381,6 +1381,16 @@ button.worknav__row:active {
   display: none;
 }
 
+/* The row is 44px because it holds a 28px position line and once held a control beside it. On a
+ * clock-led day it holds neither: the position is in the block, since "Lift 1 of 4" is wrong for
+ * fifteen minutes in every sixteen. Measured on the real screen, that left 44px of nothing between
+ * the day name and the caption under it, which is the gap that made the top of this screen read as
+ * badly set rather than as spacious. An empty row keeping a tap target's height is a control's
+ * footprint with no control in it. */
+.screen.is-emom .context__row {
+  min-height: 0;
+}
+
 /* A definite height, which min-height alone is not.
  *
  * This is the whole trick that keeps the page still while the list inside it moves. A flex column
@@ -4596,6 +4606,22 @@ button.navlink:disabled {
   text-align: center;
 }
 
+/* Eight lines clumped at 8px apart in the middle of a tall phone, with a hundred and fifty pixels
+ * of black above and below, reads as a block that fell down the screen rather than as a screen with
+ * air in it. So the gap grows where there is height to spend, and only there: measured on a 932
+ * tall phone this hands the block 40px of its own breathing room out of 300 that were doing
+ * nothing.
+ *
+ * Keyed on height rather than width, because height is what is actually short, and clamped by a
+ * media query rather than by vh units so a short screen gets the original 8px exactly. This screen
+ * must never scroll, and a gap that scaled smoothly would find the viewport where six of them add
+ * up to one row too many. */
+@media (min-height: 760px) {
+  .emom {
+    gap: var(--s-3);
+  }
+}
+
 /* Round and minute. Chrome, and the quietest thing on the screen: it is reassurance about where
  * you are, not an instruction, and it must never compete with the lift name above the clock. */
 .emom__where {
@@ -4690,22 +4716,6 @@ button.navlink:disabled {
   min-height: 1.2em;
   color: var(--text-secondary);
   font-size: var(--t-small);
-}
-
-/* The two controls sit on one line, and wrap onto two at 360px rather than shrinking. A key whose
- * glyph is squeezed to fit is a key that got harder to hit, and this screen has the band spare:
- * the steppers and the log action are not on it. */
-.emom__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-2);
-}
-
-/* Nothing to control once the block is over, and an empty row would still spend the column's gap. */
-.emom[data-state='done'] .emom__controls {
-  display: none;
 }
 
 /* The round dial. Unique in this app on purpose, and the reasoning is the same one that keeps the
@@ -4952,14 +4962,24 @@ button.navlink:disabled {
   display: none;
 }
 
-/* Takes the space the steppers and the log action would have had, and centres in it. Without
- * this the clock sits jammed against the tab bar under a third of a screen of nothing, because
- * the spacer above is sized for a layout whose bottom half has been removed. */
+/* Takes the space the steppers and the log action would have had, and sits at the bottom of it,
+ * which is where every other day of this app puts the thing you press.
+ *
+ * It centred for one build, and centring is what put a hundred and sixty pixels of black above the
+ * block and another hundred and sixty below it. Measured against the ordinary logging screen on the
+ * same phone: the log action ends 12px above the tab bar, and the start action on a clock-led day
+ * ended 174px above it. Same screen, same thumb, same press, two different places, and the gap read
+ * as a layout that had come loose rather than as air.
+ *
+ * Bottom aligned answers both states rather than only the one in the screenshot. Ready, the last
+ * thing in the block is "Start the clock". Running, the button is gone and the last thing is "Add a
+ * minute". Both are presses, so whichever one exists lands in the thumb arc, and the slack collects
+ * in one deliberate band under the header instead of being split into two accidental ones. */
 .emomhost {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-end;
   min-height: 0;
 }
 

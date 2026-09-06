@@ -47,6 +47,27 @@ import { trackFill } from './track.js';
 export function mountEmomView(host) {
   host.innerHTML = `
     <div class="emom" data-state="ready">
+      <!-- Directly above the line that names the rounds, in both states: "4 rounds, 4 stations,
+           16 min" before the clock starts, "Round 2 of 5" once it is going. It sat at the bottom
+           for one build, in a row beside "Add a minute", which put the control that changes a
+           number a screen away from the number it changes. Being beside what it moves is worth
+           more than being in the thumb arc here: another round is a between-rounds decision, made
+           standing still, with the other hand. The minute is the urgent one and it keeps its place
+           by the clock.
+
+           Drawn as one object rather than as two buttons with a number between them, because minus
+           and plus either side of a count is the shape this app uses for the load on the bar, and
+           this is not that: it changes the workout's shape, not a number inside it. Hence the
+           capsule, the hairline cells, and no fill until a key is pressed. -->
+      <div class="emomrounds" role="group" aria-label="Rounds in this block" data-emom-rounds>
+        <button type="button" class="emomrounds__key" data-emom-rounds-down aria-label="One round fewer">&minus;</button>
+        <span class="emomrounds__read">
+          <span class="emomrounds__num num" data-emom-rounds-num>0</span>
+          <span class="emomrounds__word" data-emom-rounds-word>rounds</span>
+        </span>
+        <button type="button" class="emomrounds__key" data-emom-rounds-up aria-label="One round more">+</button>
+      </div>
+
       <p class="emom__where num" data-emom-where></p>
 
       <p class="emom__lift" data-emom-lift></p>
@@ -59,30 +80,12 @@ export function mountEmomView(host) {
 
       <p class="emom__next" data-emom-next></p>
 
-      <!-- Two controls, and they are the two things a client can honestly change about a block they
-           are standing in the middle of: how long this window gets, and how many windows there are.
-           Neither asks a question and neither writes to the program.
-
-           The round dial is drawn as one object rather than as two buttons with a number between
-           them, because minus and plus either side of a count is a shape this app already uses for
-           the load on the bar, and this is not that: it changes the workout's shape, not a number
-           inside it. Hence the capsule, the hairline cells, and no fill until a key is pressed. -->
-      <div class="emom__controls">
-        <div class="emomrounds" role="group" aria-label="Rounds in this block" data-emom-rounds>
-          <button type="button" class="emomrounds__key" data-emom-rounds-down aria-label="One round fewer">&minus;</button>
-          <span class="emomrounds__read">
-            <span class="emomrounds__num num" data-emom-rounds-num>0</span>
-            <span class="emomrounds__word" data-emom-rounds-word>rounds</span>
-          </span>
-          <button type="button" class="emomrounds__key" data-emom-rounds-up aria-label="One round more">+</button>
-        </div>
-
-        <!-- Mid EMOM there is no time to dial a number or answer anything, and the only useful
-             thing the app can offer somebody who has fallen behind is more time. -->
-        <button type="button" class="emom__more" data-emom-more>
-          <span data-emom-more-label>Add a minute</span>
-        </button>
-      </div>
+      <!-- Mid EMOM there is no time to dial a number or answer anything, and the only useful thing
+           the app can offer somebody who has fallen behind is more time. It stays here, under the
+           clock it changes, for the same reason the dial sits under the round count. -->
+      <button type="button" class="emom__more" data-emom-more>
+        <span data-emom-more-label>Add a minute</span>
+      </button>
 
       <!-- Nothing starts on arrival, and that is not a nicety. A clock that began the moment the
            screen loaded would spend the client's first window on walking to the rack and picking up

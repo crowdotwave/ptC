@@ -536,6 +536,20 @@ somebody is standing in the middle of. It only ever grows: a round taken OFF lea
 rows, the same way an added minute leaves none, and both come back at what the trainer prescribed
 rather than at a change nobody can evidence.
 
+**It sits directly above the line that names the rounds**, which is "4 rounds, 4 stations, 16 min"
+before the clock starts and "Round 2 of 5" once it is going. It was at the bottom of the block for
+one build, in a row beside "Add a minute", and that put the control that changes a number a screen
+away from the number it changes. Being beside what it moves is worth more than being in the thumb
+arc here, because another round is a between-rounds decision made standing still. The minute is the
+urgent one and it keeps its place under the clock, which is what it changes.
+
+**The block is bottom aligned in the space the steppers would have had**, so whichever control
+exists lands in the thumb arc: "Start the clock" before it begins, "Add a minute" while it runs. It
+centred for one build, and centring is what put 162px of black above the block and another 162
+below it. Measured against an ordinary day on the same phone: the log action ends 12px above the tab
+bar and the start action ended 174px above it, which read as a layout that had come loose. The empty
+44px position row goes too, since the position on this day is inside the block.
+
 **The dial is drawn as one capsule and not as a pair of stepper keys**, and that is a claim rather
 than a decoration. The steppers are lit violet slabs because they change a number inside a set and
 they are the most pressed thing in the app. This changes how long the workout is. Two controls that
