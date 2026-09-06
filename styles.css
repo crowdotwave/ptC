@@ -4692,8 +4692,134 @@ button.navlink:disabled {
   font-size: var(--t-small);
 }
 
-/* Chrome, flat, and the only control on the screen while the block runs. Sized to its label with
- * the 44px target kept by a transparent ::after, same as every other chrome control.
+/* The two controls sit on one line, and wrap onto two at 360px rather than shrinking. A key whose
+ * glyph is squeezed to fit is a key that got harder to hit, and this screen has the band spare:
+ * the steppers and the log action are not on it. */
+.emom__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+}
+
+/* Nothing to control once the block is over, and an empty row would still spend the column's gap. */
+.emom[data-state='done'] .emom__controls {
+  display: none;
+}
+
+/* The round dial. Unique in this app on purpose, and the reasoning is the same one that keeps the
+ * clock above it flat: this screen's vocabulary is not the logging screen's.
+ *
+ * It is not a stepper. The steppers are lit violet slabs with keys sunk into them, and they are
+ * drawn that way because they change a number inside a set, mid effort, and they are the most
+ * pressed thing in the app. This changes how long the workout is. Borrowing their treatment would
+ * put two objects that mean completely different things into the same shape, on the one screen with
+ * no time to tell them apart, and it would put a second lit slab beside a start action that is lit
+ * precisely because it is the only one.
+ *
+ * It is not the "Add a minute" pill either, and that is deliberate: the pill is one press with one
+ * outcome, this is a value with two directions and a number that has to be read at a glance. So it
+ * takes the shape neither of them has, a hairline capsule on the base surface split into three
+ * cells, with no fill anywhere until a key goes down. That is the sleekest thing this token set can
+ * draw, because on an OLED panel the base is the one surface that costs nothing.
+ *
+ * Everything else here is the house rules unchanged: light direction on the edge, --chrome-edge on
+ * the top and --chrome-edge-low on the other three, which is what survives a phone turned down to
+ * fifteen percent. No glow. No gradient. No green. */
+.emomrounds {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, auto) auto;
+  align-items: stretch;
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
+  /* The one full capsule in the app. A radius nothing else uses is doing the same job as the shape
+   * itself: telling this control apart from every rectangle around it at a glance. */
+  border-radius: 999px;
+  background: var(--surface-base);
+}
+
+/* A cell, not a button drawn inside one. The divider is what makes the three read as one object,
+ * and it is --divider for the same reason the row lists use it: a dark line on a dark face is no
+ * line at all on a dimmed screen. */
+.emomrounds__key {
+  position: relative;
+  min-width: 2.75rem;
+  min-height: 38px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--t-body);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The 44px target, kept apart from the ink, exactly as .emom__more does it. Tightening how a
+ * control looks must never tighten what a thumb has to hit. */
+.emomrounds__key::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  min-height: var(--tap);
+  transform: translateY(-50%);
+}
+
+.emomrounds__key:active:not(:disabled) {
+  background: var(--chrome-face-press);
+}
+
+/* Greyed rather than hidden. The floor is the round the client is standing in, so the minus key
+ * goes quiet at the bottom of the block and the dial keeps its width instead of the plus key
+ * sliding across under a thumb already on its way down.
+ *
+ * --muted measures 6.22 on the base, under the 7:1 the reading tiers are held to, and that is the
+ * one place on this screen where being under it is the point: the glyph is not information anybody
+ * has to read mid effort, its dimness IS the message, and the same token does the same job on a
+ * disabled stepper key. Everything that has to be READ here clears the floor. */
+.emomrounds__key:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.emomrounds__read {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.3em;
+  padding: 0 var(--s-2);
+  border-left: 1px solid var(--divider);
+  border-right: 1px solid var(--divider);
+}
+
+/* The number is the thing being read from arm's length, so it carries the weight and the word
+ * behind it stays a label. Tabular, because 9 rounds becoming 10 must not shift the capsule. */
+.emomrounds__num {
+  align-self: center;
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.emomrounds__word {
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.emomrounds[hidden] {
+  display: none;
+}
+
+/* Chrome, flat, and the control this screen has always had. Sized to its label with the 44px target
+ * kept by a transparent ::after, same as every other chrome control.
  *
  * It stays chrome rather than becoming a second lit slab beside the clock, and that is the whole
  * lighting rule doing its job: the start action is lit because it is the one press this screen is

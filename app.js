@@ -22,6 +22,7 @@ import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
 import {
   emomBlock, emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
+  emomChangeRounds, emomBlockFor,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
@@ -881,6 +882,17 @@ function emomPositionLine() {
 }
 
 /**
+ * The cursor a start press would pick up, or null for a block that has not run yet.
+ *
+ * One expression, three readers: the press itself, the ready screen that has to say which press it
+ * is offering, and the round dial, whose floor before the clock starts is decided by how far the
+ * rows already go rather than by round one.
+ */
+function emomPickup() {
+  return emomResume(state.emom.block, state.emom.rows);
+}
+
+/**
  * Begins the block, or picks a running one back up after a reload.
  *
  * The position comes from the rows wherever there are any, per js/emom.js emomResume, so a client
@@ -891,9 +903,39 @@ function startEmom() {
   const emom = state.emom;
   if (!emom || emom.cursor.windowStartedAt !== null) return;
 
-  emom.cursor = emomResume(emom.block, emom.rows) ?? emomStart(emom.block, Date.now());
+  emom.cursor = emomPickup() ?? emomStart(emom.block, Date.now());
   emom.handle = setInterval(tickEmom, EMOM_TICK_MS);
   tickEmom();
+}
+
+/**
+ * One round more, or one fewer, on the block the client is standing in.
+ *
+ * Writes nothing. The rounds a trainer asked for stay on the day and reach the next session
+ * untouched; what this changes is how many windows this block runs for, and the only lasting record
+ * of it is the rows those windows write, which carry is_extra past the prescribed count.
+ *
+ * Before the clock starts, the cursor to reason about is the one the start press would resume onto
+ * rather than the empty one on screen. A client who reloaded into the middle of a sixth round they
+ * added cannot then set the block back to five: the log already describes more windows than that,
+ * and emomResume would clamp the cursor to the end of a block they are standing inside.
+ */
+function changeEmomRounds(delta) {
+  const emom = state.emom;
+  if (!emom) return;
+
+  const cursor =
+    emom.cursor.windowStartedAt === null ? (emomPickup() ?? emom.cursor) : emom.cursor;
+  const block = emomChangeRounds(emom.block, cursor, delta);
+  // Refused rather than clamped, so a key at its limit changes nothing at all, including the notice
+  // band and the header.
+  if (block === emom.block) return;
+
+  emom.block = block;
+  renderEmom();
+  // The chip carries the round out of the block's own count, so it moves with this as well as with
+  // the clock.
+  renderHeader();
 }
 
 /**
@@ -960,6 +1002,12 @@ function addEmomMinute() {
  *
  * set_index is the ROUND, so a station's five windows are set 1 to 5 of that lift, which is what
  * every chart downstream already understands a set index to mean.
+ *
+ * A window in a round the client added carries is_extra, decided by js/emom.js rather than here.
+ * That is the same claim Add set makes on an ordinary day and it buys the same two things: the
+ * trainer's charts keep prescribed and actual apart, and the round does not come back next week as
+ * part of the program. Nothing about this row says the block was longer than the day asked for
+ * beyond that flag, which is enough, because the day still holds the number the trainer wrote.
  */
 function logEmomWindow(minute) {
   const session = ensureSessionRecord();
@@ -978,7 +1026,7 @@ function logEmomWindow(minute) {
     logged_at: new Date().toISOString(),
     supersedes_id: null,
     is_void: false,
-    is_extra: false,
+    is_extra: minute.extra === true,
     device_id: getDeviceId(),
   });
 
@@ -991,7 +1039,7 @@ function logEmomWindow(minute) {
     reps: record.reps,
     logMode: 'bodyweight_reps',
     isWarmup: false,
-    isExtra: false,
+    isExtra: minute.extra === true,
     previousBest: state.best.get(item.exercise_id),
   });
 
@@ -1027,6 +1075,8 @@ function renderEmom() {
     emom.view = mountEmomView(ui.emomHost);
     emom.view.start.addEventListener('click', startEmom);
     emom.view.more.addEventListener('click', addEmomMinute);
+    emom.view.roundsDown.addEventListener('click', () => changeEmomRounds(-1));
+    emom.view.roundsUp.addEventListener('click', () => changeEmomRounds(1));
   }
 
   ui.exerciseName.textContent = dayTitle(state.day);
@@ -1038,7 +1088,7 @@ function renderEmom() {
   ui.target.textContent = 'Every minute on the minute';
 
   if (emom.cursor.windowStartedAt === null) {
-    readyEmom(emom.view, emom.block, emom.rows.length > 0);
+    readyEmom(emom.view, emom.block, emomPickup());
     return;
   }
   drawEmom(emom.view, emom.block, emomWhere(emom.block, emom.cursor, Date.now()));
@@ -1638,6 +1688,11 @@ async function openDayOn(day, sessions, session) {
   // no promise about order.
   if (isEmomDay()) {
     state.emom.rows = [...rows].sort((a, b) => String(a.logged_at).localeCompare(String(b.logged_at)));
+    // A round the client added is in the rows and nowhere else, since it was never written to the
+    // day. So the block is grown to hold them before anything reads its length: without this, a
+    // reload into the middle of an added round comes back to the prescribed block, the cursor is
+    // clamped to the end of it, and the screen declares done a block still being run.
+    state.emom.block = emomBlockFor(state.emom.block, state.emom.rows);
     // Enough for the summary to count what the session holds. Nothing on this day reads an entry.
     state.logged = state.emom.rows.map((row) => ({
       id: row.id,
@@ -1648,7 +1703,7 @@ async function openDayOn(day, sessions, session) {
       reps: row.reps,
       logMode: 'bodyweight_reps',
       isWarmup: false,
-      isExtra: false,
+      isExtra: row.is_extra === true,
       previousBest: null,
     }));
     state.cursor = 0;

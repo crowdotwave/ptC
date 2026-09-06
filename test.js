@@ -60,6 +60,7 @@ import { setLine, renderSessionReadout } from './js/session-readout.js';
 import {
   emomSettings, emomBlock, emomClock, emomLength, emomDurationMs, emomMinuteAt,
   emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
+  emomWithRounds, emomChangeRounds, emomRoundFloor, emomBlockFor, EMOM_MAX_ROUNDS,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 
@@ -5041,6 +5042,86 @@ test('a minute cannot be added to a window that has already closed', () => {
   eq(emomAddMinute(b, cursor, T0 + 59_999).windowMs, cursor.windowMs + b.windowMs, 'a millisecond earlier is fine');
 });
 
+// ---------------------------------------------------------------- changing the rounds
+//
+// The other control, and it moves the BLOCK where adding a minute moves the cursor. Emma asked for
+// it: a block that is going well is one somebody wants another round of, and a block that is not is
+// one they want to finish honestly rather than walk away from. Neither is an edit to the program.
+
+test('a round added moves neither the station nor the clock', () => {
+  const b = emmaBlock();
+  const at = min(8) + 20_000;                       // twenty seconds into minute nine
+  const { cursor } = runTo(b, at);
+  const before = emomWhere(b, cursor, at);
+
+  const longer = emomChangeRounds(b, cursor, 1);
+  const after = emomWhere(longer, cursor, at);
+
+  eq(longer.rounds, 6);
+  eq(longer.minutes, 36, 'six stations further on the end of the block');
+  eq(after.index, before.index, 'the client is standing exactly where they were');
+  eq(after.station.name, before.station.name);
+  eq(after.round, before.round);
+  eq(after.remainingMs, before.remainingMs, 'and the window they are in is untouched');
+  eq(emomWithRounds(b, 6).minutes, 36, 'the count and the window total move together');
+});
+
+test('the added round is what the block runs on the end, and its rows say so', () => {
+  const b = emomChangeRounds(emmaBlock(), emomStart(emmaBlock(), T0), 1);
+  const { written, cursor } = runTo(b, min(37));
+  eq(written.length, 36, 'thirty six windows, thirty six rows');
+  eq(cursor.windowsDone, 36);
+  eq(written.filter((m) => m.extra).length, 6, 'the sixth round, and only the sixth');
+  ok(written.slice(0, 30).every((m) => !m.extra), 'the five the trainer asked for are not extra');
+  eq(written.at(-1).station.name, 'JUMPING SQUATS');
+  eq(written.at(-1).round, 5);
+});
+
+test('a round already begun cannot be given back', () => {
+  const b = emmaBlock();
+  const { cursor } = runTo(b, min(8));               // minute nine, which is round two
+  eq(emomRoundFloor(b, cursor), 2);
+
+  let block = b;
+  for (let i = 0; i < 4; i += 1) block = emomChangeRounds(block, cursor, -1);
+  eq(block.rounds, 2, 'down to the round being run, and no further');
+  eq(emomChangeRounds(block, cursor, -1), block, 'refused rather than clamped, so the key can grey');
+});
+
+test('taking rounds off still lets the client finish the round they are in', () => {
+  const started = emmaBlock();
+  const { cursor } = runTo(started, min(8));         // minute nine, which is round two
+  const b = emomChangeRounds(started, cursor, -3);   // five rounds down to two
+  eq(b.minutes, 12, 'two rounds of six');
+
+  const rest = runTo(b, min(13), 1000, cursor);
+  eq(rest.written.at(-1).index, 11, 'the last window of round two, not a block cut off mid round');
+  ok(emomWhere(b, rest.cursor, min(13)).done);
+  ok(rest.written.every((m) => !m.extra), 'and nothing here was beyond the plan');
+});
+
+test('the dial stops at both ends rather than wrapping', () => {
+  const b = emmaBlock();
+  const fresh = emomCursor();
+  eq(emomRoundFloor(b, fresh), 1, 'before the clock starts, the floor is round one');
+  eq(emomChangeRounds(emomWithRounds(b, 1), fresh, -1).rounds, 1);
+  eq(emomChangeRounds(emomWithRounds(b, EMOM_MAX_ROUNDS), fresh, 1).rounds, EMOM_MAX_ROUNDS);
+
+  const done = runTo(b, min(31)).cursor;
+  eq(emomChangeRounds(b, done, 1), b, 'a block that is over has no clock left to change');
+  eq(emomChangeRounds(b, done, -1), b);
+});
+
+// The whole point of the control, said as a property: what the trainer asked for is untouched by
+// what the client did, and the rows are where the difference lives.
+test('changing the rounds never changes what the program prescribed', () => {
+  const b = emomChangeRounds(emomChangeRounds(emmaBlock(), emomCursor(), 1), emomCursor(), 1);
+  eq(b.rounds, 7);
+  eq(b.prescribedRounds, 5, 'the day still says five, and next week still asks for five');
+  ok(!emomMinuteAt(b, 29).extra, 'the last window of round five is prescribed work');
+  ok(emomMinuteAt(b, 30).extra, 'the first window of round six is not');
+});
+
 // ---------------------------------------------------------------- picking it back up
 
 test('a reload reads the block position straight off the rows', () => {
@@ -5073,6 +5154,34 @@ test('a reload reads a synced timestamp as well as a local one', () => {
      Date.parse('2026-08-26T18:01:00.048Z'));
   eq(emomResume(b, []), null, 'nothing written yet, so there is nothing to pick up');
   eq(emomResume(b, [{ logged_at: 'not a time' }]), null, 'and a junk row does not become the epoch');
+});
+
+// A round the client added lives in the rows and nowhere else, because it was never written to the
+// day. Without this the block comes back at the prescribed thirty windows, the cursor is clamped to
+// the end of it, and the screen declares done a block still being run.
+test('a reload reads an added round off the rows as well as the position', () => {
+  const b = emmaBlock();
+  const rows = Array.from({ length: 32 }, (_, n) => ({ logged_at: new Date(min(n + 1)).toISOString() }));
+
+  const grown = emomBlockFor(b, rows);
+  eq(grown.rounds, 6, 'thirty two windows do not fit in five rounds of six');
+  eq(grown.minutes, 36);
+  eq(grown.prescribedRounds, 5, 'and the program is still the program');
+
+  const cursor = emomResume(grown, rows);
+  eq(cursor.windowsDone, 32, 'not clamped back to thirty');
+  eq(emomWhere(grown, cursor, min(33)).index, 32, 'minute thirty three, and still running');
+  ok(!emomWhere(grown, cursor, min(33)).done);
+});
+
+test('a block inside its prescription comes back at its prescription', () => {
+  const b = emmaBlock();
+  const rows = [1, 2, 3].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
+  eq(emomBlockFor(b, rows), b, 'the same block, untouched');
+  eq(emomBlockFor(b, []).rounds, 5);
+  // A round taken OFF leaves no trace in the rows, exactly as an added minute leaves none. Both
+  // come back at what the trainer prescribed rather than at a change nobody can evidence.
+  eq(emomBlockFor(emomWithRounds(b, 2), rows).rounds, 2, 'and nothing here grows a shortened block');
 });
 
 test('the clock does not stop for the reload it survived', () => {
@@ -5173,16 +5282,59 @@ test('a finished block stops offering the control and says it is done', () => {
 test('the ready screen offers the block and the one press that starts it', () => {
   const b = emmaBlock();
   const { ui } = emomUi();
-  readyEmom(ui, b, false);
+  readyEmom(ui, b, null);
   eq(ui.where.textContent, '5 rounds, 6 stations, 30 min', 'the decision is half an hour, not one lift');
   eq(ui.lift.textContent, 'DB THRUSTERS', 'named so the client knows what to stand over');
   eq(ui.startLabel.textContent, 'Start the clock');
   eq(ui.startSub.textContent, '30 windows');
   ok(ui.more.hidden, 'nothing to catch up on before it begins');
 
-  readyEmom(ui, b, true);
+  const rows = [1, 2, 3].map((n) => ({ logged_at: new Date(min(n)).toISOString() }));
+  readyEmom(ui, b, emomResume(b, rows));
   eq(ui.startLabel.textContent, 'Pick the clock back up');
   eq(ui.startSub.textContent, 'It kept running');
+});
+
+// ---------------------------------------------------------------- the round dial
+
+test('the dial says how many rounds the block is set to, not where you are in it', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  readyEmom(ui, b, null);
+  eq(ui.roundsNum.textContent, '5');
+  eq(ui.roundsWord.textContent, 'rounds');
+  ok(!ui.rounds.hidden, 'and it is offered before the clock starts, not only during');
+
+  const one = emomWithRounds(b, 1);
+  readyEmom(ui, one, null);
+  eq(ui.roundsNum.textContent, '1');
+  eq(ui.roundsWord.textContent, 'round', 'one round, singular');
+  eq(ui.where.textContent, '1 round, 6 stations, 6 min', 'and the block reads back as it now is');
+});
+
+test('the minus key greys on the round being run rather than refusing quietly', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+
+  drawAt(ui, b, runTo(b, T0 + 10_000).cursor, T0 + 10_000);
+  ok(!ui.roundsDown.disabled, 'five rounds set, standing in the first');
+
+  drawAt(ui, emomWithRounds(b, 1), runTo(b, T0 + 10_000).cursor, T0 + 10_000);
+  ok(ui.roundsDown.disabled, 'nothing left to give back');
+  ok(!ui.roundsUp.disabled);
+
+  const capped = emomWithRounds(b, EMOM_MAX_ROUNDS);
+  drawAt(ui, capped, runTo(b, T0 + 10_000).cursor, T0 + 10_000);
+  ok(ui.roundsUp.disabled, 'and the dial stops at the top');
+});
+
+test('the dial leaves when the block does', () => {
+  const b = emmaBlock();
+  const { ui } = emomUi();
+  const { cursor } = runTo(b, min(30));
+  drawAt(ui, b, cursor, min(30));
+  ok(ui.rounds.hidden, 'there is no block left to lengthen');
+  ok(ui.more.hidden);
 });
 
 test('the summary counts windows and grades nothing', () => {
@@ -5190,6 +5342,15 @@ test('the summary counts windows and grades nothing', () => {
   // No percentage, no "you missed", no shortfall. Every window of a block that ran to the end is a
   // window the client stood through.
   ok(!/miss|fail|only|short|%/i.test(emomSummary(emmaBlock())));
+});
+
+test('a round the client added is counted, and a round they dropped is not reported', () => {
+  const b = emmaBlock();
+  eq(emomSummary(emomWithRounds(b, 6)), '6 rounds, 36 windows, 1 round past the plan');
+  eq(emomSummary(emomWithRounds(b, 7)), '7 rounds, 42 windows, 2 rounds past the plan');
+  // The asymmetry is the no-guilt rule: a surplus is evidence, a shortfall is a report card. The
+  // block that ran is still what gets counted either way, so nothing is hidden by the silence.
+  eq(emomSummary(emomWithRounds(b, 3)), '3 rounds, 18 windows');
 });
 
 test('a station with no rep count does not print an empty reps line', () => {

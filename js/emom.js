@@ -53,11 +53,31 @@
 // not. The clock in the room did not stop. A client who pockets their phone for ninety seconds
 // comes back two stations further on, which is exactly what happened to them in the gym. Adding a
 // minute is the only thing that moves the clock, and it takes a deliberate press.
+//
+// The second control changes the BLOCK rather than the cursor, and that split is why both are
+// cheap. How long this window gets lives on the cursor; how many windows there are lives on the
+// block. So a round added or taken off mid effort moves neither the station nor the clock: the
+// client is standing exactly where they were and the block now ends somewhere else. It is not
+// written back to the program, because the number of rounds is the trainer's and a decision made on
+// the floor is not an edit to what was asked for. What it does leave behind is rows, and a window
+// in a round beyond the prescribed count is written `is_extra`, which is the same claim the Add set
+// control makes on every other day: this is what was done, and it is not what was programmed.
 
 import { instantOf } from './dates.js';
 
 /** The default window. Sixty seconds is what the E, M and O in the name are about. */
 export const DEFAULT_WINDOW_SECONDS = 60;
+
+/**
+ * As many rounds as the dial will go to.
+ *
+ * Not a judgement about how much anybody should train. It is the reach of a mis-tap: the round
+ * control is two keys a client presses mid effort with a wet thumb, and without a ceiling a
+ * fumbled press can put a three digit number into a line that reads "Round 3 of 214". Two digits
+ * is more rounds than any block in this app will ever hold, and the key stops rather than
+ * wrapping, so nothing has to be given back.
+ */
+export const EMOM_MAX_ROUNDS = 99;
 
 /**
  * A day's EMOM settings, or null for every other day in the app.
@@ -114,6 +134,10 @@ export function emomBlock(day, items, repsOf) {
   return {
     stations,
     rounds: settings.rounds,
+    // What the trainer asked for, kept apart from what the block is currently set to, because the
+    // client can move `rounds` mid block and this is the line that decides which windows were
+    // beyond the prescription. See emomMinuteAt.
+    prescribedRounds: settings.rounds,
     windowSeconds: settings.windowSeconds,
     windowMs: settings.windowSeconds * 1000,
     minutes: stations.length * settings.rounds,
@@ -129,11 +153,17 @@ export function emomDurationMs(block) {
 /** Which station and which round a window index lands on. The block's whole geometry, in one place. */
 export function emomMinuteAt(block, index) {
   const count = block.stations.length;
+  const round = Math.floor(index / count);
   return {
     index,
-    round: Math.floor(index / count),
+    round,
     stationIndex: index % count,
     station: block.stations[index % count],
+    // A window in a round the client added is work beyond the prescription, and the row written for
+    // it says so. Same claim `is_extra` carries on the ordinary screen: this is what was done, and
+    // it is not what the program asked for. Decided here rather than by the caller, so the screen
+    // and the row cannot disagree about which round is which.
+    extra: round >= block.prescribedRounds,
   };
 }
 
@@ -210,6 +240,80 @@ export function emomAddMinute(block, cursor, now) {
 }
 
 /**
+ * The same block, run a different number of times.
+ *
+ * Changes the BLOCK and never the cursor, which is the whole difference between this and adding a
+ * minute. A minute moves when the window now running ends. A round moves how many windows there
+ * are, so the client stays exactly where they are standing and the block ends somewhere else.
+ *
+ * It writes nothing to the program and it cannot: `template_days.emom` belongs to the trainer, and
+ * a client deciding on the floor to go round once more is not an edit to what they were asked to
+ * do. It lasts for this block and no longer, which is what "on the fly" means. What survives it is
+ * the rows, and the rows say which windows were beyond the prescription.
+ */
+export function emomWithRounds(block, rounds) {
+  const held = Math.max(1, Math.min(EMOM_MAX_ROUNDS, Math.round(rounds)));
+  return { ...block, rounds: held, minutes: block.stations.length * held };
+}
+
+/**
+ * The fewest rounds this block can now be set to: the round the client is standing in.
+ *
+ * A round already begun cannot be given back. Half of it has been done, its windows have written
+ * their rows, and there is no honest block that holds fewer windows than the log already describes.
+ * Before the clock starts that is round one, so the same expression answers both screens.
+ */
+export function emomRoundFloor(block, cursor) {
+  const index = Math.min(cursor.windowsDone, block.minutes - 1);
+  return Math.floor(index / block.stations.length) + 1;
+}
+
+/**
+ * One round more, or one fewer. The whole of the round control.
+ *
+ * Refuses rather than clamps, so a key that would do nothing can be drawn as disabled and a press
+ * on it changes nothing at all: the caller compares the block it got back against the one it sent.
+ *
+ * Two refusals. Below the floor above, because the round now running has already happened. And on a
+ * block that is over, which has no clock left to change and, on the logging screen, a session that
+ * has already closed itself.
+ *
+ * A legal decrease can never end the block on the spot. The floor is the round now running, so the
+ * smallest block this can produce still holds every window of that round, and the client always
+ * finishes the round they are in. That is the property that keeps this from being a stop button
+ * wearing a minus sign: ending early is a different control, on the workout panel, where it has
+ * always been.
+ */
+export function emomChangeRounds(block, cursor, delta) {
+  if (cursor.windowsDone >= block.minutes) return block;
+  const wanted = block.rounds + delta;
+  if (wanted < emomRoundFloor(block, cursor) || wanted > EMOM_MAX_ROUNDS) return block;
+  return emomWithRounds(block, wanted);
+}
+
+/**
+ * The block a session's rows need in order to hold them all.
+ *
+ * The resume half of the round control, and the same principle emomResume is built on: the rows are
+ * the only thing on the device a reload cannot destroy, so the block is read back off them rather
+ * than remembered. Thirty two rows against six stations is a client who added a sixth round, and
+ * without this the block comes back at the prescribed thirty windows, emomResume clamps the cursor
+ * to the end of it, and the screen declares a block done that the client is still standing in the
+ * middle of.
+ *
+ * It only ever grows. A round the client took OFF leaves no trace in the rows, exactly as an added
+ * minute leaves none, and both come back at the length the trainer prescribed. That errs toward the
+ * program rather than toward a change nobody can evidence.
+ */
+export function emomBlockFor(block, rows) {
+  let windows = 0;
+  for (const row of rows ?? []) if (instantOf(row?.logged_at) !== null) windows += 1;
+
+  const rounds = Math.ceil(windows / block.stations.length);
+  return rounds > block.rounds ? emomWithRounds(block, rounds) : block;
+}
+
+/**
  * Walks the cursor forward to now, and says which windows closed on the way.
  *
  * The catch up, and the only function that moves a cursor with time. A loop rather than a division
@@ -275,6 +379,9 @@ export function emomWhere(block, cursor, now) {
     remainingMs,
     windowMs: started ? cursor.windowMs : block.windowMs,
     stretched: started && !done && cursor.windowMs > block.windowMs,
+    // Carried so the screen can grey the minus key off the same number emomChangeRounds refuses on,
+    // rather than off a second copy of the rule that could disagree with it.
+    roundFloor: emomRoundFloor(block, cursor),
     running: started && !done,
     done,
   };

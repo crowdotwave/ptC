@@ -14,19 +14,29 @@
 //   what is next    so the last ten seconds are spent getting into position, not reading
 //   where they are  round and minute, smallest, because it is reassurance rather than instruction
 //
-// One control, and it adds a minute to the window now running. It replaced a "Missed it" flag,
-// which was the wrong shape twice over: it asked the client to file a report about failing, on the
-// one screen in this app most tempted to grade somebody, and it did nothing to help them. Adding a
-// minute is the same situation answered usefully. Somebody who is behind takes the extra window,
-// catches up, and rejoins the block on the next minute, which is what they would do with a clock on
-// the wall.
+// Two controls, and between them they are everything a client can change about a block they are
+// already standing in the middle of.
+//
+// Adding a minute replaced a "Missed it" flag, which was the wrong shape twice over: it asked the
+// client to file a report about failing, on the one screen in this app most tempted to grade
+// somebody, and it did nothing to help them. Adding a minute is the same situation answered
+// usefully. Somebody who is behind takes the extra window, catches up, and rejoins the block on the
+// next minute, which is what they would do with a clock on the wall.
+//
+// The round dial is the other half of that argument, and it points both ways. A block that is going
+// well is one somebody wants another round of; a block that is not is one they want to finish
+// honestly rather than abandon. Neither of those is a change to the program, so neither is written
+// back to it: what the trainer asked for stays on the day, and the rows say what was actually run.
+// It is drawn as a capsule rather than as a pair of stepper keys because the steppers change a
+// number inside a set and this changes the shape of the workout, and two controls that look alike
+// and mean different things is exactly the confusion this screen has no time for.
 //
 // The lighting rules from CLAUDE.md apply unchanged. No green anywhere: `--done` marks a finished
 // session in the three places it is fenced to, and a fifth meaning of "you are on time" is exactly
 // the overload that fence exists to prevent. What says a window is nearly out is the numeral falling
 // and the track emptying, which is size and position rather than hue.
 
-import { emomClock, emomLength } from './emom.js';
+import { emomClock, emomLength, emomRoundFloor, EMOM_MAX_ROUNDS } from './emom.js';
 import { trackFill } from './track.js';
 
 /**
@@ -49,12 +59,30 @@ export function mountEmomView(host) {
 
       <p class="emom__next" data-emom-next></p>
 
-      <!-- The one control while the block runs. Not a stepper and not a question: mid EMOM there is
-           no time to dial a number or answer anything, and the only useful thing the app can offer
-           somebody who has fallen behind is more time. -->
-      <button type="button" class="emom__more" data-emom-more>
-        <span data-emom-more-label>Add a minute</span>
-      </button>
+      <!-- Two controls, and they are the two things a client can honestly change about a block they
+           are standing in the middle of: how long this window gets, and how many windows there are.
+           Neither asks a question and neither writes to the program.
+
+           The round dial is drawn as one object rather than as two buttons with a number between
+           them, because minus and plus either side of a count is a shape this app already uses for
+           the load on the bar, and this is not that: it changes the workout's shape, not a number
+           inside it. Hence the capsule, the hairline cells, and no fill until a key is pressed. -->
+      <div class="emom__controls">
+        <div class="emomrounds" role="group" aria-label="Rounds in this block" data-emom-rounds>
+          <button type="button" class="emomrounds__key" data-emom-rounds-down aria-label="One round fewer">&minus;</button>
+          <span class="emomrounds__read">
+            <span class="emomrounds__num num" data-emom-rounds-num>0</span>
+            <span class="emomrounds__word" data-emom-rounds-word>rounds</span>
+          </span>
+          <button type="button" class="emomrounds__key" data-emom-rounds-up aria-label="One round more">+</button>
+        </div>
+
+        <!-- Mid EMOM there is no time to dial a number or answer anything, and the only useful
+             thing the app can offer somebody who has fallen behind is more time. -->
+        <button type="button" class="emom__more" data-emom-more>
+          <span data-emom-more-label>Add a minute</span>
+        </button>
+      </div>
 
       <!-- Nothing starts on arrival, and that is not a nicety. A clock that began the moment the
            screen loaded would spend the client's first window on walking to the rack and picking up
@@ -77,6 +105,11 @@ export function mountEmomView(host) {
     time: node('time'),
     fill: node('fill'),
     next: node('next'),
+    rounds: node('rounds'),
+    roundsDown: node('rounds-down'),
+    roundsUp: node('rounds-up'),
+    roundsNum: node('rounds-num'),
+    roundsWord: node('rounds-word'),
     more: node('more'),
     moreLabel: node('more-label'),
     start: node('start'),
@@ -86,13 +119,33 @@ export function mountEmomView(host) {
 }
 
 /**
+ * The round dial, wherever the block is.
+ *
+ * Says the total rather than the position, because the position is on the line at the top of the
+ * screen and this is the number the keys move. `floor` is the round the client is standing in, and
+ * the minus key greys out on it: a round that has already begun cannot be given back, and a key
+ * that quietly refuses is worse than one that says it will.
+ */
+function drawRounds(ui, block, floor) {
+  ui.roundsNum.textContent = String(block.rounds);
+  ui.roundsWord.textContent = block.rounds === 1 ? 'round' : 'rounds';
+  ui.roundsDown.disabled = block.rounds <= floor;
+  ui.roundsUp.disabled = block.rounds >= EMOM_MAX_ROUNDS;
+}
+
+/**
  * The screen before the clock is running: what the block is, and the one press that begins it.
  *
  * Says the whole block rather than the first station, because the decision being made here is
  * whether to start half an hour of work, and the first lift is not that decision. The first station
  * gets named underneath so the client knows what to be standing over.
+ *
+ * `resume` is the cursor the start press will pick up, or null for a block that has not run yet.
+ * It is passed rather than a flag because the dial needs it: a client coming back to a block whose
+ * rows already cover six rounds cannot set it to five, and the floor for that is the same one
+ * emomChangeRounds enforces. A boolean could say the block was resumable and not how far in.
  */
-export function readyEmom(ui, block, resumable) {
+export function readyEmom(ui, block, resume) {
   ui.root.dataset.state = 'ready';
   ui.where.textContent = emomLength(block);
   ui.lift.textContent = block.stations[0].name;
@@ -101,9 +154,14 @@ export function readyEmom(ui, block, resumable) {
   ui.fill.style.transform = trackFill(100);
   ui.next.textContent = block.stations.length > 1 ? `Next: ${block.stations[1].name}` : '';
   ui.more.hidden = true;
+  // Offered before the clock starts as well as during it. Deciding on four rounds while standing
+  // over the dumbbells is the same decision as deciding on four in the middle, made earlier, and
+  // the alternative is a client starting a block they already know they are not going to finish.
+  ui.rounds.hidden = false;
+  drawRounds(ui, block, resume ? emomRoundFloor(block, resume) : 1);
   ui.start.hidden = false;
-  ui.startLabel.textContent = resumable ? 'Pick the clock back up' : 'Start the clock';
-  ui.startSub.textContent = resumable ? 'It kept running' : `${block.minutes} windows`;
+  ui.startLabel.textContent = resume ? 'Pick the clock back up' : 'Start the clock';
+  ui.startSub.textContent = resume ? 'It kept running' : `${block.minutes} windows`;
 }
 
 /**
@@ -143,6 +201,10 @@ export function drawEmom(ui, block, at) {
   }
 
   ui.more.hidden = !at.running;
+  // Both controls leave together when the block is over. There is no window left to lengthen and no
+  // block left to lengthen either: the session has closed itself by the time this draws.
+  ui.rounds.hidden = at.done;
+  drawRounds(ui, block, at.roundFloor);
   ui.start.hidden = true;
 }
 
@@ -156,5 +218,14 @@ export function drawEmom(ui, block, at) {
  */
 export function emomSummary(block) {
   const rounds = `${block.rounds} round${block.rounds === 1 ? '' : 's'}`;
-  return `${rounds}, ${block.minutes} window${block.minutes === 1 ? '' : 's'}`;
+  const windows = `${block.minutes} window${block.minutes === 1 ? '' : 's'}`;
+
+  // A round the client added is said out loud, the way the ordinary summary says how many sets were
+  // added. A round they took OFF is not, and that asymmetry is the no-guilt rule: a surplus is
+  // evidence and a shortfall is a report card. The block that ran is the block that gets counted
+  // either way, so nothing is hidden by leaving the second one unsaid.
+  const past = block.rounds - block.prescribedRounds;
+  const beyond = past > 0 ? `, ${past} round${past === 1 ? '' : 's'} past the plan` : '';
+
+  return `${rounds}, ${windows}${beyond}`;
 }

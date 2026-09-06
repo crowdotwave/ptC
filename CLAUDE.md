@@ -500,6 +500,39 @@ therefore when every window after it does. The minute changes how long the clien
 the program asked of them, which is why it writes nothing and cannot: the window is still open, so
 its row is not owed yet.
 
+**The round dial changes the block where the minute changes the cursor, and that split is why both
+are cheap.** How long this window gets lives on the cursor; how many windows there are lives on the
+block. So a round added or taken off mid effort moves neither the station nor the clock: the client
+is standing exactly where they were and the block now ends somewhere else. `emomChangeRounds` owns
+it. A round already begun cannot be given back, so the floor is the round now running, which means
+a legal decrease can never end the block on the spot: the client always finishes the round they are
+in. Ending early is a different control and it is still on the workout panel, where it has always
+been.
+
+It is **not written back to the program.** `template_days.emom` is the trainer's, and a decision
+made on the floor is not an edit to what was asked for. What it leaves behind is rows, and a window
+in a round beyond the prescribed count is written `is_extra`, which is the same claim Add set makes
+on every other day: this is what was done, and it is not what was programmed. `block.rounds` is
+what is being run and `block.prescribedRounds` is what was asked for, and the second one never
+moves. The summary says how many rounds were done past the plan and never how many were short of
+it, per the no-shortfall rule above.
+
+A round the client added lives in the rows and nowhere else, so `emomBlockFor` reads it back off
+them on a reload, exactly as `emomResume` reads the position. Without that the block returns at the
+prescribed length, the cursor is clamped to the end of it, and the screen declares done a block
+somebody is standing in the middle of. It only ever grows: a round taken OFF leaves no trace in the
+rows, the same way an added minute leaves none, and both come back at what the trainer prescribed
+rather than at a change nobody can evidence.
+
+**The dial is drawn as one capsule and not as a pair of stepper keys**, and that is a claim rather
+than a decoration. The steppers are lit violet slabs because they change a number inside a set and
+they are the most pressed thing in the app. This changes how long the workout is. Two controls that
+look alike and mean different things is the confusion this screen has the least time for, so it
+takes the shape neither the steppers nor the "Add a minute" pill has: a hairline capsule on the base
+surface, split into three cells, with no fill anywhere until a key goes down. Same edge rules as
+everything else, `--chrome-edge` on the top and `--chrome-edge-low` on the other three. No glow, no
+gradient, no green.
+
 It replaced a "Missed it" flag that marked a window short and wrote a row with no rep count. That
 was the wrong shape twice over: it asked the client to file a report about failing, on the screen in
 this app most tempted to grade somebody, and having done so it did nothing to help them. Adding a
@@ -525,8 +558,10 @@ written twice. None of those is visible in a screenshot and finding them at 1x c
 attempt. `emom-test.html` mounts the real `js/emom-view.js` and owns only the clock, so it can run a
 thirty minute block in seven seconds, and it lists the rows the logging screen WOULD have appended.
 A rehearsal that drew its own version of the screen would be a rehearsal of something no client ever
-sees. It opens at 10x rather than 60x, because the screen has a control on it and a window at 60x
-lasts one real second, which is not long enough to press anything and see what it did. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
+sees. It opens at 10x rather than 60x, because the screen has controls on it and a window at 60x
+lasts one real second, which is not long enough to press anything and see what it did. Each listed
+row carries the flag it would be written with, so which windows come out marked `is_extra` after a
+round is added on the dial is watched rather than assumed. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
 adapter, which is a different question and the one that puts sets on somebody's phone.
 
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no

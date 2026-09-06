@@ -18,7 +18,7 @@
 // would have been appended to set_logs, in the order it would have landed.
 
 import {
-  emomBlock, emomLength, emomStart, emomAdvance, emomWhere, emomAddMinute,
+  emomBlock, emomLength, emomStart, emomAdvance, emomWhere, emomAddMinute, emomChangeRounds,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, emomSummary } from './js/emom-view.js';
 
@@ -101,7 +101,10 @@ function paint() {
     row.className = 'rehearse__row';
     row.textContent =
       `min ${String(minute.index + 1).padStart(2, ' ')}  ` +
-      `r${minute.round + 1}  ${minute.station.name}  ${minute.station.reps} reps`;
+      `r${minute.round + 1}  ${minute.station.name}  ${minute.station.reps} reps` +
+      // The flag the row would carry. A round added on the dial is work past the prescription, and
+      // the whole point of rehearsing here is watching which rows come out of it marked.
+      (minute.extra ? '  extra' : '');
     el('written').append(row);
     el('written').scrollTop = el('written').scrollHeight;
   }
@@ -113,6 +116,19 @@ function paint() {
   el('written-count').textContent = at.done
     ? `${done} of ${state.block.minutes}. ${emomSummary(state.block)}`
     : `${done} of ${state.block.minutes}${at.stretched ? ', extra minute running' : ''}`;
+}
+
+/**
+ * The round dial, driven the way the logging screen drives it.
+ *
+ * The line at the top of the page is the block as it now stands rather than as the fields describe
+ * it: changing the rounds mid run is exactly the thing being rehearsed, and a header that kept
+ * saying five would be rehearsing the wrong screen.
+ */
+function changeRounds(delta) {
+  state.block = emomChangeRounds(state.block, state.cursor, delta);
+  el('block-state').textContent = emomLength(state.block);
+  paint();
 }
 
 function frame(now) {
@@ -137,6 +153,9 @@ function start() {
     state.cursor = emomAddMinute(state.block, state.cursor, state.clock);
     paint();
   });
+
+  state.ui.roundsDown.addEventListener('click', () => changeRounds(-1));
+  state.ui.roundsUp.addEventListener('click', () => changeRounds(1));
 
   state.ui.start.addEventListener('click', () => {
     state.cursor = emomStart(state.block, state.clock);
@@ -174,6 +193,7 @@ window.__emom = {
     state.cursor = emomAddMinute(state.block, state.cursor, state.clock);
     paint();
   },
+  changeRounds,
   where: () => emomWhere(state.block, state.cursor, state.clock),
   rows: () => [...document.querySelectorAll('#written .rehearse__row')].map((r) => r.textContent),
 };
