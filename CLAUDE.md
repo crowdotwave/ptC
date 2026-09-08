@@ -981,19 +981,50 @@ value that wanted retuning. Taking 147 instead buys slots 1 and 2 a separation o
 the widest pair this palette has ever had, and it does not overload the token, because a filled
 cell and a finished session are the same claim. See the note under the `--done` rule above.
 
-**Four channels, and hue is the fourth.** A trained day fills where an untrained one does not,
-carries a two letter glyph made unique inside its own program (Upper A and Upper B become UA and
-UB, never U and U), carries a lit bar on its top edge at a slot determined position, and only then
-carries a colour. Fill against no fill is the signal doing the real work, same as the chooser chips.
+**Hue names the block. Lightness, chroma and hue together name the day inside it.** That second
+half used to be lightness and five degrees of hue, and it did not work: measured, two days of one
+block landed 0.021 apart in oklab, which is about the threshold for two large patches touching each
+other and nowhere near it for two 46px tiles with a week of calendar between them. What it looked
+like on a phone is what it was, a block of five days drawn in one purple, with the glyph doing all
+of the work the colour was supposed to be sharing.
 
-**The bar lives inside the flat run of the top edge, and the cell clips.** It used to start 12
-percent in with the cell rounded at 10px, which on a 46px phone cell put its left end four pixels
-inside the corner curve, where the cell has no top edge yet. It painted a square cornered tab plus
-its own glow hanging off the rounded corner, and at that size it read as a second slab offset
-behind the first. The trap is that it is invisible at any size you would mock this up at: the same
-12 percent clears the radius comfortably on a 300px cell. Two fixes, because one of them is a
-percentage and percentages follow whatever the cell size becomes next: the positions are pulled
-into the flat run, and `.cal__day` clips its own overflow.
+Three things bought the step back up to about 0.034, and none of them moved the contrast ceiling:
+
+- **The lightness band is solved per hue rather than pinned.** One fixed band has to be set by the
+  brightest hue it will ever carry, since green runs about a sixth brighter than rose at the same
+  oklch lightness. The old band was: safe for green, and it left rose using `Y 0.062` to `0.031`
+  when the rule allows `0.080` to `0.030`. `js/split-palette.js` solves the endpoints against the
+  luminance rule itself now, so a five day ladder gets the whole room the ceiling permits and the
+  ceiling holds by construction. It asks for a hair under the boundary rather than for the boundary:
+  sRGB is eight bits a channel, and a face solved to land exactly on `Y 0.0801` measured 6.99.
+- **Chroma is a channel.** Pale at the top of a block's ladder, deep at the bottom. Nothing in the
+  contrast rules is about saturation, so this is the channel with the most room left, and a pale
+  mauve beside a deep magenta separates under glare and on a dimmed screen in a way two adjacent
+  purples never did. The floor stays well clear of the colourless band's chroma, because the palest
+  day of a block still has to read as a colour rather than as "no colour left for this one".
+- **The rim is free and was being spent as if it were not.** Nothing sits on a rim, so the 7:1 rule
+  that caps the face says nothing about it, and it used to be the face plus a fixed amount, which
+  carried the face's own ladder and not a step more. Given its own wider ramp it separates two days
+  about forty percent harder than the face does. On a 46px tile lit along its top edge that hairline
+  is a large share of what the eye actually gets.
+
+The green block's centre moved from 147 to 140 to pay for the wider spread, so its ladder runs 130
+to 150 rather than 137 to 157 and every day of it stays at least 40 degrees off `--accent-data`.
+Spreading around 147 would have run the deep end out to 33, and the margin above was already argued
+thin. `--done`'s own 147 is still inside the ladder, so a filled cell and a finished session go on
+being the same claim.
+
+**Two channels still outrank all of that, and the order matters.** A trained day fills where an
+untrained one does not, and carries a two letter glyph made unique inside its own program (Upper A
+and Upper B become UA and UB, never U and U). Fill against no fill is the signal doing the real
+work, same as the chooser chips, and the glyph is what names a day exactly. Colour is the third
+thing, and the ladder above is what makes it worth reading rather than what makes it sufficient.
+
+There is no fifth. A lit bar on the top edge, positioned by slot, was tried and removed: at 46px
+that segment is about 9px long, nothing at that size reads as a POSITION along an edge, and what it
+read as to the person holding the phone was a notch bitten out of the tile. The geometry lesson it
+left is worth keeping and lives as a headstone in `styles.css`, because it is the kind of bug that
+is invisible at any size you would mock a cell up at.
 
 **Tapping a day focuses that session everywhere, and focusing is not filtering.** A cell answers
 whether somebody trained. What they actually did is the question the tap asks, and until now the

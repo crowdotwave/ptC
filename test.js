@@ -1699,6 +1699,110 @@ test('no two days of one program are drawn the same colour', () => {
   eq(new Set(faces).size, faces.length, 'ten days, ten distinct faces');
 });
 
+// The distance between two colours as the eye reads it, in oklab, measured off the pixel the
+// browser actually paints.
+//
+// A distinct() check is what this file had, and it is why "the days are all one purple" shipped:
+// five days a hundredth apart are five distinct strings. Set membership answers whether two values
+// differ and the complaint was about how MUCH, so the check has to be a measurement.
+//
+// Painting a pixel rather than parsing the oklch() string, for the reason written at length on the
+// 7:1 test below: the string is what this app asks for and the pixel is what the phone shows, and
+// they are only the same while a colour is inside the gamut.
+function oklabReader() {
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return (colour) => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r8, g8, b8] = ctx.getImageData(0, 0, 1, 1).data;
+    const r = lin(r8 / 255);
+    const g = lin(g8 / 255);
+    const b = lin(b8 / 255);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+    ];
+  };
+}
+const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+test('two days of one block are far enough apart to actually tell apart', () => {
+  // The bug this pins, reported off a phone: A2 and A3 sat two cells apart in one week of the grid
+  // and read as the same purple. They were 0.021 apart in oklab, which is around the threshold for
+  // two large patches SIDE BY SIDE and well under it for two 46px tiles with a week between them.
+  //
+  // 0.030 is the floor rather than a target. What the palette actually delivers is about 0.034 a
+  // step, and the number is here so that a future change which quietly narrows the ladder again
+  // fails rather than ships.
+  const built = blocksBuilt([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  const read = oklabReader();
+  for (const block of ['A', 'B']) {
+    const days = month.legend.filter((e) => e.label.startsWith(block));
+    eq(days.length, 5, `${block} has five days`);
+    for (let i = 0; i < days.length; i += 1) {
+      for (let j = i + 1; j < days.length; j += 1) {
+        const d = apart(read(days[i].colours.face), read(days[j].colours.face));
+        ok(d >= 0.03, `${days[i].label} and ${days[j].label} are ${d.toFixed(4)} apart, want 0.030`);
+      }
+    }
+  }
+});
+
+test('and the rim carries more of that than the face does, since nothing sits on a rim', () => {
+  // The face is capped by the 7:1 rule for the glyph and the date on it. The rim is a hairline
+  // with nothing on it, so it is free, and giving it its own wider ramp is where the cheapest half
+  // of the separation came from. If a change ever ties the rim back to the face plus a constant,
+  // this is what says so.
+  const built = blocksBuilt([0, 1, 2, 3, 4]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  const read = oklabReader();
+  const days = month.legend.filter((e) => e.label.startsWith('A'));
+  for (let i = 1; i < days.length; i += 1) {
+    const face = apart(read(days[i - 1].colours.face), read(days[i].colours.face));
+    const rim = apart(read(days[i - 1].colours.rim), read(days[i].colours.rim));
+    ok(rim > face, `${days[i].label}: rim ${rim.toFixed(4)} should beat face ${face.toFixed(4)}`);
+  }
+});
+
+test('telling the block is always the easier of the two distinctions', () => {
+  // The design intent this protects, in split-palette.js's own words: a reader tells an A day from
+  // a B day instantly and two A days apart only on inspection. Widening the within block ladder is
+  // exactly the change that could invert that, so the ordering is measured rather than assumed.
+  //
+  // The claim is about the two distances, not about hue windows: the nearest A to B pair has to
+  // stay several times the closest pair inside one block. It is not that every cross block pair
+  // beats every within block one, and it never was. A pale first day and a deep last day of the
+  // same block are the widest pair on the grid, which is the ladder doing its job.
+  const built = blocksBuilt([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const month = built.months.find((m) => m.key === '2026-08');
+  const read = oklabReader();
+  const a = month.legend.filter((e) => e.label.startsWith('A')).map((e) => read(e.colours.face));
+  const b = month.legend.filter((e) => e.label.startsWith('B')).map((e) => read(e.colours.face));
+  let closestInside = Infinity;
+  for (const set of [a, b]) {
+    for (let i = 0; i < set.length; i += 1) {
+      for (let j = i + 1; j < set.length; j += 1) {
+        closestInside = Math.min(closestInside, apart(set[i], set[j]));
+      }
+    }
+  }
+  let closestAcross = Infinity;
+  for (const x of a) {
+    for (const y of b) closestAcross = Math.min(closestAcross, apart(x, y));
+  }
+  ok(
+    closestAcross > closestInside * 3,
+    `nearest A to B is ${closestAcross.toFixed(4)}, nearest inside a block is ${closestInside.toFixed(4)}`,
+  );
+});
+
 test('hue says which block, so an A day and a B day are never near each other', () => {
   const built = blocksBuilt([1, 6]);
   const month = built.months.find((m) => m.key === '2026-08');
