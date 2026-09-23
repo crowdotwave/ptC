@@ -6,5 +6,11 @@
       "mcp__supabase",
       "Bash(npx impeccable *)"
     ]
-  }
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "includeCoAuthoredBy": false
 }
