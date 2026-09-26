@@ -30,6 +30,7 @@ import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import { publishSync } from './js/sync-status.js';
 import { trackFill } from './js/track.js';
+import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine } from './js/iso.js';
 import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
 import {
   unit,
@@ -96,6 +97,11 @@ const ui = {
   log: el('log'),
   logLabel: el('log-label'),
   logSub: el('log-sub'),
+  iso: el('iso'),
+  isoLine: el('iso-line'),
+  isoTime: el('iso-time'),
+  isoFill: el('iso-fill'),
+  isoMark: el('iso-mark'),
   emomHost: el('emom-host'),
   rehearseBar: el('rehearse-bar'),
   rehearseWhat: el('rehearse-what'),
@@ -156,6 +162,11 @@ const state = {
   //   view    the mounted js/emom-view.js handles
   //   handle  the interval, cleared on every path out of this day
   emom: null,
+  // A hold being timed, or null. { entry, startedAt, marks, passed, handle, wake }. startedAt is
+  // the press, and the hold itself begins ISO_LEAD_MS after it. Every reading comes off the wall
+  // clock through js/iso.js, so the interval can be throttled or stopped without the number
+  // drifting. See js/iso.js for the shape and why it counts up.
+  iso: null,
 };
 
 // ------------------------------------------------------------------ units
@@ -449,8 +460,19 @@ function render() {
   // Both of the first two name a load through loadLabel, so a set done with nothing on it reads
   // 'Last time bodyweight for 8' rather than 'Last time 0 lb for 8'. That is the same set either
   // way: the row carries zero and always did.
+  //
+  // A hold is the exception, since it has seconds and no load: "Last time bodyweight for 38" is a
+  // load that was never on anything and a count with no unit. It says the seconds, and a first
+  // hold says nothing about bars or starting light, because there is nothing on the bar to adjust.
+  const hold = entry.logMode === 'time_hold';
   ui.lastTime.textContent =
-    entry.lastWeightKg !== null
+    hold && entry.lastWeightKg !== null
+      ? `Last time ${entry.lastReps} seconds, ${shortDate(entry.lastOn)}`
+      : hold && entry.carriedFrom
+        ? `Carried from your last hold, ${entry.carriedFrom.reps} seconds.`
+        : hold
+          ? 'First time on this hold. Start at the goal and see where it goes.'
+          : entry.lastWeightKg !== null
       ? `Last time ${loadLabel(entry.lastWeightKg)} for ${entry.lastReps}, ${shortDate(entry.lastOn)}`
       : entry.carriedFrom
         ? `Carried from your last set, ${loadLabel(entry.carriedFrom.weightKg)} for ${entry.carriedFrom.reps}.`
@@ -461,6 +483,16 @@ function render() {
 
   renderValues();
   renderUndo();
+
+  // Mid hold, the log action is the only control that means anything, and it means stop. Every
+  // other way off this set would leave a clock running against a lift the client has left, so they
+  // wait for the hold to end. None of them is ever more than one tap on the big button away.
+  const holding = Boolean(state.iso);
+  ui.skip.disabled = holding;
+  ui.addSet.disabled = holding;
+  ui.typeToggle.disabled = holding;
+  ui.dayJump.disabled = holding;
+  if (holding) ui.undo.disabled = true;
 }
 
 /** The chip top left: which day this is, and where in it the client is standing. */
@@ -555,8 +587,11 @@ function renderValues() {
   //
   // The second stepper is the one that changes meaning, and the unit label under it is what
   // says so, because a bare number mid set is not self explanatory.
-  ui.stepperReps.hidden = mode === 'weight_only';
+  // While a hold is being timed the clock takes the seconds stepper's place: there is nothing to
+  // step mid hold, and the two stacked would push this screen into scrolling.
+  ui.stepperReps.hidden = mode === 'weight_only' || Boolean(state.iso);
   ui.stepperWeight.hidden = mode === 'bodyweight_reps' || mode === 'time_hold';
+  ui.iso.hidden = !state.iso;
   ui.repsUnit.textContent =
     mode === 'rounds' ? 'rounds' : mode === 'time_hold' ? 'sec' : 'reps';
 
@@ -595,6 +630,33 @@ function renderValues() {
       bodyweight_reps: `${state.reps} rep${state.reps === 1 ? '' : 's'}${suffix}`,
       time_hold: `${state.reps} second${state.reps === 1 ? '' : 's'}${suffix}`,
     }[mode] ?? `${opens} for ${state.reps}${suffix}`;
+
+  paintHoldAction();
+}
+
+/**
+ * What the log action says on a hold, which is the one lift where it is not "Log set".
+ *
+ * On a time_hold lift the big button starts the clock, and the seconds stepper above it is the
+ * goal for this hold rather than the number that gets written: prefilled from last time, the way a
+ * rep count is, and moved the same way. The typing fallback is still "Log set", because somebody
+ * who opened the keyboard is entering a hold they timed some other way, and that has to stay
+ * possible.
+ */
+function paintHoldAction() {
+  const entry = currentEntry();
+  if (!entry || entry.logMode !== 'time_hold' || state.typing) return;
+  if (!state.iso) {
+    ui.logLabel.textContent = 'Start hold';
+    ui.logSub.textContent = `Goal ${state.reps} seconds`;
+    return;
+  }
+  const reading = holdReading();
+  ui.logLabel.textContent = reading.phase === 'lead' ? 'Cancel' : 'Stop and log';
+  ui.logSub.textContent =
+    reading.phase === 'lead'
+      ? `Starting in ${reading.leadLeft}`
+      : `${isoSeconds(reading.heldMs)} second${isoSeconds(reading.heldMs) === 1 ? '' : 's'}`;
 }
 
 function renderUndo() {
@@ -837,6 +899,137 @@ function tickRest() {
     ui.rest.dataset.state = 'running';
     ui.restLabel.textContent = 'Rest';
   }
+}
+
+// ------------------------------------------------------------------ the hold timer
+//
+// A time_hold lift used to be a seconds stepper and nothing else, so a timed hold meant counting
+// in your head or running a stopwatch in another app and typing the answer back. Everything this
+// decides comes from js/iso.js. What stays here is the part that needs the screen: the interval,
+// the wake lock, and turning a stop into a logged set.
+
+/** Four times a second, the rest timer's rate. The number is read off the wall clock, not counted. */
+const ISO_TICK_MS = 250;
+
+function holdReading(now = Date.now()) {
+  const { startedAt, marks } = state.iso;
+  return isoReading({ startedAt, now, leadMs: ISO_LEAD_MS, goal: marks.goal, top: marks.top });
+}
+
+/**
+ * Keeps the screen on for the length of a hold.
+ *
+ * A phone locks itself after thirty seconds untouched by default, which is shorter than the holds
+ * this exists for. The clock would still be right when the phone was woken, since it reads the
+ * wall clock, but somebody lying on the floor with their hips up cannot reach over to wake it. Not
+ * every browser has the API, and one that refuses is not worth a word on screen: the fallback is
+ * the phone doing what it always did.
+ */
+async function keepAwake() {
+  try {
+    if (state.iso && 'wakeLock' in navigator) state.iso.wake = await navigator.wakeLock.request('screen');
+  } catch {
+    // Refused, usually for a hidden page. The hold is timed correctly either way.
+  }
+}
+
+function buzz(pattern) {
+  try {
+    navigator.vibrate?.(pattern);
+  } catch {
+    // No motor, or not allowed. The words on the line say the same thing.
+  }
+}
+
+function startHold() {
+  const entry = currentEntry();
+  if (!entry || state.iso) return;
+  // Working, so not resting. The rest timer comes back on its own when the hold is logged.
+  stopRest();
+  ui.prChip.hidden = true;
+  clearNotice();
+  state.iso = {
+    entry,
+    startedAt: Date.now(),
+    marks: isoMarks(entry.item, state.reps),
+    passed: 'none',
+    phase: 'lead',
+    handle: setInterval(tickHold, ISO_TICK_MS),
+    wake: null,
+  };
+  keepAwake();
+  render();
+  tickHold();
+}
+
+/** Tears the hold down without writing anything. Used by cancel and by stop, which then logs. */
+function clearHold() {
+  if (!state.iso) return;
+  clearInterval(state.iso.handle);
+  state.iso.wake?.release?.().catch?.(() => {});
+  state.iso = null;
+  ui.iso.hidden = true;
+}
+
+function cancelHold() {
+  clearHold();
+  render();
+}
+
+/**
+ * Stopping is logging. The seconds held are written, and the goal on the stepper is what carries
+ * to the next set, not the time just held: the next set's goal is the plan's answer unless the
+ * client moved it, the same rule every other stepper follows.
+ */
+function stopHold() {
+  const held = isoSeconds(holdReading().heldMs);
+  clearHold();
+  buzz(40);
+  logSet({ count: held });
+}
+
+function tickHold() {
+  if (!state.iso) return;
+  const reading = holdReading();
+  const { marks } = state.iso;
+
+  if (reading.phase !== state.iso.phase) {
+    state.iso.phase = reading.phase;
+    // The start of the hold, felt rather than read, since the eyes are on the ceiling by now.
+    buzz(80);
+  }
+  if (reading.passed !== state.iso.passed) {
+    state.iso.passed = reading.passed;
+    // Two short for the goal, one long for the top of the range. A pattern rather than a
+    // strength, because strength is the one thing a phone on a gym floor cannot be relied on for.
+    buzz(reading.passed === 'top' ? 400 : [120, 80, 120]);
+  }
+
+  ui.iso.dataset.phase = reading.phase;
+  ui.iso.dataset.passed = reading.passed;
+  ui.isoTime.textContent = reading.phase === 'lead' ? String(reading.leadLeft) : isoClock(reading.seconds);
+  ui.isoLine.textContent = isoLine(reading, marks);
+  ui.isoFill.style.transform = trackFill(reading.fill);
+
+  // The goal as a notch, only when there is a ceiling beyond it for the track to be measured
+  // against. With the goal alone the track simply fills to it.
+  const showMark = marks.goal !== null && marks.top !== null;
+  ui.isoMark.hidden = !showMark;
+  if (showMark) ui.isoMark.style.left = `${(marks.goal / marks.top) * 100}%`;
+
+  paintHoldAction();
+}
+
+/** The log action, which on a hold is start, cancel, or stop and log, depending on the clock. */
+function onLogPress() {
+  const entry = currentEntry();
+  if (entry?.logMode !== 'time_hold' || state.typing) {
+    logSet();
+    return;
+  }
+  if (!state.iso) startHold();
+  else if (holdReading().phase === 'lead') cancelHold();
+  else stopHold();
 }
 
 // ------------------------------------------------------------------ every minute on the minute
@@ -1144,9 +1337,25 @@ function ensureSessionRecord() {
   return state.sessionRecord;
 }
 
-function logSet() {
+/**
+ * `count`, when given, is the number actually performed where it differs from the stepper: the
+ * seconds a timed hold lasted. The stepper still holds the goal, and the goal is what carries.
+ */
+/**
+ * A logged set as the steppers read when it was logged, which is what the carry compares.
+ *
+ * The same thing as the set itself everywhere except a timed hold, where the stepper was the goal
+ * and the row is how long the hold lasted. A set replayed after a reload has only the row, so it
+ * carries the time held, which is the honest fallback: it is a number the client really did.
+ */
+function asStepped(row) {
+  return row.stepperReps === undefined ? row : { ...row, reps: row.stepperReps };
+}
+
+function logSet({ count = null } = {}) {
   const entry = currentEntry();
   if (!entry) return;
+  const performed = count ?? state.reps;
 
   const session = ensureSessionRecord();
   const record = makeRecord('set_logs', {
@@ -1160,9 +1369,9 @@ function logSet() {
     // rather than zero, because zero is a measurement and null is the absence of one: a hold
     // has no rep count, and writing 0 there would make it a set of no reps.
     reps:
-      entry.logMode === 'weight_reps' || entry.logMode === 'bodyweight_reps' ? state.reps : null,
-    rounds: entry.logMode === 'rounds' ? state.reps : null,
-    hold_seconds: entry.logMode === 'time_hold' ? state.reps : null,
+      entry.logMode === 'weight_reps' || entry.logMode === 'bodyweight_reps' ? performed : null,
+    rounds: entry.logMode === 'rounds' ? performed : null,
+    hold_seconds: entry.logMode === 'time_hold' ? performed : null,
     rpe: null,
     is_warmup: entry.isWarmup,
     logged_at: new Date().toISOString(),
@@ -1185,7 +1394,10 @@ function logSet() {
     exerciseId: entry.item.exercise_id,
     setIndex: entry.setIndex,
     weightKg: state.weightKg,
-    reps: state.reps,
+    reps: performed,
+    // What the stepper read, which undo puts back. Differs from reps only on a timed hold, where
+    // the stepper was the goal and reps is how long the hold actually lasted.
+    stepperReps: state.reps,
     logMode: entry.logMode,
     isWarmup: entry.isWarmup,
     isExtra: entry.isExtra === true,
@@ -1194,7 +1406,7 @@ function logSet() {
     previousBest,
   });
 
-  const achieved = epley1rm(state.weightKg, state.reps);
+  const achieved = epley1rm(state.weightKg, performed);
   const isPr = !entry.isWarmup && previousBest !== null && achieved > previousBest;
   if (isPr) state.best.set(entry.item.exercise_id, achieved);
 
@@ -1286,7 +1498,7 @@ function undoLast() {
   last.entry.status = 'pending';
   state.cursor = state.plan.indexOf(last.entry);
   state.weightKg = last.weightKg;
-  state.reps = last.reps;
+  state.reps = last.stepperReps ?? last.reps;
   stopRest();
   ui.prChip.hidden = true;
   exitTypingMode();
@@ -1406,7 +1618,7 @@ function jumpTo(index) {
   // is the deliberately light fallback on a lift with no history, and they would correct it twice.
   const previous = [...state.logged].reverse().find((row) => row.entry.item === entry.item);
   const steppers = previous
-    ? nextSteppers(previous, previous.entry, entry)
+    ? nextSteppers(asStepped(previous), previous.entry, entry)
     : { weightKg: entry.weightKg, reps: entry.reps };
   state.weightKg = steppers.weightKg;
   state.reps = steppers.reps;
@@ -1742,7 +1954,7 @@ async function openDayOn(day, sessions, session) {
 
   const last = state.logged[state.logged.length - 1];
   const steppers = last
-    ? nextSteppers(last, last.entry, first)
+    ? nextSteppers(asStepped(last), last.entry, first)
     : { weightKg: first.weightKg, reps: first.reps };
   state.weightKg = steppers.weightKg;
   state.reps = steppers.reps;
@@ -1753,7 +1965,15 @@ function wire() {
   bindHold(ui.weightDown, () => adjustWeight(-1));
   bindHold(ui.repsUp, () => adjustReps(1));
   bindHold(ui.repsDown, () => adjustReps(-1));
-  ui.log.addEventListener('click', logSet);
+  ui.log.addEventListener('click', onLogPress);
+
+  // A wake lock is dropped by the browser whenever the page is hidden, so a hold that survives a
+  // glance at another app has to ask again. The clock itself needs nothing: it reads the wall.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !state.iso) return;
+    keepAwake();
+    tickHold();
+  });
   ui.undo.addEventListener('click', undoLast);
   ui.skip.addEventListener('click', skipExercise);
   ui.end.addEventListener('click', endSession);

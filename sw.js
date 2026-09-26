@@ -89,6 +89,7 @@ const SHELL = [
   'js/hold.js',
   'js/import-program.js',
   'js/import-ui.js',
+  'js/iso.js',
   'js/lift-picker.js',
   'js/nav.js',
   'js/plan.js',

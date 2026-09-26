@@ -370,6 +370,19 @@ Requirements:
   survive the end of the session: the summary card replaces it rather than sharing a screen with
   it, because a countdown next to "Session logged" is telling somebody to get ready for a set that
   does not exist. Undo brings the set back and the timer with it.
+- **A hold is timed by the app, not by the client's head.** On a `time_hold` lift the log action
+  reads Start hold, and the seconds stepper above it is the goal for this hold, prefilled like any
+  other count. The press gives three seconds to get into position, then the clock counts UP, never
+  down: a hold ends when the body says so, and a countdown hitting zero mid hold would be the app
+  telling somebody to let go early. The goal and the top of the trainer's range are marks the clock
+  passes, said in words on the line above it and by a vibration pattern where the phone has one,
+  never by a green. The same button is then Stop and log, so ending the hold is writing it, and a
+  hold that should not count is Undo like any other set. The goal is what carries to the next set,
+  not the time just held, which is the adjustment rule below applied to a stepper that now means a
+  target. The screen holds a wake lock for the length of the hold, because phones lock after thirty
+  seconds untouched and the person holding is on the floor. `js/iso.js` owns every reading and,
+  like `js/emom.js`, does not care how often it is called. Typing is still the fallback for a hold
+  timed some other way.
 - A set is logged optimistically. The UI never blocks on the network.
 - **How many sets there are comes from `target_sets`. What is on them comes from history.** These
   look like one question and are not. Building the plan out of last session's rows answers both
