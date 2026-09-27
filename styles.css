@@ -5046,3 +5046,318 @@ button.navlink:disabled {
 .emomhost[hidden] {
   display: none;
 }
+
+/* ================================================================ 2026 refresh
+ *
+ * A visual pass over the whole app, layered last so it can be read, and reverted, as one block.
+ * It changes how things look and nothing about what they do: no selector here adds or removes a
+ * control, and every contrast floor above still holds, because every surface below is the same
+ * token as before or darker than it.
+ *
+ * What moved:
+ * - The bevel is gone. Lit top edges, face gradients, drop shades and rest glows made each control
+ *   read as a physical key, which is what dated it. Controls are now flat tinted fills with one
+ *   hairline, and a press answers with a darker fill and a slight scale instead of an inset shadow.
+ * - The stepper stops being a violet slab holding two black holes. It is a dark card, the numerals
+ *   sit on it at a higher contrast than before, and the keys are the violet: filled, rounded,
+ *   obviously the thing to press.
+ * - Top of screen. The status bar is translucent now (black-translucent in every page head), so
+ *   the page runs up behind it and there is no black band above the header. --safe-top then pads
+ *   content clear of whatever the phone has up there: a notch, a Dynamic Island, or nothing. With
+ *   nothing, env() answers 0 and the old 16px stands.
+ */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --screen-top: max(var(--s-4), calc(var(--safe-top) + var(--s-2)));
+
+  --radius: 16px;
+  --radius-card: 22px;
+  --radius-control: 12px;
+
+  /* The chrome fill, a violet tinted black. Darker than --surface-raised, so every text token
+   * keeps the ratio it has against the base. */
+  --chrome-face: color-mix(in srgb, var(--surface-raised) 24%, var(--surface-base));
+  --chrome-face-press: color-mix(in srgb, var(--surface-raised) 40%, var(--surface-base));
+  --card: color-mix(in srgb, var(--surface-raised) 13%, var(--surface-base));
+  --hairline: color-mix(in srgb, var(--chrome-edge) 30%, transparent);
+  --press: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.screen,
+.auth {
+  padding-top: var(--screen-top);
+}
+
+.resume {
+  margin-top: calc(var(--screen-top) * -1);
+  padding-top: calc(var(--s-2) + var(--safe-top));
+}
+
+/* ---------------------------------------------------------------- type */
+
+.context__exercise {
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.context__set {
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+h1,
+h2 {
+  letter-spacing: -0.02em;
+}
+
+/* ---------------------------------------------------------------- chrome */
+
+.button-secondary,
+.daypicker__item,
+.sections__item,
+.dayjump {
+  border: 1px solid var(--hairline);
+  background: var(--chrome-face);
+  box-shadow: none;
+  transition: background-color 160ms var(--press), transform 160ms var(--press);
+}
+
+.button-secondary {
+  border-radius: var(--radius-control);
+  font-weight: 650;
+}
+
+.button-secondary:active,
+.daypicker__item:active,
+.sections__item:active,
+.dayjump:active {
+  background: var(--chrome-face-press);
+  transform: scale(0.97);
+}
+
+.dayjump {
+  padding-left: var(--s-4);
+}
+
+.dayjump__day {
+  font-weight: 750;
+  letter-spacing: 0.01em;
+}
+
+.daypicker__item,
+.sections__item {
+  letter-spacing: 0.02em;
+}
+
+/* Selected still means filled, and still carries the 700 weight. */
+.daypicker__item.is-on,
+.sections__item.is-on,
+.feel__item.is-on {
+  background: var(--surface-raised);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------- rest timer */
+
+.rest {
+  --rest-track-height: 4px;
+  border: 0;
+  background: var(--card);
+  border-radius: var(--radius);
+}
+
+.rest__track {
+  inset: auto var(--s-3) var(--s-2) var(--s-3);
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-raised) 55%, var(--surface-base));
+}
+
+.rest {
+  padding-bottom: calc(var(--s-3) + var(--rest-track-height));
+}
+
+.log,
+.rest__fill {
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------- stepper */
+
+.stepper {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: none;
+}
+
+.stepper__btn {
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: none;
+  transition: background-color 120ms var(--press), transform 120ms var(--press);
+}
+
+.stepper__btn:active {
+  background: var(--accent-action-pressed);
+  color: var(--surface-base);
+  box-shadow: none;
+  transform: scale(0.94);
+}
+
+.stepper__value {
+  font-weight: 750;
+  letter-spacing: -0.035em;
+}
+
+.stepper__unit {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- the log action */
+
+.log {
+  border: 0;
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--accent-action);
+  letter-spacing: -0.02em;
+  transition: background-color 120ms var(--press), transform 120ms var(--press);
+}
+
+.log:active {
+  background: var(--accent-action-pressed);
+  box-shadow: none;
+  transform: scale(0.98);
+}
+
+.log__sub {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+/* ---------------------------------------------------------------- lists and cards */
+
+.worknav__list,
+.row-card {
+  border: 1px solid var(--hairline);
+  background: var(--card);
+}
+
+.worknav__row.is-now {
+  box-shadow: none;
+}
+
+.consistency,
+.chart,
+.history {
+  border: 1px solid var(--hairline);
+  background: var(--card);
+  box-shadow: none;
+}
+
+/* A day nobody trained is a numeral on black, so it loses its box. */
+.cal__empty {
+  border-color: transparent;
+}
+
+.cal__cell.is-today .cal__empty {
+  border-color: var(--chrome-edge);
+}
+
+.cal__day {
+  background: var(--cal-face);
+  box-shadow: none;
+}
+
+.cal__day.is-record {
+  box-shadow: 0 0 0 2px var(--pr);
+}
+
+/* ---------------------------------------------------------------- the other singular controls */
+
+.cal__nav,
+.liftpick__open {
+  border: 1px solid var(--hairline);
+  background: var(--chrome-face);
+  box-shadow: none;
+}
+
+.dayjump::before,
+.liftpick__open::before,
+.cal__nav::before {
+  display: none;
+}
+
+/* The EMOM clock matches the rest timer: a dark card with the track inset along its foot. */
+.emom__clock {
+  border: 0;
+  background: var(--card);
+  padding-bottom: calc(var(--s-3) + var(--s-2) + var(--rest-track-height));
+}
+
+.emom__track {
+  inset: auto var(--s-3) var(--s-3) var(--s-3);
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.emomrounds {
+  border: 1px solid var(--hairline);
+  background: var(--chrome-face);
+}
+
+.emom__start {
+  border: 0;
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--accent-action);
+  box-shadow: none;
+}
+
+.feel__item,
+.sections__item {
+  border-color: var(--hairline);
+}
+
+/* ---------------------------------------------------------------- tab bar */
+
+.tabbar {
+  border-top-color: var(--hairline);
+}
+
+.tab__icon {
+  box-sizing: content-box;
+  padding: 3px 18px;
+  border-radius: 999px;
+  transition: background-color 200ms var(--press);
+}
+
+.tab.is-on .tab__icon {
+  filter: none;
+  background: color-mix(in srgb, var(--accent-data) 16%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-secondary,
+  .daypicker__item,
+  .sections__item,
+  .dayjump,
+  .stepper__btn,
+  .log,
+  .tab__icon {
+    transition: none;
+  }
+
+  .button-secondary:active,
+  .daypicker__item:active,
+  .sections__item:active,
+  .dayjump:active,
+  .stepper__btn:active,
+  .log:active {
+    transform: none;
+  }
+}
