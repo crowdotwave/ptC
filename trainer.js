@@ -7,6 +7,7 @@
 
 import { makeRecord } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
+import './js/press.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression, suggestDeloadWeeks } from './js/progression.js';
 import { renderE1rmChart, renderVolumeChart, renderRepsAtLoadChart } from './js/charts.js';

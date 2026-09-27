@@ -13,6 +13,7 @@
 
 import { makeRecord, newId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
+import './js/press.js';
 import { mountShell } from './js/nav.js';
 import { parseReps, parseRest, parseLoad, parseSets, inferLogging, targetLine } from './js/program.js';
 import { buildSnapshot, currentAssignment, pickDay, sameSnapshot, sortedDays, sortedItems } from './js/snapshot.js';

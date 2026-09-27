@@ -7,6 +7,7 @@
 // here designed to cross a change of rep scheme.
 
 import { boot, gate } from './js/boot.js';
+import './js/press.js';
 import { mountShell } from './js/nav.js';
 import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';

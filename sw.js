@@ -93,6 +93,7 @@ const SHELL = [
   'js/nav.js',
   'js/plan.js',
   'js/prefill.js',
+  'js/press.js',
   'js/program-view.js',
   'js/program.js',
   'js/progression.js',

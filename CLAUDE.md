@@ -635,7 +635,10 @@ numbers sit on black. What did NOT change, and still binds: the palette and its 
 contrast floor, the 44px tap floor, selected means filled, no hue-only encoding, no glow behind
 text read mid set, and the logging screen never scrolling (checked at 390 by 667). The top of
 every screen runs behind a `black-translucent` status bar, and `--safe-top` pads content clear
-of a notch or Dynamic Island; with neither, `env()` answers 0 and the old 16px stands.
+of a notch or Dynamic Island; with neither, `env()` answers 0 and the old 16px stands. **A press only shows on an iPhone because of `js/press.js`.** Safari on iOS applies `:active`
+only when a touch listener is registered on the element or above it, so without that file's one
+empty passive listener every press style is invisible on the phone and fine in every desktop
+browser. Every page imports it, and a new page has to as well.
 
 Dark UI only. Before writing CSS, define a token set and stick to it. Do not reach for the
 default near-black background with a single acid-green accent, which is the generic answer.

@@ -13,6 +13,7 @@
 
 import { makeRecord, getDeviceId } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
+import './js/press.js';
 import { mountShell } from './js/nav.js';
 import { lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';

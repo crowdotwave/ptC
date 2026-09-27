@@ -32,6 +32,7 @@
 
 import { getSupabase, hasConfig } from './js/supabase.js';
 import { installWorker } from './js/worker.js';
+import './js/press.js';
 import {
   currentSession, sendSignInEmail, verifyCode, describeAuthError, cooldownLeft,
   RESEND_COOLDOWN_S,
