@@ -625,6 +625,18 @@ differentiator against every incumbent that leads with weight loss.
 
 ## Design direction
 
+**The 2026 refresh, read this first.** The two blocks at the end of `styles.css` headed "2026
+refresh" restyle the whole app and win over the lighting model described below wherever the two
+disagree. What changed: quiet controls are glass (a falling sheen, a bright top rim, frost where
+content scrolls under them), the violet keys and selected chips are glossy with a soft glow, the
+log action is lacquered orange with a warm glow, presses sink on a spring, and the rest clock is a
+glass pane with a thick glowing track, a travelling sheen and a bead at its head. The stepper
+numbers sit on black. What did NOT change, and still binds: the palette and its meanings, every
+contrast floor, the 44px tap floor, selected means filled, no hue-only encoding, no glow behind
+text read mid set, and the logging screen never scrolling (checked at 390 by 667). The top of
+every screen runs behind a `black-translucent` status bar, and `--safe-top` pads content clear
+of a notch or Dynamic Island; with neither, `env()` answers 0 and the old 16px stands.
+
 Dark UI only. Before writing CSS, define a token set and stick to it. Do not reach for the
 default near-black background with a single acid-green accent, which is the generic answer.
 Derive the palette from the subject: this is a gym floor tool, read under bad lighting,
