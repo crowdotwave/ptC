@@ -5329,26 +5329,13 @@ h2 {
   border-top-color: var(--hairline);
 }
 
-.tab__icon {
-  box-sizing: content-box;
-  padding: 3px 18px;
-  border-radius: 999px;
-  transition: background-color 200ms var(--press);
-}
-
-.tab.is-on .tab__icon {
-  filter: none;
-  background: color-mix(in srgb, var(--accent-data) 16%, transparent);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .button-secondary,
   .daypicker__item,
   .sections__item,
   .dayjump,
   .stepper__btn,
-  .log,
-  .tab__icon {
+  .log {
     transition: none;
   }
 
@@ -5360,4 +5347,374 @@ h2 {
   .log:active {
     transform: none;
   }
+}
+
+/* ================================================================ 2026 refresh, finish
+ *
+ * The flat pass above made the app clean. This makes it feel expensive, and it spends light only
+ * on things a thumb presses and on the one thing a client watches between sets, the rest clock.
+ * Everything read mid set still sits on black: gloss and glow live on the edges and faces of
+ * controls, never behind a number.
+ *
+ * Three materials, each with one job:
+ * - Glass, for the quiet controls (secondary buttons, the day chip, choosers): a faint white
+ *   sheen falling top to bottom, a bright rim along the top edge, frost where something scrolls
+ *   under it.
+ * - Gloss, for the violet keys and selected chips: a lit gradient, a specular band across the top
+ *   half, and a soft coloured glow under the key so it reads as lit from inside.
+ * - Candy, for the log action alone: the brightest object on the screen, with a glossy highlight
+ *   and a warm glow beneath it.
+ *
+ * Presses answer in the same way everywhere: the object sinks (scale), dims, and its glow pulls
+ * in, on a quick spring, so every press is felt rather than merely seen.
+ */
+
+:root {
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --glass: linear-gradient(180deg, rgb(255 255 255 / 0.085) 0%, rgb(255 255 255 / 0.02) 55%, rgb(255 255 255 / 0.01) 100%);
+  --glass-rim: rgb(255 255 255 / 0.16);
+  --glass-edge: rgb(255 255 255 / 0.07);
+  --gloss: linear-gradient(180deg, rgb(255 255 255 / 0.22) 0%, rgb(255 255 255 / 0.06) 48%, rgb(255 255 255 / 0) 52%);
+}
+
+/* ---------------------------------------------------------------- glass */
+
+.button-secondary,
+.daypicker__item,
+.sections__item,
+.feel__item,
+.dayjump,
+.cal__nav,
+.liftpick__open,
+.emomrounds {
+  border: 1px solid var(--glass-edge);
+  border-top-color: var(--glass-rim);
+  background: var(--glass), var(--chrome-face);
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
+    0 8px 18px -12px rgb(0 0 0 / 0.9);
+  transition:
+    transform 260ms var(--spring),
+    filter 160ms ease,
+    box-shadow 200ms ease;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .button-secondary,
+  .dayjump {
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+}
+
+.button-secondary:active,
+.daypicker__item:active,
+.sections__item:active,
+.feel__item:active,
+.dayjump:active,
+.liftpick__open:active {
+  background: var(--chrome-face-press);
+  transform: scale(0.95);
+  filter: brightness(0.9);
+  transition-duration: 90ms;
+}
+
+/* ---------------------------------------------------------------- gloss */
+
+.stepper__btn,
+.daypicker__item.is-on,
+.sections__item.is-on,
+.feel__item.is-on {
+  position: relative;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-top-color: rgb(255 255 255 / 0.28);
+  background:
+    var(--gloss),
+    linear-gradient(180deg, var(--surface-raised-rim) 0%, var(--surface-raised) 55%, var(--surface-raised-shade) 100%);
+  box-shadow:
+    inset 0 -2px 6px 0 rgb(0 0 0 / 0.28),
+    0 10px 22px -10px color-mix(in srgb, var(--surface-raised-rim) 85%, transparent),
+    0 0 18px -6px color-mix(in srgb, var(--chrome-edge) 55%, transparent);
+}
+
+.stepper__btn {
+  transition:
+    transform 280ms var(--spring),
+    filter 140ms ease,
+    box-shadow 200ms ease;
+}
+
+.stepper__btn:active {
+  background: var(--gloss), var(--accent-action-pressed);
+  border-color: rgb(255 255 255 / 0.12);
+  color: var(--surface-base);
+  box-shadow:
+    inset 0 2px 8px 0 rgb(0 0 0 / 0.35),
+    0 0 22px -4px color-mix(in srgb, var(--accent-action) 60%, transparent);
+  transform: scale(0.92);
+  transition-duration: 80ms;
+}
+
+/* The card behind the numbers stays black, which is the point of it. A single rim of light along
+ * its top edge is all it takes, so it reads as a glass pane rather than a box. */
+.stepper {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.04) 0%, rgb(255 255 255 / 0) 40%), var(--surface-base);
+  border: 1px solid var(--glass-edge);
+  border-top-color: var(--glass-rim);
+}
+
+/* ---------------------------------------------------------------- the log action */
+
+.log {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-top-color: rgb(255 255 255 / 0.5);
+  background: linear-gradient(180deg, #ffa468 0%, var(--accent-action) 42%, var(--accent-action-shade) 100%);
+  box-shadow:
+    inset 0 -3px 10px 0 rgb(120 40 0 / 0.25),
+    0 14px 34px -14px color-mix(in srgb, var(--accent-action) 80%, transparent),
+    0 0 26px -8px color-mix(in srgb, var(--accent-action) 55%, transparent);
+  transition:
+    transform 300ms var(--spring),
+    filter 140ms ease,
+    box-shadow 220ms ease;
+}
+
+/* The gloss: a soft band of light across the top of the slab, like a lacquered surface. */
+.log::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 52% 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.34) 0%, rgb(255 255 255 / 0.08) 100%);
+  pointer-events: none;
+}
+
+.log:active {
+  background: linear-gradient(180deg, var(--accent-action) 0%, var(--accent-action-pressed) 100%);
+  box-shadow:
+    inset 0 3px 10px 0 rgb(90 30 0 / 0.35),
+    0 6px 16px -10px color-mix(in srgb, var(--accent-action) 70%, transparent);
+  transform: scale(0.965);
+  transition-duration: 90ms;
+}
+
+.log:active::before {
+  opacity: 0.45;
+}
+
+.log:disabled {
+  border-color: var(--glass-edge);
+  background: var(--surface-base);
+  box-shadow: none;
+}
+
+.log:disabled::before {
+  display: none;
+}
+
+.emom__start {
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-top-color: rgb(255 255 255 / 0.5);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.3) 0%, rgb(255 255 255 / 0.06) 48%, rgb(255 255 255 / 0) 52%),
+    linear-gradient(180deg, #ffa468 0%, var(--accent-action) 42%, var(--accent-action-shade) 100%);
+  box-shadow:
+    0 14px 34px -14px color-mix(in srgb, var(--accent-action) 80%, transparent),
+    0 0 26px -8px color-mix(in srgb, var(--accent-action) 55%, transparent);
+  transition: transform 300ms var(--spring), filter 140ms ease;
+}
+
+.emom__start:active {
+  transform: scale(0.965);
+  filter: brightness(0.9);
+  transition-duration: 90ms;
+}
+
+/* ---------------------------------------------------------------- the rest clock
+ *
+ * The one thing a client watches between sets, so it gets the most care of anything that is not
+ * pressed. A glass pane, a bigger clock, and a thick track with a lit fill: the fill runs from a
+ * deep cyan into a bright one, glows, carries a slow sheen along its length while it runs, and
+ * ends in a bright head, so the eye finds how much rest is left from across the room. */
+
+.rest,
+.emom__clock {
+  --rest-track-height: 10px;
+  border: 1px solid var(--glass-edge);
+  border-top-color: var(--glass-rim);
+  background: var(--glass), var(--surface-base);
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+  transition: box-shadow 400ms ease, border-color 400ms ease;
+}
+
+.rest {
+  --rest-track-height: 8px;
+  padding: var(--s-2) var(--s-4) calc(var(--s-2) + var(--s-3) + var(--rest-track-height));
+}
+
+.rest[data-state='running'],
+.emom__clock {
+  border-top-color: color-mix(in srgb, var(--accent-data) 45%, transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--accent-data) 25%, transparent),
+    0 0 30px -14px color-mix(in srgb, var(--accent-data) 70%, transparent);
+}
+
+.rest__time {
+  font-size: calc(var(--t-md) * 1.1);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.rest__track,
+.emom__track {
+  inset: auto var(--s-4) var(--s-3) var(--s-4);
+}
+
+.rest__track {
+  bottom: var(--s-2);
+}
+
+.rest__track,
+.emom__track {
+  height: var(--rest-track-height);
+  border-radius: 999px;
+  overflow: visible;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.6), 0 1px 0 0 rgb(255 255 255 / 0.05);
+}
+
+/* The fill drains by sliding left (js/track.js sets its transform), so the track has to cut it
+ * off at its left end. clip-path does that and nothing else: it cuts at the left edge and leaves
+ * room above, below and to the right, so the glow and the bead at the head still show. */
+.rest__track,
+.emom__track {
+  clip-path: inset(-24px -24px -24px 0);
+}
+
+.rest__fill,
+.emom__fill {
+  position: relative;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.45) 0%, rgb(255 255 255 / 0) 55%),
+    linear-gradient(90deg, #1f7f96 0%, var(--accent-data) 70%, #c8f5ff 100%);
+  box-shadow:
+    0 0 12px 0 color-mix(in srgb, var(--accent-data) 60%, transparent),
+    0 0 2px 0 color-mix(in srgb, var(--accent-data) 90%, transparent);
+  background-size: 100% 100%, 100% 100%;
+}
+
+/* The head: a bright bead at the leading edge. */
+.rest__fill::after,
+.emom__fill::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: calc(var(--rest-track-height) + 6px);
+  height: calc(var(--rest-track-height) + 6px);
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffffff 0%, #d9faff 35%, var(--accent-data) 75%);
+  box-shadow: 0 0 14px 2px color-mix(in srgb, var(--accent-data) 75%, transparent);
+}
+
+/* The sheen, a slow band of light travelling the length of the fill while the clock runs. */
+.rest[data-state='running'] .rest__fill::before,
+.emom__fill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.55) 50%, transparent 100%) no-repeat;
+  background-size: 30% 100%;
+  animation: rest-sheen 2.4s ease-in-out infinite;
+  mix-blend-mode: overlay;
+}
+
+@keyframes rest-sheen {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+
+.rest[data-state='idle'] .rest__fill::after,
+.rest[data-state='ready'] .rest__fill::after {
+  opacity: 0;
+}
+
+.rest[data-state='ready'] {
+  border-top-color: color-mix(in srgb, var(--text-primary) 35%, transparent);
+}
+
+/* ---------------------------------------------------------------- cards */
+
+.consistency,
+.chart,
+.history,
+.worknav__list,
+.row-card {
+  border: 1px solid var(--glass-edge);
+  border-top-color: var(--glass-rim);
+  background: var(--glass), var(--card);
+}
+
+.worknav__row.is-now {
+  background: var(--gloss), linear-gradient(180deg, var(--surface-raised-rim) 0%, var(--surface-raised) 40%, var(--surface-raised-shade) 100%);
+}
+
+/* A trained day is a small lit tile. */
+.cal__day {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-top-color: rgb(255 255 255 / 0.26);
+  background: var(--gloss), linear-gradient(180deg, var(--cal-rim) 0%, var(--cal-face) 45%, var(--cal-shade) 100%);
+  box-shadow: 0 6px 14px -8px var(--cal-rim);
+}
+
+.cal__day.is-record {
+  box-shadow: 0 0 0 2px var(--pr), 0 0 14px 0 color-mix(in srgb, var(--pr) 50%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-secondary,
+  .daypicker__item,
+  .sections__item,
+  .feel__item,
+  .dayjump,
+  .liftpick__open,
+  .stepper__btn,
+  .log,
+  .emom__start {
+    transition: none;
+  }
+
+  .button-secondary:active,
+  .daypicker__item:active,
+  .sections__item:active,
+  .feel__item:active,
+  .dayjump:active,
+  .liftpick__open:active,
+  .stepper__btn:active,
+  .log:active,
+  .emom__start:active {
+    transform: none;
+  }
+
+  .rest[data-state='running'] .rest__fill::before,
+  .emom__fill::before {
+    animation: none;
+  }
+}
+
+/* The way back to a set in progress wears the log action's lacquer, since pressing it is the same
+ * act: getting back to lifting. */
+.resume {
+  background: linear-gradient(180deg, #ffa468 0%, var(--accent-action) 55%, var(--accent-action-shade) 100%);
+  box-shadow:
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.35),
+    0 10px 26px -12px color-mix(in srgb, var(--accent-action) 75%, transparent);
 }
