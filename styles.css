@@ -5718,3 +5718,188 @@ h2 {
     inset 0 -1px 0 0 rgb(255 255 255 / 0.35),
     0 10px 26px -12px color-mix(in srgb, var(--accent-action) 75%, transparent);
 }
+
+/* ---------------------------------------------------------------- every other press
+ *
+ * The blocks above gave the spring to the controls they restyled. This gives it to every other
+ * button in the app, so no press anywhere goes unanswered. Same curve, same quick way in, and a
+ * depth that follows the size of the thing: small keys sink furthest, slabs and full width
+ * actions barely, because the same scale reads as a lurch on something wide.
+ *
+ * Two kinds of control sink their contents rather than themselves:
+ * - List rows (the lift picker, the workout overview, the client and template lists). The row is
+ *   full width and carries the divider above it, so scaling it would pull the divider in from the
+ *   card's edges. The row's face darkens as before and what is printed on it sinks.
+ * - The month stepper's halves. The pill clips them, and a shrunk half would lose the round outer
+ *   end its pressed state is drawn to keep, so the chevron sinks instead.
+ *
+ * The resume bar does not scale at all. It runs edge to edge, and a shrinking bar would open a gap
+ * at both sides with the page showing through. It dims and takes the log action's pressed shadow.
+ */
+
+.cal__day,
+.iconbtn,
+.emomrounds__key,
+.emom__more,
+.feel__done,
+.auth__go,
+.unitset__swap,
+.account__out,
+.auth__alt,
+.rehearse__out,
+.archive__summary,
+.cal__chev,
+.tab__icon,
+.row__body,
+.worknav__grid,
+.clientlist__inner,
+.clientlist__go {
+  transition:
+    transform 260ms var(--spring),
+    filter 160ms ease,
+    opacity 160ms ease;
+}
+
+/* ---------------------------------------------------------------- keys and chips */
+
+.iconbtn:active,
+.emomrounds__key:active:not(:disabled) {
+  transform: scale(0.9);
+  filter: brightness(0.9);
+  transition-duration: 80ms;
+}
+
+.iconbtn:active {
+  background: var(--chrome-face-press);
+}
+
+/* Held and selected share a picture in the grid, so the selected day keeps its 1px drop and only
+ * the press adds the sink. */
+.cal__day:active {
+  transform: translateY(1px) scale(0.92);
+  transition-duration: 80ms;
+}
+
+.emom__more:active {
+  transform: scale(0.95);
+  filter: brightness(0.9);
+  transition-duration: 90ms;
+}
+
+/* ---------------------------------------------------------------- slabs */
+
+.feel__done:active:not(:disabled),
+.auth__go:active:not(:disabled) {
+  transform: scale(0.965);
+  filter: brightness(0.92);
+  transition-duration: 90ms;
+}
+
+.resume {
+  transition:
+    filter 160ms ease,
+    box-shadow 200ms ease;
+}
+
+.resume:active {
+  filter: brightness(0.9);
+  box-shadow: inset 0 3px 10px 0 rgb(90 30 0 / 0.35);
+  transition-duration: 90ms;
+}
+
+/* ---------------------------------------------------------------- text links */
+
+.unitset__swap:active,
+.account__out:active,
+.auth__alt:active,
+.rehearse__out:active,
+.archive__summary:active {
+  transform: scale(0.94);
+  transition-duration: 80ms;
+}
+
+.account__out:active,
+.rehearse__out:active,
+.archive__summary:active {
+  color: var(--text-primary);
+}
+
+/* ---------------------------------------------------------------- what sits inside a control */
+
+.cal__step:active .cal__chev {
+  transform: scale(0.82);
+  transition-duration: 80ms;
+}
+
+/* The tab keeps its fade. The icon sinks with it, so a tab press feels like the rest of the app. */
+.tab:active .tab__icon {
+  transform: scale(0.86);
+  transition-duration: 60ms;
+}
+
+button.row:active .row__body,
+button.worknav__row:active .worknav__grid,
+.clientlist__button:active .clientlist__inner,
+.clientlist__button:active .clientlist__go {
+  transform: scale(0.97);
+  transition-duration: 90ms;
+}
+
+/* The inner boxes scale from the left, where the text starts, so a long name does not appear to
+ * slide right as it sinks. */
+.row__body,
+.worknav__grid,
+.clientlist__inner {
+  transform-origin: left center;
+}
+
+.clientlist__button:active,
+button.worknav__row:active {
+  background: var(--chrome-face-press);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cal__day,
+  .iconbtn,
+  .emomrounds__key,
+  .emom__more,
+  .feel__done,
+  .auth__go,
+  .unitset__swap,
+  .account__out,
+  .auth__alt,
+  .rehearse__out,
+  .archive__summary,
+  .cal__chev,
+  .tab__icon,
+  .row__body,
+  .worknav__grid,
+  .clientlist__inner,
+  .clientlist__go,
+  .resume {
+    transition: none;
+  }
+
+  .iconbtn:active,
+  .emomrounds__key:active,
+  .emom__more:active,
+  .feel__done:active,
+  .auth__go:active,
+  .unitset__swap:active,
+  .account__out:active,
+  .auth__alt:active,
+  .rehearse__out:active,
+  .archive__summary:active,
+  .cal__step:active .cal__chev,
+  .tab:active .tab__icon,
+  button.row:active .row__body,
+  button.worknav__row:active .worknav__grid,
+  .clientlist__button:active .clientlist__inner,
+  .clientlist__button:active .clientlist__go {
+    transform: none;
+  }
+
+  .cal__day:active {
+    transform: translateY(1px);
+  }
+}
