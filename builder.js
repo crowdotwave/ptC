@@ -25,6 +25,7 @@ import { isoDate } from './js/dates.js';
 import { emomSettings, emomBlock, emomLength, DEFAULT_WINDOW_SECONDS } from './js/emom.js';
 import { loadUnit, mountUnitSetting, onUnitChange, viewerName } from './js/units.js';
 import { readFile, renderDraft, setMode, setField, createProgram } from './js/import-ui.js';
+import { libraryOrder, findByName, suggestionNames } from './js/library.js';
 
 const el = (id) => document.getElementById(id);
 const state = {
@@ -1093,7 +1094,8 @@ async function resolveExercise(name) {
   const wanted = name.trim();
   if (!wanted) return null;
 
-  const found = state.exercises.find((e) => e.name.toLowerCase() === wanted.toLowerCase());
+  // This trainer's own lift before the shared library's of the same name. See js/library.js.
+  const found = findByName(state.exercises, state.trainer?.id ?? null, wanted);
   if (found) return found;
 
   const created = makeRecord('exercises', {
@@ -1181,7 +1183,9 @@ function refreshDerived(dayId, item) {
 
 async function addRow(dayId) {
   const items = state.items.get(dayId) ?? [];
-  const fallback = state.exercises[0];
+  // One of the trainer's own lifts where there is one. The row is a placeholder until a name is typed,
+  // and a placeholder drawn from a library of hundreds reads as the builder choosing a lift.
+  const fallback = libraryOrder(state.exercises, state.trainer?.id ?? null)[0];
   if (!fallback) return;
 
   const item = makeRecord('template_items', {
@@ -1279,10 +1283,8 @@ async function deleteDay(dayId) {
 }
 
 function refreshExerciseOptions() {
-  el('exercise-options').innerHTML = state.exercises
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((e) => `<option value="${esc(e.name)}"></option>`)
+  el('exercise-options').innerHTML = suggestionNames(state.exercises, state.trainer?.id ?? null)
+    .map((name) => `<option value="${esc(name)}"></option>`)
     .join('');
 }
 

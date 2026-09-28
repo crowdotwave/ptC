@@ -67,6 +67,7 @@ import {
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 import { windowCues, cueKey, createCountdown, COUNT_IN_SECONDS } from './js/countdown.js';
+import { libraryOrder, findByName, suggestionNames } from './js/library.js';
 
 const results = [];
 
@@ -5552,6 +5553,38 @@ test('the memory driver hands back copies, the way serialising one would', async
   read.display_name = 'someone else';
   eq((await driver.get('clients', 'client-em')).display_name, 'Emma',
      'a caller mutating what it read cannot reach back into the database');
+});
+
+// ------------------------------------------------------------------ the shared library
+//
+// A trainer's own lift and the library's often share a name. The trainer's must win, because it
+// carries their clients' history.
+
+const lib = [
+  { id: 'g1', trainer_id: null, name: 'Face Pull' },
+  { id: 'g2', trainer_id: null, name: 'Kettlebell Swing' },
+  { id: 't1', trainer_id: 'clay', name: 'FACE PULL' },
+  { id: 'o1', trainer_id: 'someone', name: 'Kettlebell Swing' },
+];
+
+test('a typed name resolves to the trainer own lift before the library one of the same name', () => {
+  eq(findByName(lib, 'clay', 'face pull')?.id, 't1');
+  eq(findByName(lib, 'clay', '  Face Pull ')?.id, 't1', 'case and surrounding space ignored');
+});
+
+test('a name only the library has resolves to the library', () => {
+  eq(findByName(lib, 'clay', 'Kettlebell Swing')?.id, 'g2', 'not another trainer row that happens to be here');
+  eq(findByName(lib, 'clay', 'Nothing Like This'), null);
+  eq(findByName(lib, 'clay', '   '), null);
+});
+
+test('with no trainer, nothing is ranked as own and the order is left alone', () => {
+  eq(libraryOrder(lib, null).map((e) => e.id), ['g1', 'g2', 't1', 'o1']);
+  eq(libraryOrder(lib, 'clay')[0].id, 't1', 'the trainer own lift comes first');
+});
+
+test('suggestions list each name once, in the trainer spelling where theirs exists', () => {
+  eq(suggestionNames(lib, 'clay'), ['FACE PULL', 'Kettlebell Swing']);
 });
 
 // ------------------------------------------------------------------ the count in
