@@ -20,6 +20,10 @@
 -- failing the day the first real trainer existed, and an unscoped exercise count did the same the
 -- day the library arrived.
 --
+-- Signup is closed, per 0007. The auth handler only ever binds a person to a clients or trainers
+-- row somebody already created on their address, so the signup checks assert that an uninvited
+-- address creates nothing at all, and that a waiting trainers row binds the way a client row does.
+--
 -- How to run: paste the whole file into the Supabase SQL editor and execute. A pass prints one
 -- row saying so. A failure raises with the name of the check that broke.
 
@@ -348,38 +352,69 @@ begin
   select count(*) into n from public.clients
    where id = '20000000-0000-4000-8000-00000000000a' and auth_user_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   if n <> 1 then raise exception 'BINDING FAILURE: an accepted client row was rebound to a new account'; end if;
-  if outcome <> 'trainer' then
-    raise exception 'a signup on a taken address should fall through to a trainer, got %', outcome;
+
+  -- and since 0007 there is nothing to fall through to: the address is taken, so it is uninvited
+  if outcome <> 'none' then
+    raise exception 'a signup on a taken address should match nothing, got %', outcome;
   end if;
+  select count(*) into n from public.trainers where auth_user_id = '99999999-9999-4999-8999-999999999999';
+  if n <> 0 then raise exception 'a signup on a taken address was made a trainer'; end if;
 end $$;
 
--- ================================================================ signing up as a trainer
+-- ================================================================ signing up is closed
+--
+-- 0007 closed self signup. Before it, anybody who signed up without a pending invite became a
+-- trainer, which is a permanent account on this project for whoever finds the URL. Now a trainer
+-- is set up the same way a client is: somebody inserts a trainers row carrying their email, and
+-- the auth trigger binds it on the first sign in. An address nobody put there creates nothing.
+
+insert into public.trainers (id, display_name, brand_color, weight_unit, email) values
+  ('10000000-0000-4000-8000-000000000007', 'Coach Iqbal', '#FF8A45', 'kg', 'coach@example.com');
 
 do $$
 declare outcome text; n bigint; v_name text;
 begin
-  outcome := ptc.handle_new_auth_user('77777777-7777-4777-8777-777777777777', 'coach@example.com',
-                                      '{"display_name":"Coach Iqbal"}'::jsonb);
-  if outcome <> 'trainer' then raise exception 'expected a trainer, got %', outcome; end if;
+  -- a waiting trainers row binds on the email match, case insensitively
+  outcome := ptc.handle_new_auth_user('77777777-7777-4777-8777-777777777777', 'Coach@Example.COM',
+                                      '{"display_name":"Somebody Else"}'::jsonb);
+  if outcome <> 'trainer' then raise exception 'expected a trainer binding, got %', outcome; end if;
 
   select count(*), max(display_name) into n, v_name
     from public.trainers where auth_user_id = '77777777-7777-4777-8777-777777777777';
-  if n <> 1 then raise exception 'a signup produced % trainer rows, expected exactly 1', n; end if;
-  if v_name <> 'Coach Iqbal' then raise exception 'display name came through as %', v_name; end if;
+  if n <> 1 then raise exception 'a trainer binding produced % trainer rows, expected exactly 1', n; end if;
 
-  -- the same person signing up again produces nothing new
+  select count(*) into n from public.trainers
+   where id = '10000000-0000-4000-8000-000000000007'
+     and auth_user_id = '77777777-7777-4777-8777-777777777777';
+  if n <> 1 then raise exception 'the waiting trainers row did not bind on the email match'; end if;
+
+  -- the row somebody inserted is the row, and signup metadata does not rename it
+  if v_name <> 'Coach Iqbal' then raise exception 'binding renamed the trainer to %', v_name; end if;
+
+  select count(*) into n from public.clients where auth_user_id = '77777777-7777-4777-8777-777777777777';
+  if n <> 0 then raise exception 'a trainer binding also produced a client'; end if;
+
+  -- the same person signing in again produces nothing new
   outcome := ptc.handle_new_auth_user('77777777-7777-4777-8777-777777777777', 'coach@example.com', '{}'::jsonb);
-  if outcome <> 'trainer_exists' then raise exception 'a repeat signup returned %', outcome; end if;
+  if outcome <> 'trainer_exists' then raise exception 'a repeat trainer bind returned %', outcome; end if;
 
   select count(*) into n from public.trainers where auth_user_id = '77777777-7777-4777-8777-777777777777';
-  if n <> 1 then raise exception 'a repeat signup produced % trainer rows, expected 1', n; end if;
+  if n <> 1 then raise exception 'a repeat trainer bind produced % trainer rows, expected 1', n; end if;
 
-  -- with no display name in the metadata, the address carries it rather than a blank
-  outcome := ptc.handle_new_auth_user('88888888-8888-4888-8888-888888888888', 'sam.rivera@example.com', '{}'::jsonb);
-  select max(display_name) into v_name from public.trainers where auth_user_id = '88888888-8888-4888-8888-888888888888';
-  if v_name <> 'sam.rivera' then raise exception 'fallback display name was %', v_name; end if;
+  -- an address nobody invited matches nothing and creates nothing, on either side
+  outcome := ptc.handle_new_auth_user('88888888-8888-4888-8888-888888888888', 'sam.rivera@example.com',
+                                      '{"display_name":"Sam Rivera"}'::jsonb);
+  if outcome <> 'none' then raise exception 'an uninvited signup returned %, expected none', outcome; end if;
 
-  -- a signup with no address does nothing at all rather than creating a nameless trainer
+  select count(*) into n from public.trainers
+   where auth_user_id = '88888888-8888-4888-8888-888888888888' or lower(email) = 'sam.rivera@example.com';
+  if n <> 0 then raise exception 'SIGNUP FAILURE: an uninvited signup created % trainer rows', n; end if;
+
+  select count(*) into n from public.clients
+   where auth_user_id = '88888888-8888-4888-8888-888888888888' or lower(email) = 'sam.rivera@example.com';
+  if n <> 0 then raise exception 'SIGNUP FAILURE: an uninvited signup created % client rows', n; end if;
+
+  -- a signup with no address does nothing at all
   outcome := ptc.handle_new_auth_user('66666666-6666-4666-8666-666666666666', null, '{}'::jsonb);
   if outcome <> 'skipped' then raise exception 'a signup with no email returned %', outcome; end if;
   select count(*) into n from public.trainers where auth_user_id = '66666666-6666-4666-8666-666666666666';
