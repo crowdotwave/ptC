@@ -22,7 +22,8 @@ import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.
 import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
 import { syncMessage, publishSync } from './js/sync-status.js';
 import { mountShell } from './js/nav.js';
-import { createStorage } from './js/storage.js';
+import { createStorage, isStorageStalled } from './js/storage.js';
+import { createIndexedDbDriver } from './js/storage-indexeddb.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can, staysSignedIn, routeWithoutSession } from './js/boot.js';
 import {
@@ -5550,6 +5551,162 @@ test('the memory driver hands back copies, the way serialising one would', async
   read.display_name = 'someone else';
   eq((await driver.get('clients', 'client-em')).display_name, 'Emma',
      'a caller mutating what it read cannot reach back into the database');
+});
+
+// ------------------------------------------------------------------ a device whose storage sticks
+//
+// A trainer's iPad, Home Screen app, straight after the file picker: the next write neither
+// finished nor failed, and the page waiting on it waited for good. These drive the real driver
+// over fake connections, because a real IndexedDB cannot be made to hang on demand.
+
+/**
+ * A connection that behaves like IndexedDB from the driver's side: every request and transaction
+ * settles on a later tick, or never does when `stuck`. Counts aborts and closes so a test can see
+ * the stuck transaction was let go and the stuck connection shut.
+ */
+function fakeConnection({ stuck = false, throwName = null } = {}) {
+  const rows = new Map();
+  const conn = {
+    rows,
+    aborted: 0,
+    closed: false,
+    close() {
+      conn.closed = true;
+    },
+    transaction() {
+      if (throwName) {
+        const error = new Error(`fake ${throwName}`);
+        error.name = throwName;
+        throw error;
+      }
+      const tx = {
+        abort() {
+          conn.aborted += 1;
+        },
+        objectStore() {
+          return {
+            put(record) {
+              if (!stuck) rows.set(record.id ?? record.key, record);
+            },
+            get(id) {
+              const request = {};
+              if (!stuck) {
+                setTimeout(() => {
+                  request.result = rows.get(id);
+                  request.onsuccess?.();
+                });
+              }
+              return request;
+            },
+          };
+        },
+      };
+      if (!stuck) setTimeout(() => tx.oncomplete?.());
+      return tx;
+    },
+  };
+  return conn;
+}
+
+const STUCK_MS = 20;
+
+test('a write that never finishes is given up on, not waited on forever', async () => {
+  const stuck = fakeConnection({ stuck: true });
+  const driver = createIndexedDbDriver(stuck, { stallMs: STUCK_MS });
+  let error = null;
+  try {
+    await driver.put('clients', { id: 'c1' });
+  } catch (caught) {
+    error = caught;
+  }
+  ok(error, 'the promise settles');
+  ok(isStorageStalled(error), 'and says it stalled, rather than looking like a refusal');
+  eq(stuck.aborted, 1, 'the stuck transaction is aborted, so it stops holding its stores');
+});
+
+test('a stuck connection is replaced and the write tried once more', async () => {
+  const stuck = fakeConnection({ stuck: true });
+  const fresh = fakeConnection();
+  let opened = 0;
+  const driver = createIndexedDbDriver(stuck, {
+    stallMs: STUCK_MS,
+    reopen: async () => {
+      opened += 1;
+      return fresh;
+    },
+  });
+  await driver.putWithOutbox('clients', { id: 'c1' }, { id: 'o1' });
+  eq(opened, 1);
+  ok(stuck.closed, 'the stuck connection is closed');
+  ok(fresh.rows.has('c1') && fresh.rows.has('o1'), 'the row and its outbox entry land on the new one');
+  eq(await driver.get('clients', 'c1'), { id: 'c1' }, 'and later reads use it too');
+});
+
+test('several stalls at once share one new connection', async () => {
+  const stuck = fakeConnection({ stuck: true });
+  let opened = 0;
+  const driver = createIndexedDbDriver(stuck, {
+    stallMs: STUCK_MS,
+    reopen: async () => {
+      opened += 1;
+      return fakeConnection();
+    },
+  });
+  await Promise.all([
+    driver.put('clients', { id: 'a' }),
+    driver.put('clients', { id: 'b' }),
+    driver.get('clients', 'a'),
+  ]);
+  eq(opened, 1, 'one reconnect, not one per waiting operation');
+});
+
+test('a second stall goes to the caller instead of retrying for ever', async () => {
+  let opened = 0;
+  const driver = createIndexedDbDriver(fakeConnection({ stuck: true }), {
+    stallMs: STUCK_MS,
+    reopen: async () => {
+      opened += 1;
+      return fakeConnection({ stuck: true });
+    },
+  });
+  let error = null;
+  try {
+    await driver.getMeta('ptc.actor');
+  } catch (caught) {
+    error = caught;
+  }
+  ok(isStorageStalled(error), 'the page hears it stalled');
+  eq(opened, 1, 'after exactly one fresh try');
+});
+
+test('a connection WebKit reports as lost is replaced too', async () => {
+  const fresh = fakeConnection();
+  const driver = createIndexedDbDriver(fakeConnection({ throwName: 'InvalidStateError' }), {
+    stallMs: STUCK_MS,
+    reopen: async () => fresh,
+  });
+  await driver.put('clients', { id: 'c1' });
+  ok(fresh.rows.has('c1'));
+});
+
+test('a real answer about the data is not retried', async () => {
+  let opened = 0;
+  const driver = createIndexedDbDriver(fakeConnection({ throwName: 'ConstraintError' }), {
+    stallMs: STUCK_MS,
+    reopen: async () => {
+      opened += 1;
+      return fakeConnection();
+    },
+  });
+  let error = null;
+  try {
+    await driver.put('clients', { id: 'c1' });
+  } catch (caught) {
+    error = caught;
+  }
+  eq(error?.name, 'ConstraintError');
+  ok(!isStorageStalled(error), 'and is not dressed up as a stall');
+  eq(opened, 0, 'a refusal would only be refused again on a new connection');
 });
 
 // ------------------------------------------------------------------ report

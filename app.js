@@ -11,7 +11,7 @@
 //
 // The adapter is the only persistence surface here. This file never touches IndexedDB.
 
-import { makeRecord, getDeviceId } from './js/storage.js';
+import { makeRecord, getDeviceId, isStorageStalled } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import './js/press.js';
 import { mountShell } from './js/nav.js';
@@ -179,7 +179,12 @@ let writeQueue = Promise.resolve();
 
 function write(task) {
   writeQueue = writeQueue.then(task).catch((error) => {
-    showNotice(`Saved on this device only. ${error.message}`, 'attention');
+    // A stall is the one failure that is NOT on this device, so "saved on this device only" would
+    // be the notice claiming a row it does not have. The set is on screen and nowhere else.
+    showNotice(
+      isStorageStalled(error) ? `Not saved. ${error.message}` : `Saved on this device only. ${error.message}`,
+      'attention',
+    );
   });
 }
 
