@@ -26,6 +26,7 @@ import {
   emomChangeRounds, emomBlockFor,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
+import { createCountdown, windowCues, cueKey } from './js/countdown.js';
 import { openSession, replaySession, loadSessions } from './js/session.js';
 import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
@@ -856,6 +857,16 @@ function tickRest() {
 /** How often the clock is asked where it is. Four times a second, same as the rest timer. */
 const EMOM_TICK_MS = 250;
 
+// The "3, 2, 1, go" as each window turns over. See js/countdown.js.
+const countdown = createCountdown();
+
+// A page that was hidden may have had its audio suspended and its pending beeps dropped, so coming
+// back forgets which window was cued and the next tick cues it again. Anything already past is
+// skipped rather than played late.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.emom) state.emom.cued = null;
+});
+
 /**
  * Builds the block for a day, or clears it.
  *
@@ -866,12 +877,13 @@ const EMOM_TICK_MS = 250;
 function setEmomDay(day) {
   stopEmom();
   const block = emomBlock(day, sortedItems(day), (item) => item.target_reps_low ?? 0);
-  state.emom = block ? { block, cursor: emomCursor(), rows: [], view: null, handle: null } : null;
+  state.emom = block ? { block, cursor: emomCursor(), rows: [], view: null, handle: null, cued: null } : null;
 }
 
 function stopEmom() {
   if (state.emom?.handle) clearInterval(state.emom.handle);
   if (state.emom) state.emom.handle = null;
+  countdown.cancel();
 }
 
 /** Whether this day is run against a clock, which decides which screen the client gets. */
@@ -909,7 +921,14 @@ function startEmom() {
   const emom = state.emom;
   if (!emom || emom.cursor.windowStartedAt !== null) return;
 
-  emom.cursor = emomPickup() ?? emomStart(emom.block, Date.now());
+  // Inside the press and before anything else, because this press is the only permission to make a
+  // sound the phone will accept.
+  countdown.unlock();
+  const resumed = emomPickup();
+  emom.cursor = resumed ?? emomStart(emom.block, Date.now());
+  // A fresh block opens on its go. A resumed one does not: that window began minutes ago, and a go
+  // now would be telling somebody to start something they are already halfway through.
+  if (!resumed) countdown.now('go');
   emom.handle = setInterval(tickEmom, EMOM_TICK_MS);
   tickEmom();
 }
@@ -960,6 +979,14 @@ function tickEmom() {
   const moved = emomAdvance(emom.block, emom.cursor, now);
   emom.cursor = moved.cursor;
   for (const minute of moved.due) logEmomWindow(minute);
+
+  // Once per window, and again whenever the window's end moves, which is what adding a minute does.
+  // Not after the block is over: its last window already cued the tone that ends it.
+  const key = cueKey(emom.block, emom.cursor);
+  if (!moved.done && key !== emom.cued) {
+    emom.cued = key;
+    countdown.schedule(windowCues(emom.block, emom.cursor), now);
+  }
 
   drawEmom(emom.view, emom.block, emomWhere(emom.block, emom.cursor, now));
   // The chip carries the round, so it has to move with the clock rather than only when something
