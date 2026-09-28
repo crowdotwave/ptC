@@ -24,8 +24,9 @@
 -- row somebody already created on their address, so the signup checks assert that an uninvited
 -- address creates nothing at all, and that a waiting trainers row binds the way a client row does.
 --
--- How to run: paste the whole file into the Supabase SQL editor and execute. A pass prints one
--- row saying so. A failure raises with the name of the check that broke.
+-- How to run: paste the whole file into the Supabase SQL editor and execute, or send it whole as
+-- one execute_sql call, which is how a release runs it (Releasing, in CLAUDE.md). A pass prints
+-- one row saying so. A failure raises with the name of the check that broke.
 
 begin;
 

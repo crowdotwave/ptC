@@ -33,6 +33,10 @@ fixtures while the policies stay in force for the parts being tested.
 CLAUDE.md: "Write a test that logs in as client A and attempts to read client B's set_logs. It
 must return zero rows. This test runs before any release."
 
+A release runs it without anybody opening the dashboard: the whole file goes to the live project
+as one `execute_sql` call through the Supabase tool, and the merge waits on the pass row. That is
+step 3 of Releasing in CLAUDE.md. By hand, paste the file into the SQL editor and run it.
+
 A pass prints one row:
 
 ```
