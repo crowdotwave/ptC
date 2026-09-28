@@ -107,6 +107,7 @@ const SHELL = [
   'js/session.js',
   'js/snapshot.js',
   'js/split-palette.js',
+  'js/stalled.js',
   'js/storage-indexeddb.js',
   'js/storage-memory.js',
   'js/storage.js',

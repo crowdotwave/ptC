@@ -20,6 +20,7 @@ import { seed, isSeeded, getDefaultClientId } from './seed.js';
 import { publishSync } from './sync-status.js';
 import { installWorker } from './worker.js';
 import { rehearsalTarget, openRehearsal } from './rehearse.js';
+import { watchStorage } from './stalled.js';
 
 // What the local database currently holds. Either 'local' for seeded fake data, or the auth
 // user whose rows are mirrored here.
@@ -151,6 +152,9 @@ export async function boot({ allowLocal = true, role = null } = {}) {
   // First, and not awaited. Every route out of this function needs the app to have opened, and the
   // one that installs the thing which makes that possible offline must not be one of them.
   installWorker();
+  // Before the first read, because the first read is where a stuck device stops a page. See
+  // js/stalled.js.
+  watchStorage();
 
   const storage = await openStorage();
   const client = await getSupabase();

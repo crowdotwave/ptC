@@ -105,6 +105,19 @@ mid set, and that screen holds all three in memory and would never notice. Getti
 own sets off the phone needs no pull at all. Both flushes are serialised against each other, since
 they drain one outbox and two in the air at once would send the same entries twice.
 
+**A stuck database is given up on, not waited on.** IndexedDB has no timeout, so a transaction
+that never completes is a promise that never settles. On a trainer's iPad, Home Screen app, the
+first write after the system file picker did exactly that: Create on the import screen did nothing,
+the next page stalled on its first read with an empty list and a dead button, and only closing the
+app cleared it. Every read and write in `js/storage-indexeddb.js` now has a deadline (`STALL_MS`).
+A stall, or a connection WebKit reports as lost, aborts the stuck transaction, reopens the database
+and tries once more; every driver operation is safe to run twice, which is what makes the retry
+legal. A second stall reaches the caller as an error carrying `stalled`, and `isStorageStalled` in
+`js/storage.js` is how UI code tells it apart from a refusal: a refused write is on the device, a
+stalled one is not. So the logging screen says "Not saved" for it rather than "Saved on this device
+only", and a stall nobody caught shows `js/stalled.js`'s message telling the person to close the
+app, which boot installs on every page before its first read.
+
 ### Offline sync rules
 
 - All record IDs are UUIDs generated client-side with `crypto.randomUUID()`. Never use

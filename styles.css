@@ -3941,6 +3941,30 @@ button.navlink:disabled {
   font-weight: 700;
 }
 
+/* Storage on this device stopped answering. See js/stalled.js. Pinned to the top of the screen
+   rather than put in flow, because the pages that need it are the ones whose startup stopped before
+   drawing anything, and there is no flow on them to put it in. On the raised surface, so
+   --text-primary is the only text colour legal on it, and the edge takes the chrome light
+   direction: lit on top, low on the other three. Said once and never dismissed, because nothing on
+   the page works until the app is closed, which is what it says to do. */
+.stalled {
+  position: fixed;
+  top: var(--screen-top);
+  left: var(--s-4);
+  right: var(--s-4);
+  z-index: 10;
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--chrome-edge-low);
+  border-top-color: var(--chrome-edge);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: var(--t-body);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .import__warnings {
   margin: 0 0 var(--s-3);
   padding-left: var(--s-4);

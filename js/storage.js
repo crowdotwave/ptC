@@ -19,6 +19,15 @@
 import { TABLES, TABLE_NAMES, OUTBOX_STORE, validate } from './schema.js';
 import { openDatabase, createIndexedDbDriver } from './storage-indexeddb.js';
 
+/**
+ * True for a read or write that neither finished nor failed in time. UI code cannot import the
+ * driver, so this is how it tells a stall from a refusal: a refused write is on the device and
+ * waiting for the server, a stalled one never reached the device at all.
+ */
+export function isStorageStalled(error) {
+  return error?.stalled === true;
+}
+
 const DEVICE_ID_KEY = 'ptc.device_id';
 
 /** Stable per browser identifier, stamped onto every set log for the audit trail. */
@@ -432,7 +441,8 @@ let instance = null;
 export async function openStorage() {
   if (!instance) {
     const db = await openDatabase();
-    instance = createStorage(createIndexedDbDriver(db));
+    // A connection that sticks is replaced and the operation tried again. See the driver.
+    instance = createStorage(createIndexedDbDriver(db, { reopen: () => openDatabase() }));
   }
   return instance;
 }

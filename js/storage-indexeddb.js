@@ -245,23 +245,103 @@ const MIGRATIONS = [
   },
 ];
 
-function promisify(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+// How long one read or one write may take before it is treated as stuck rather than slow.
+//
+// Every operation here finishes in milliseconds on a working device, including a pull's bulk write
+// of every set somebody has ever logged. What this exists for is the other case, seen on a
+// trainer's iPad running the Home Screen app: after the system file picker had been open, the next
+// write never completed and never failed. IndexedDB offers no timeout of its own, so a stuck
+// transaction is a promise that never settles, and everything waiting on it waits for good. The
+// Create button on the import screen did nothing, the next page stalled on its first read with an
+// empty list and a dead Add button, and only closing the app cleared it. The server logs are the
+// evidence: that page confirmed who was signed in and then never reached its sync.
+export const STALL_MS = 8000;
+
+// Opening gets longer, because an open can carry a migration over every row on the device.
+const OPEN_STALL_MS = 20000;
+
+export const STALLED_MESSAGE =
+  'Storage on this device stopped responding. Close the app completely and open it again.';
+
+/**
+ * A read or write that neither finished nor failed in time. Carries `stalled` so code that cannot
+ * import this file, which is all UI code, can still tell it apart from a refusal: a refused write
+ * is on the device and waiting for the server, a stalled one is not on the device at all.
+ */
+export class StorageStalledError extends Error {
+  constructor(message = STALLED_MESSAGE) {
+    super(message);
+    this.name = 'StorageStalledError';
+    this.stalled = true;
+  }
 }
 
-function txDone(tx) {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+/** Settles with `promise`, or rejects stalled after `ms`, calling `onStall` first. */
+function deadline(promise, ms, onStall = null) {
+  let timer = null;
+  const stalled = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      if (onStall) onStall();
+      reject(new StorageStalledError());
+    }, ms);
   });
+  return Promise.race([promise, stalled]).finally(() => clearTimeout(timer));
 }
 
-export function openDatabase(name = DB_NAME, version = DB_VERSION) {
-  return new Promise((resolve, reject) => {
+/**
+ * Aborted on a stall rather than abandoned, because an abandoned readwrite transaction keeps its
+ * stores locked, and a retry on a fresh connection would queue behind the very thing it is trying
+ * to get past. Throws if the transaction already finished, which is fine: then there is nothing
+ * to free.
+ */
+function abandon(tx) {
+  try {
+    tx.abort();
+  } catch {
+    // Already finished or already aborted.
+  }
+}
+
+function promisify(request, tx, ms) {
+  return deadline(
+    new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    }),
+    ms,
+    () => abandon(tx),
+  );
+}
+
+function txDone(tx, ms) {
+  return deadline(
+    new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    }),
+    ms,
+    () => abandon(tx),
+  );
+}
+
+/**
+ * Worth one fresh connection and one more try. A stall, and the two ways WebKit reports a
+ * connection it has lost: InvalidStateError from transaction() on a connection that is closing,
+ * and UnknownError ("Connection to Indexed Database server lost"). Anything else is a real answer
+ * about the data and goes straight to the caller.
+ */
+function isLostConnection(error) {
+  return (
+    error instanceof StorageStalledError ||
+    error?.name === 'InvalidStateError' ||
+    error?.name === 'UnknownError'
+  );
+}
+
+export function openDatabase(name = DB_NAME, version = DB_VERSION, { stallMs = OPEN_STALL_MS } = {}) {
+  let late = false;
+  const opening = new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       reject(new Error('IndexedDB is unavailable. Serve the app over http, not file://'));
       return;
@@ -288,6 +368,12 @@ export function openDatabase(name = DB_NAME, version = DB_VERSION) {
 
     request.onsuccess = () => {
       const db = request.result;
+      // Given up on already, and the caller has moved on. A connection nobody holds would keep the
+      // version pinned and block the next open, so it is closed rather than left lying about.
+      if (late) {
+        db.close();
+        return;
+      }
       // Another tab opening a newer version must not hang on this one holding the old.
       db.onversionchange = () => db.close();
       resolve(db);
@@ -296,23 +382,69 @@ export function openDatabase(name = DB_NAME, version = DB_VERSION) {
     request.onblocked = () =>
       reject(new Error('Another tab has this database open at an older version. Close it and reload.'));
   });
+  return deadline(opening, stallMs, () => {
+    late = true;
+  });
 }
 
-export function createIndexedDbDriver(db) {
-  function read(stores) {
-    return db.transaction(stores, 'readonly');
+/**
+ * The driver over one connection, and the only place that connection is replaced.
+ *
+ * `reopen` is how a stuck connection is got past: every operation that stalls, or that finds its
+ * connection lost, closes it, opens a fresh one, and tries once more. Once, because a second stall
+ * says the storage underneath is stuck rather than this connection, and waiting longer would only
+ * put off the one message that helps. Every operation here is safe to run twice: a put writes by
+ * id, the outbox entry carries its own id made before the first try, and a delete of a row already
+ * gone is a no op. Without `reopen` a stall goes straight to the caller.
+ */
+export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } = {}) {
+  let conn = db;
+  let reopening = null;
+
+  // Several operations stall together when a connection sticks. The first replaces it and the rest
+  // wait for that one replacement rather than opening a connection each.
+  function reconnect(stale) {
+    if (conn !== stale) return Promise.resolve(conn);
+    if (!reopening) {
+      reopening = (async () => {
+        try {
+          stale.close();
+        } catch {
+          // Already closed, which is how some of these arrive.
+        }
+        conn = await reopen();
+        return conn;
+      })().finally(() => {
+        reopening = null;
+      });
+    }
+    return reopening;
   }
-  function write(stores) {
-    return db.transaction(stores, 'readwrite');
+
+  async function run(op) {
+    const current = conn;
+    try {
+      return await op(current);
+    } catch (error) {
+      if (!reopen || !isLostConnection(error)) throw error;
+      return op(await reconnect(current));
+    }
   }
+
+  const read = (on, stores) => on.transaction(stores, 'readonly');
+  const write = (on, stores) => on.transaction(stores, 'readwrite');
 
   return {
-    db,
+    get db() {
+      return conn;
+    },
 
-    async get(store, id) {
-      const tx = read([store]);
-      const row = await promisify(tx.objectStore(store).get(id));
-      return row ?? null;
+    get(store, id) {
+      return run(async (on) => {
+        const tx = read(on, [store]);
+        const row = await promisify(tx.objectStore(store).get(id), tx, stallMs);
+        return row ?? null;
+      });
     },
 
     /**
@@ -320,83 +452,103 @@ export function createIndexedDbDriver(db) {
      * the read walks the index instead of scanning. Everything else is filtered in memory,
      * which is fine at prototype scale and keeps the query surface small.
      */
-    async getAll(store, indexField = null, indexValue = undefined) {
-      const tx = read([store]);
-      const objectStore = tx.objectStore(store);
-      if (indexField && objectStore.indexNames.contains(indexField) && indexValue !== undefined) {
-        return promisify(objectStore.index(indexField).getAll(indexValue));
-      }
-      return promisify(objectStore.getAll());
+    getAll(store, indexField = null, indexValue = undefined) {
+      return run((on) => {
+        const tx = read(on, [store]);
+        const objectStore = tx.objectStore(store);
+        if (indexField && objectStore.indexNames.contains(indexField) && indexValue !== undefined) {
+          return promisify(objectStore.index(indexField).getAll(indexValue), tx, stallMs);
+        }
+        return promisify(objectStore.getAll(), tx, stallMs);
+      });
     },
 
-    async put(store, record) {
-      const tx = write([store]);
-      tx.objectStore(store).put(record);
-      await txDone(tx);
-      return record;
+    put(store, record) {
+      return run(async (on) => {
+        const tx = write(on, [store]);
+        tx.objectStore(store).put(record);
+        await txDone(tx, stallMs);
+        return record;
+      });
     },
 
     /** Writes a domain row and its outbox entry in one transaction so they cannot diverge. */
-    async putWithOutbox(store, record, outboxEntry) {
-      const tx = write([store, OUTBOX_STORE]);
-      tx.objectStore(store).put(record);
-      if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
-      await txDone(tx);
-      return record;
+    putWithOutbox(store, record, outboxEntry) {
+      return run(async (on) => {
+        const tx = write(on, [store, OUTBOX_STORE]);
+        tx.objectStore(store).put(record);
+        if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
+        await txDone(tx, stallMs);
+        return record;
+      });
     },
 
-    async deleteWithOutbox(store, id, outboxEntry) {
-      const tx = write([store, OUTBOX_STORE]);
-      tx.objectStore(store).delete(id);
-      if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
-      await txDone(tx);
+    deleteWithOutbox(store, id, outboxEntry) {
+      return run(async (on) => {
+        const tx = write(on, [store, OUTBOX_STORE]);
+        tx.objectStore(store).delete(id);
+        if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
+        await txDone(tx, stallMs);
+      });
     },
 
-    async count(store) {
-      const tx = read([store]);
-      return promisify(tx.objectStore(store).count());
+    count(store) {
+      return run((on) => {
+        const tx = read(on, [store]);
+        return promisify(tx.objectStore(store).count(), tx, stallMs);
+      });
     },
 
-    async bulkPut(store, records) {
-      if (!records.length) return 0;
-      const tx = write([store]);
-      const objectStore = tx.objectStore(store);
-      for (const record of records) objectStore.put(record);
-      await txDone(tx);
-      return records.length;
+    bulkPut(store, records) {
+      if (!records.length) return Promise.resolve(0);
+      return run(async (on) => {
+        const tx = write(on, [store]);
+        const objectStore = tx.objectStore(store);
+        for (const record of records) objectStore.put(record);
+        await txDone(tx, stallMs);
+        return records.length;
+      });
     },
 
     /** Deletes rows by id with no outbox entry. Used by sync to maintain the mirror. */
-    async deleteRows(store, ids) {
-      if (!ids.length) return 0;
-      const tx = write([store]);
-      const objectStore = tx.objectStore(store);
-      for (const id of ids) objectStore.delete(id);
-      await txDone(tx);
-      return ids.length;
+    deleteRows(store, ids) {
+      if (!ids.length) return Promise.resolve(0);
+      return run(async (on) => {
+        const tx = write(on, [store]);
+        const objectStore = tx.objectStore(store);
+        for (const id of ids) objectStore.delete(id);
+        await txDone(tx, stallMs);
+        return ids.length;
+      });
     },
 
-    async clearAll() {
-      const stores = [...TABLE_NAMES, OUTBOX_STORE, META_STORE];
-      const tx = write(stores);
-      for (const store of stores) tx.objectStore(store).clear();
-      await txDone(tx);
+    clearAll() {
+      return run(async (on) => {
+        const stores = [...TABLE_NAMES, OUTBOX_STORE, META_STORE];
+        const tx = write(on, stores);
+        for (const store of stores) tx.objectStore(store).clear();
+        await txDone(tx, stallMs);
+      });
     },
 
-    async getMeta(key) {
-      const tx = read([META_STORE]);
-      const row = await promisify(tx.objectStore(META_STORE).get(key));
-      return row ? row.value : null;
+    getMeta(key) {
+      return run(async (on) => {
+        const tx = read(on, [META_STORE]);
+        const row = await promisify(tx.objectStore(META_STORE).get(key), tx, stallMs);
+        return row ? row.value : null;
+      });
     },
 
-    async setMeta(key, value) {
-      const tx = write([META_STORE]);
-      tx.objectStore(META_STORE).put({ key, value });
-      await txDone(tx);
+    setMeta(key, value) {
+      return run(async (on) => {
+        const tx = write(on, [META_STORE]);
+        tx.objectStore(META_STORE).put({ key, value });
+        await txDone(tx, stallMs);
+      });
     },
 
     close() {
-      db.close();
+      conn.close();
     },
   };
 }
