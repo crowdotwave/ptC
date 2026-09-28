@@ -255,6 +255,15 @@ export const TABLES = {
       // prescribed volume from extra volume on every row it reads, and because whether a set
       // was part of the plan is a fact about the moment it was logged.
       is_extra: { type: BOOL },
+      // The program slot this set was done for: the template item's id in the assignment snapshot.
+      // Usually that slot's own lift, and the column exists for the times it is not. A client who
+      // swaps bench press for machine press logs machine press, so the set counts toward machine
+      // press's history and records rather than bench's, and this is what still says it was done
+      // in bench's place: it is how an interrupted session puts a swapped set back in its seat, and
+      // how anyone reading the session later can see a swap happened. No reference, because the
+      // item lives in frozen snapshot JSON and not in a table. Null on rows written before it
+      // existed, which fall back to matching on the lift.
+      template_item_id: { type: UUID, nullable: true },
       device_id: { type: TEXT },
     },
   },

@@ -9,7 +9,7 @@ export const DB_NAME = 'ptc';
 
 // Bump this whenever MIGRATIONS grows. The two must move together or the new migration never
 // runs on a device that already has data.
-export const DB_VERSION = 11;
+export const DB_VERSION = 12;
 
 /**
  * Creates any object store or index in schema.js that is missing. Safe to call repeatedly.
@@ -241,6 +241,19 @@ const MIGRATIONS = [
       // than left absent for the same reason discarded_at was: the validator throws on a missing
       // column, so the next write of an old day row, which is what any builder edit is, would fail.
       rewriteRows(tx, 'template_days', (row) => (row.emom === undefined ? { ...row, emom: null } : row));
+    },
+  },
+  {
+    version: 12,
+    describe: 'add set_logs.template_item_id so a swapped set knows which program slot it filled',
+    up: (db, tx) => {
+      ensureStoresFromSchema(db, tx);
+      // Every set already on disk was done as its slot's own lift, and null says exactly that:
+      // match on the lift, as everything did before a swap existed. Backfilled rather than left
+      // absent, because the validator throws on a missing column and a retraction copies the row.
+      rewriteRows(tx, 'set_logs', (row) =>
+        row.template_item_id === undefined ? { ...row, template_item_id: null } : row,
+      );
     },
   },
 ];

@@ -130,6 +130,7 @@ async function runAdapterCheck(storage) {
         is_extra: existingLog.is_extra === true,
         rounds: existingLog.rounds ?? null,
         hold_seconds: null,
+        template_item_id: existingLog.template_item_id ?? null,
         device_id: getDeviceId(),
       });
       await storage.put('set_logs', retraction);

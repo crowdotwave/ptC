@@ -1345,7 +1345,19 @@ button.worknav__row:active {
 .worknav__foot {
   display: flex;
   flex: 0 0 auto;
+  gap: var(--s-2);
 }
+
+/* Which lift is being swapped, said once at the top of the chooser. The only heading on it, and it
+ * names the one fact the list below cannot: what is being given up. */
+.swapper__title {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-body);
+}
+
+
 
 .worknav__foot .button-secondary {
   flex: 1 1 auto;
@@ -3332,6 +3344,14 @@ button.row:active {
   color: var(--text-primary);
   font-size: var(--t-small);
   font-weight: 650;
+}
+
+/* A swap, under the lift that was done. Secondary text, because it qualifies the lift above it rather
+ * than being a fact of its own, and in words rather than a colour per the encoding rules. */
+.readout__instead {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
 }
 
 .readout__sets {

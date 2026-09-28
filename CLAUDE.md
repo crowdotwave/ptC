@@ -237,6 +237,8 @@ set_logs                      -- APPEND ONLY
   is_warmup boolean
   logged_at timestamptz
   supersedes_id uuid null
+  template_item_id uuid null  -- the program slot the set was done for; differs from the lift after
+                              -- a swap. No reference: slots live in frozen snapshot JSON
   device_id text
 
 payments
@@ -470,6 +472,23 @@ Requirements:
   stacked rows is what pushes this screen into scrolling on a short phone, and the header is
   already saying what a neutral message would confirm. A refused write outranks both: that one is
   the only place the app says a set is on this device alone.
+- **Swapping a lift changes the lift in the slot, never the slot.** The bench is taken, so it is
+  machine press today. Logged under bench press, a heavier machine press became a bench record, a
+  point on the bench chart and next week's bench prefill, all wrong and all plausible, which is how a
+  client reported it. So "Swap lift" sits in the workout panel beside End session and opens a chooser
+  in the panel's place: lifts swapped into this slot before, then the programmed lift when the slot
+  holds something else, then every lift the client can read, library included, searchable. Choosing
+  rebuilds the sets the slot still owes from the new lift's own history (its prefill, its opening
+  weight, its best), keeps the trainer's count, reps and rest, drops the trainer's starting weight
+  because it was a number for the other lift, and leaves sets already logged as they were done.
+  Nothing is written by choosing; a swap nobody logs under leaves no trace, like a skip. Every row
+  carries `set_logs.template_item_id`, the slot it was done for, which is how a swapped set is
+  seated again after a reload and how anyone can tell later that a swap happened. `js/swap.js` owns
+  the rules and `replaySession` matches a row by its slot first and its lift second, which is also
+  what every row written before the column existed falls back to. The day readout on Progress, which
+  is where a trainer reads a client's session, says "In place of Barbell Bench Press" under a
+  swapped lift, read off the snapshot the session was logged under (`standInFor`) and never the
+  live program, since the question is what the client was asked to do that day.
 - Ending a session early is always available and closes the session with whatever was logged.
   The summary reports what was done and never what was not. A session with two lifts in it is
   a session, not a partial one. It sits in the workout panel rather than in the row of secondary
