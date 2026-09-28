@@ -71,11 +71,13 @@ What it covers beyond the required case:
 - a signup on a matching address binds the client row, case insensitively, and creates no
   trainer for them
 - running the handler twice for the same person produces exactly the same rows
-- an already accepted client row is never rebound, so a second signup on that address becomes
-  a trainer instead of taking over the row
-- a signup with no pending invite becomes exactly one trainer, and a repeat creates no
-  duplicate
-- a signup with no email address creates nothing at all
+- an already accepted client row is never rebound, so a second signup on that address matches
+  nothing and returns `none` instead of taking over the row
+- a waiting trainers row binds on the email match, case insensitively, keeps the name it was
+  created with, and a repeat returns `trainer_exists` with no duplicate
+- an address nobody invited returns `none` and creates no trainers row and no clients row,
+  since 0007 closed self signup
+- a signup with no email address returns `skipped` and creates nothing at all
 - a trainer can correct a client's email and cannot write auth_user_id at all
 - created_at and updated_at ignore whatever the client sent, and logged_at does not
 - anon reads nothing at all and cannot reach the auth binding function
@@ -109,8 +111,11 @@ itself because it has no row and therefore no permissions. The cost is that a bu
 signup outright, which is why the logic sits in `handle_new_auth_user` taking plain arguments,
 so the test can call it without fabricating an `auth.users` row.
 
-**Anyone who signs up without a pending invite becomes a trainer.** Correct for a product with
-no public client signup, and the thing to revisit if one ever appears.
+**Signing up without a pending invite gets you nothing.** 0003 made that person a trainer, and
+0007 closed it, because on a public URL it handed an account to whoever found the app. A new
+trainer is now a trainers row carrying their email, inserted by somebody with database access,
+which the trigger binds on their first sign in exactly as it binds a client. The thing to
+revisit when there is a real signup page with something in front of it.
 
 **`clients.email` is globally unique, case insensitively.** `ptc.current_client_id()` resolves
 one auth user to one client row, so a second match would make "which client am I"
