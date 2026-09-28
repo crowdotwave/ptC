@@ -81,6 +81,7 @@ const SHELL = [
   'js/charts.js',
   'js/consistency-view.js',
   'js/consistency.js',
+  'js/countdown.js',
   'js/dates.js',
   'js/emom-view.js',
   'js/emom.js',

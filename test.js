@@ -66,6 +66,7 @@ import {
   emomWithRounds, emomChangeRounds, emomRoundFloor, emomBlockFor, emomShape, EMOM_MAX_ROUNDS,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
+import { windowCues, cueKey, createCountdown, COUNT_IN_SECONDS } from './js/countdown.js';
 
 const results = [];
 
@@ -5551,6 +5552,97 @@ test('the memory driver hands back copies, the way serialising one would', async
   read.display_name = 'someone else';
   eq((await driver.get('clients', 'client-em')).display_name, 'Emma',
      'a caller mutating what it read cannot reach back into the database');
+});
+
+// ------------------------------------------------------------------ the count in
+//
+// "3, 2, 1, go" as each window turns over. The cues are read off the cursor, so these check the
+// instants against the clock js/emom.js keeps rather than against any timer.
+
+const cueBlock = { minutes: 4, windowMs: 60000 };
+
+test('a window is counted out in its last three seconds and opens the next on a go', () => {
+  const cursor = { windowsDone: 0, windowStartedAt: 1_000_000, windowMs: 60000 };
+  eq(windowCues(cueBlock, cursor), [
+    { at: 1_057_000, kind: 'tick' },
+    { at: 1_058_000, kind: 'tick' },
+    { at: 1_059_000, kind: 'tick' },
+    { at: 1_060_000, kind: 'go' },
+  ]);
+  eq(COUNT_IN_SECONDS, [3, 2, 1]);
+});
+
+test('the last window ends on an end tone, not a go into nothing', () => {
+  const cursor = { windowsDone: 3, windowStartedAt: 0, windowMs: 60000 };
+  eq(windowCues(cueBlock, cursor).at(-1), { at: 60000, kind: 'end' });
+});
+
+test('a minute added moves the count with the window it lengthened', () => {
+  const before = { windowsDone: 1, windowStartedAt: 0, windowMs: 60000 };
+  const after = { ...before, windowMs: 120000 };
+  eq(windowCues(cueBlock, after)[0].at, 117000, 'the 3 sounds three seconds before the new end');
+  ok(cueKey(cueBlock, before) !== cueKey(cueBlock, after), 'and the screen sees it has to cue again');
+});
+
+test('nothing is cued before the clock starts or after the block ends', () => {
+  eq(windowCues(cueBlock, { windowsDone: 0, windowStartedAt: null, windowMs: 0 }), []);
+  eq(windowCues(cueBlock, { windowsDone: 4, windowStartedAt: 0, windowMs: 60000 }), []);
+  eq(cueKey(cueBlock, { windowsDone: 0, windowStartedAt: null, windowMs: 0 }), null);
+});
+
+/** Just enough AudioContext to watch what gets started and what gets stopped early. */
+function fakeAudio() {
+  const log = { started: [], stoppedEarly: [] };
+  class Ctx {
+    constructor() { this.currentTime = 100; this.state = 'running'; this.destination = {}; }
+    createGain() {
+      const ramp = () => {};
+      return { gain: { setValueAtTime: ramp, exponentialRampToValueAtTime: ramp }, connect: (n) => n };
+    }
+    createOscillator() {
+      const osc = {
+        frequency: {},
+        connect: (n) => n,
+        start: (when) => { osc.when = when; log.started.push({ when, hz: osc.frequency.value }); },
+        stop: (when) => { if (when === undefined) log.stoppedEarly.push(osc.when); },
+      };
+      return osc;
+    }
+  }
+  return { Ctx, log };
+}
+
+test('cues are placed on the audio clock, and a cue already gone is dropped, not played late', () => {
+  const { Ctx, log } = fakeAudio();
+  const saved = globalThis.AudioContext;
+  globalThis.AudioContext = Ctx;
+  try {
+    const speaker = createCountdown();
+    speaker.schedule([
+      { at: 9_000, kind: 'tick' },
+      { at: 12_000, kind: 'tick' },
+      { at: 13_000, kind: 'go' },
+    ], 10_000);
+    eq(log.started.map((s) => s.when), [102, 103], 'two seconds and three seconds from now');
+    eq(log.started.map((s) => s.hz), [880, 1320], 'a tick, then the higher go');
+  } finally {
+    globalThis.AudioContext = saved;
+  }
+});
+
+test('re-cueing silences pending beeps but never one already sounding', () => {
+  const { Ctx, log } = fakeAudio();
+  const saved = globalThis.AudioContext;
+  globalThis.AudioContext = Ctx;
+  try {
+    const speaker = createCountdown();
+    // A go due now and a tick due in two seconds.
+    speaker.schedule([{ at: 10_000, kind: 'go' }, { at: 12_000, kind: 'tick' }], 10_000);
+    speaker.cancel();
+    eq(log.stoppedEarly, [102], 'the pending tick is stopped and the go that just began is not');
+  } finally {
+    globalThis.AudioContext = saved;
+  }
 });
 
 // ------------------------------------------------------------------ a device whose storage sticks

@@ -620,6 +620,17 @@ row carries the flag it would be written with, so which windows come out marked 
 round is added on the dial is watched rather than assumed. The seed also carries a clock-led day, so `?local=1` can run the whole path against the real
 adapter, which is a different question and the one that puts sets on somebody's phone.
 
+**The turn of every window is said out loud: three short beeps and a long go.** Nobody on a rower
+or under a bar is looking at a phone, and the one moment an EMOM needs attention is the one this
+screen was otherwise silent about. `js/countdown.js` owns it. The cues are read off the cursor, so a
+minute added moves them with the window, and they are scheduled on the audio clock rather than
+fired from a timer, so they land on the second the way the block itself does. Tones and never
+speech, because a spoken go arrives when the phone gets round to it. The press of the start control
+is what unlocks the audio, since iOS accepts nothing else as permission to make a sound, and a
+resumed block does not play a go for a window that began minutes ago. The silent switch mutes it and
+a locked screen stops it, both deliberately left alone: the switch is the mute control somebody
+already knows, and a locked phone is a clock nobody is watching.
+
 Deliberately absent: no streak pressure, no guilt messaging for missed days, no
 notifications nagging the client to train.
 
