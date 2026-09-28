@@ -2,7 +2,11 @@
 //
 //   curl -sL -o free-exercise-db.json \
 //     https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json
-//   node supabase/library/build.mjs free-exercise-db.json
+//   node supabase/library/build.mjs free-exercise-db.json [--json rows.json]
+//
+// --json also writes the rows as JSON, ids included, for loading the library into a local or
+// rehearsal database that has no server to pull it from. The migration is still the only thing
+// that puts it on the server.
 //
 // Why a library at all: a client who swaps bench press for machine press needs somewhere to pick
 // machine press from, and a trainer should not have to type every lift into a program before anybody
@@ -222,6 +226,8 @@ const fingerprint = createHash('sha256')
   .digest('hex');
 
 writeFileSync(here + '../migrations/0019_exercise_library.sql', sql.replace(/\n/g, '\r\n'));
+const jsonAt = process.argv.indexOf('--json');
+if (jsonAt > 0 && process.argv[jsonAt + 1]) writeFileSync(process.argv[jsonAt + 1], JSON.stringify(rows));
 const byEquipment = rows.reduce((m, r) => ((m[r.equipment] = (m[r.equipment] || 0) + 1), m), {});
 console.log(`${rows.length} lifts (${kept.length} from the source, ${added.length} added)`, byEquipment);
 console.log(`fingerprint ${fingerprint}`);

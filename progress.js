@@ -13,6 +13,7 @@ import { buildProgression } from './js/progression.js';
 import { buildConsistency } from './js/consistency.js';
 import { renderConsistency, renderMonthNav, longDay, sessionLabel } from './js/consistency-view.js';
 import { renderSessionReadout } from './js/session-readout.js';
+import { standInFor } from './js/swap.js';
 import { renderLiftPicker, groupLifts, liftSummaries } from './js/lift-picker.js';
 import { activeSetLogs } from './js/history.js';
 import { openSession, loadSessions, summarise, discardSession } from './js/session.js';
@@ -490,13 +491,18 @@ function readoutFor(day) {
         .slice()
         .sort((a, b) => String(a.logged_at).localeCompare(String(b.logged_at)));
 
+      // The snapshot the session was logged under, which is what says which lift each slot held.
+      const snapshot = state.assignments.get(session.assignment_id)?.snapshot ?? null;
       const lifts = [];
       for (const row of rows) {
         const name = state.exercises.get(row.exercise_id)?.name;
         if (!name) continue;
+        // Grouped by what was done AND what it stood in for, so a machine press done in bench's
+        // place is not merged with a machine press the program asked for later in the same day.
+        const insteadOf = standInFor(snapshot, row.template_item_id, row.exercise_id);
         const open = lifts[lifts.length - 1];
-        if (open && open.exerciseId === row.exercise_id) open.sets.push(row);
-        else lifts.push({ exerciseId: row.exercise_id, name, sets: [row] });
+        if (open && open.exerciseId === row.exercise_id && open.insteadOf === insteadOf) open.sets.push(row);
+        else lifts.push({ exerciseId: row.exercise_id, name, insteadOf, sets: [row] });
       }
 
       return {

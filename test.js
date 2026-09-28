@@ -68,6 +68,7 @@ import {
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
 import { windowCues, cueKey, createCountdown, COUNT_IN_SECONDS } from './js/countdown.js';
 import { libraryOrder, findByName, suggestionNames } from './js/library.js';
+import { swappedItem, programmed, swapSlot, swapsFromRows, recentSwaps, swapChoices, standInFor } from './js/swap.js';
 
 const results = [];
 
@@ -2259,6 +2260,7 @@ const setRow = (over = {}) => ({
   supersedes_id: null,
   is_void: false,
   is_extra: false,
+  template_item_id: null,
   device_id: 'device',
   ...over,
 });
@@ -2820,7 +2822,7 @@ test('a fractional rep is rejected by the schema', () => {
     exercise_id: '00000000-0000-4000-8000-000000000003',
     set_index: 3, weight_kg: 0, reps: 10, rounds: null, hold_seconds: null, rpe: null,
     is_warmup: false, logged_at: '2026-08-05T00:00:00.000Z',
-    supersedes_id: null, is_void: false, is_extra: false, device_id: 'test',
+    supersedes_id: null, is_void: false, is_extra: false, template_item_id: null, device_id: 'test',
   };
   eq(validate('set_logs', base).reps, 10, 'a whole rep still stores');
 
@@ -5553,6 +5555,162 @@ test('the memory driver hands back copies, the way serialising one would', async
   read.display_name = 'someone else';
   eq((await driver.get('clients', 'client-em')).display_name, 'Emma',
      'a caller mutating what it read cannot reach back into the database');
+});
+
+// ------------------------------------------------------------------ swapping a lift
+//
+// Machine press instead of bench press because the bench is taken. The sets have to count toward
+// machine press, and the slot has to stay the trainer's.
+
+const benchSlot = {
+  id: 'slot-bench', exercise_id: 'bench', order_index: 0, target_sets: 4, target_reps_low: 8,
+  target_reps_high: 8, target_reps_text: '8', rest_seconds: 120, log_mode: 'weight_reps',
+  starting_weight_kg: 60, is_logged: true,
+  exercise: { id: 'bench', name: 'Bench Press', slug: 'bench-press', equipment: 'barbell', increment_kg: 2.5 },
+};
+const machinePress = { id: 'machine', name: 'Machine Press', slug: 'machine-press', equipment: 'machine', increment_kg: 5, trainer_id: null };
+const barOpening = { kg: 20, source: 'bar' };
+const stackOpening = { kg: 5, source: 'lightest' };
+
+test('lifts for the same muscle come before everything else, even when the trainer row says unspecified', () => {
+  const library = [
+    { id: 'own-bench', name: 'Barbell Bench Press', trainer_id: 'clay', primary_muscle: 'unspecified' },
+    { id: 'lib-bench', name: 'Barbell Bench Press', trainer_id: null, primary_muscle: 'chest' },
+    { id: 'mcp', name: 'Machine Chest Press', trainer_id: null, primary_muscle: 'chest' },
+    { id: 'sit', name: '3/4 Sit-Up', trainer_id: null, primary_muscle: 'abdominals' },
+  ];
+  const slot = { ...benchSlot, exercise_id: 'own-bench', exercise: { id: 'own-bench', name: 'Barbell Bench Press' } };
+  eq(swapChoices(library, { current: slot }).map((g) => [g.label, g.lifts.map((l) => l.id)]), [
+    ['Chest', ['mcp']],
+    ['Everything else', ['sit']],
+  ], 'chest from the library namesake, and the library bench is not offered as a swap for bench');
+});
+
+test('a set says what it stood in for, read off the snapshot it was logged under', () => {
+  const snapshot = { days: [{ items: [{ id: 'slot-bench', exercise_id: 'bench', exercise: { name: 'Bench Press' } }] }] };
+  eq(standInFor(snapshot, 'slot-bench', 'machine'), 'Bench Press', 'machine press done in bench slot');
+  eq(standInFor(snapshot, 'slot-bench', 'bench'), null, 'the slot own lift stood in for nothing');
+  eq(standInFor(snapshot, null, 'machine'), null, 'a row from before slots were recorded');
+  eq(standInFor(snapshot, 'gone', 'machine'), null, 'a slot the snapshot no longer has');
+  eq(standInFor(null, 'slot-bench', 'machine'), null);
+});
+
+test('the day readout names the lift a swap stood in for, under the lift that was done', () => {
+  const html = renderSessionReadout(
+    { day: '2026-09-27', dayLabel: 'Sunday', sessions: [{ label: 'Upper A', time: '', note: '', isOpen: false, lifts: [
+      { name: 'Machine Chest Press', insteadOf: 'Barbell Bench Press', sets: [setRow({ weight_kg: 30, reps: 8 })] },
+      { name: 'Barbell Row', insteadOf: null, sets: [setRow({ weight_kg: 60, reps: 8 })] },
+    ] }] },
+    { weight: (kg) => `${kg} kg` },
+  );
+  ok(html.includes('In place of Barbell Bench Press'), 'the swap is said');
+  eq((html.match(/In place of/g) ?? []).length, 1, 'and only on the lift that was swapped');
+});
+
+test('a swapped slot keeps its id and targets, loses the starting weight, and swaps back to itself', () => {
+  const swapped = swappedItem(benchSlot, machinePress);
+  eq(swapped.id, 'slot-bench', 'the slot is the same slot, which every row logged in it says');
+  eq(swapped.exercise_id, 'machine');
+  eq(swapped.exercise.name, 'Machine Press');
+  eq([swapped.target_sets, swapped.target_reps_low, swapped.rest_seconds], [4, 8, 120], 'the trainer asked for these whatever the machine');
+  eq(swapped.starting_weight_kg, null, 'a bench number must not reach a stack');
+  ok(programmed(swapped) === benchSlot, 'it remembers what the program asked for');
+  ok(swappedItem(swapped, { id: 'bench', name: 'Bench Press' }) === benchSlot, 'swapping back is the programmed slot itself');
+});
+
+test('a swap before any set rebuilds the whole slot for the new lift', () => {
+  const plan = planForItem(benchSlot, null, barOpening);
+  const next = swappedItem(benchSlot, machinePress);
+  const { plan: swapped, cursor } = swapSlot(plan, plan, next, null, stackOpening);
+  eq(swapped.length, 4, 'four sets, the trainer count');
+  ok(swapped.every((e) => e.item === next), 'every set is the new lift');
+  eq(swapped[0].weightKg, 5, 'opened from the machine fallback, not the bar');
+  eq(cursor, 0);
+});
+
+test('a swap after two of four sets keeps those two and owes two of the new lift, with no warmup', () => {
+  const plan = planForItem(benchSlot, null, barOpening);
+  plan[0].status = 'logged';
+  plan[1].status = 'logged';
+  const next = swappedItem(benchSlot, machinePress);
+  // Machine press history opening on a warmup. It must not come along: the client is already warm.
+  const previous = {
+    sessionId: 's-old', startedAt: '2026-09-01T10:00:00.000Z',
+    bySetIndex: new Map([
+      [0, { weight_kg: 20, reps: 10, is_warmup: true }],
+      [1, { weight_kg: 50, reps: 8, is_warmup: false }],
+      [2, { weight_kg: 50, reps: 8, is_warmup: false }],
+    ]),
+  };
+  const { plan: swapped, cursor } = swapSlot(plan, plan, next, previous, stackOpening);
+  eq(swapped.length, 4);
+  ok(swapped[0].item === benchSlot && swapped[1].item === benchSlot, 'the logged bench sets stay bench');
+  eq(swapped.slice(2).map((e) => [e.item === next, e.isWarmup, e.weightKg]), [[true, false, 50], [true, false, 50]],
+    'two working machine sets from machine history, no warmup');
+  ok(swapped[2].setIndex > swapped[1].setIndex, 'set numbers after the kept ones, so seats cannot collide');
+  eq(cursor, 2, 'the screen lands on the first machine set');
+});
+
+test('a swapped set goes back to its own slot on resume, not another slot with the same lift', () => {
+  const otherSlot = { ...benchSlot, id: 'slot-other', exercise_id: 'machine', order_index: 1, exercise: { ...machinePress } };
+  const next = swappedItem(benchSlot, machinePress);
+  const plan = [
+    ...planForItem(next, null, stackOpening),
+    ...planForItem(otherSlot, null, stackOpening),
+  ];
+  const row = setRow({
+    id: 'r-swapped', session_id: 's-now', exercise_id: 'machine', set_index: 0, weight_kg: 40, reps: 8,
+    template_item_id: 'slot-bench', logged_at: '2026-09-27T10:00:00.000Z',
+  });
+  const replayed = replaySession(plan, [row], new Map());
+  eq(replayed.logged[0].entry.item.id, 'slot-bench', 'seated in the slot it was done for');
+  eq(replayed.logged[0].templateItemId, 'slot-bench', 'and undo would write the slot on the retraction');
+});
+
+test('a row written before slots existed still resumes by lift', () => {
+  const plan = planForItem(benchSlot, null, barOpening);
+  const row = setRow({ id: 'r-legacy', exercise_id: 'bench', set_index: 1, template_item_id: null });
+  eq(replaySession(plan, [row], new Map()).logged[0].entry.setIndex, 1);
+});
+
+test('which slots were swapped is read off the newest row in each', () => {
+  const rows = [
+    setRow({ id: 'a', exercise_id: 'bench', template_item_id: 'slot-bench', logged_at: '2026-09-27T10:00:00.000Z' }),
+    setRow({ id: 'b', exercise_id: 'machine', template_item_id: 'slot-bench', logged_at: '2026-09-27T10:05:00.000Z' }),
+    setRow({ id: 'c', exercise_id: 'squat', template_item_id: null, logged_at: '2026-09-27T10:06:00.000Z' }),
+  ];
+  const squatSlot = { id: 'slot-squat', exercise_id: 'squat' };
+  eq(swapsFromRows([benchSlot, squatSlot], rows).map((x) => [x.item.id, x.exerciseId]), [['slot-bench', 'machine']],
+    'bench was swapped, and a row naming no slot cannot mark one');
+});
+
+test('lifts swapped in before come newest first, from this slot only, and never the programmed lift', () => {
+  const rows = [
+    setRow({ id: '1', exercise_id: 'machine', template_item_id: 'slot-bench', logged_at: '2026-09-01T10:00:00.000Z' }),
+    setRow({ id: '2', exercise_id: 'dumbbell', template_item_id: 'slot-bench', logged_at: '2026-09-20T10:00:00.000Z' }),
+    setRow({ id: '3', exercise_id: 'bench', template_item_id: 'slot-bench', logged_at: '2026-09-25T10:00:00.000Z' }),
+    setRow({ id: '4', exercise_id: 'cable', template_item_id: 'slot-other', logged_at: '2026-09-26T10:00:00.000Z' }),
+  ];
+  eq(recentSwaps(rows, 'slot-bench', 'bench'), ['dumbbell', 'machine']);
+});
+
+test('the chooser lists swapped before, the way back, then every lift once by name', () => {
+  const library = [
+    { id: 'bench', name: 'Bench Press', trainer_id: null },
+    machinePress,
+    { id: 'db', name: 'Dumbbell Bench Press', trainer_id: null },
+    { id: 'cable-own', name: 'Cable Fly', trainer_id: 'clay' },
+    { id: 'cable-lib', name: 'Cable Fly', trainer_id: null },
+  ];
+  const swapped = swappedItem(benchSlot, machinePress);
+  const groups = swapChoices(library, { current: swapped, recentIds: ['db'] });
+  eq(groups.map((g) => [g.label, g.lifts.map((l) => l.id)]), [
+    ['Swapped before', ['db']],
+    ['In your program', ['bench']],
+    ['Every lift', ['cable-own']],
+  ], 'machine press is in the slot now so it is not offered, and Cable Fly is offered once, the trainer row');
+  eq(swapChoices(library, { current: benchSlot, query: 'press machine' }).flatMap((g) => g.lifts.map((l) => l.id)), ['machine'],
+    'every word typed, in any order');
 });
 
 // ------------------------------------------------------------------ the shared library

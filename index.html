@@ -147,7 +147,30 @@
                reopens it. It sat in the thumb arc between Add set and Undo, which is the busiest
                row on the screen and has no confirmation anywhere in it by design. Here it costs
                one deliberate tap to reach and cannot be caught by a thumb aiming at Undo. -->
+          <!-- Swap sits here for the same reason End session does: it changes what the rest of this
+               lift is, so it is one deliberate tap into the panel and never in the thumb row. -->
+          <button type="button" class="button-secondary" id="swap-open">Swap lift</button>
           <button type="button" class="button-secondary" id="end">End session</button>
+        </div>
+      </section>
+
+      <!-- Choosing a different lift for the slot the client is on. A state of the screen like the
+           panel above, not a layer over it: no focus trap, no z-index, escape to close. The search
+           field is never focused on its own, because this screen does not raise a keyboard nobody
+           asked for; the lifts swapped before are listed first so most swaps need no typing. -->
+      <section class="worknav swapper" id="swapper" hidden aria-labelledby="swap-title">
+        <p class="swapper__title" id="swap-title"></p>
+        <div class="worknav__scroll">
+          <div class="row-card">
+            <div class="liftpick__find">
+              <input type="search" class="liftpick__search" id="swap-search" placeholder="Search every lift"
+                     aria-label="Search every lift" autocomplete="off" autocorrect="off" spellcheck="false" />
+            </div>
+            <div id="swap-list"></div>
+          </div>
+        </div>
+        <div class="worknav__foot">
+          <button type="button" class="button-secondary" id="swap-cancel">Keep this lift</button>
         </div>
       </section>
 

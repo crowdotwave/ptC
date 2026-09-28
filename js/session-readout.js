@@ -84,6 +84,9 @@ function renderLift(lift, weight) {
   return (
     `<div class="readout__lift">` +
     `<p class="readout__liftname">${esc(lift.name)}</p>` +
+    // A swap, said in words under the lift that was done. The trainer programmed the other one, and
+    // a session that quietly shows a lift they never wrote is one they have to go and ask about.
+    (lift.insteadOf ? `<p class="readout__instead">In place of ${esc(lift.insteadOf)}</p>` : '') +
     `<ol class="readout__sets">${lift.sets.map((row, i) => renderSet(row, i, weight)).join('')}</ol>` +
     `</div>`
   );

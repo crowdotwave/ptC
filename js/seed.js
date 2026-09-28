@@ -525,6 +525,7 @@ export async function seed(storage, { force = false } = {}) {
               is_extra: false,
               rounds: null,
               hold_seconds: null,
+              template_item_id: item.id ?? null,
               device_id: deviceId,
             });
             setIndex += 1;
@@ -554,6 +555,7 @@ export async function seed(storage, { force = false } = {}) {
               is_extra: false,
               rounds: null,
               hold_seconds: null,
+              template_item_id: item.id ?? null,
               device_id: deviceId,
             });
           }
@@ -612,6 +614,7 @@ export async function seed(storage, { force = false } = {}) {
           is_extra: false,
           rounds: null,
           hold_seconds: null,
+          template_item_id: original.template_item_id ?? null,
           device_id: deviceId,
         },
         { created_at: iso(new Date(Date.parse(original.created_at) + 90 * 1000)) },

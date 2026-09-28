@@ -15,7 +15,7 @@ import { makeRecord, getDeviceId, isStorageStalled } from './js/storage.js';
 import { boot, gate } from './js/boot.js';
 import './js/press.js';
 import { mountShell } from './js/nav.js';
-import { lastPerformance, bestEstimated1rm, epley1rm } from './js/history.js';
+import { lastPerformance, bestEstimated1rm, epley1rm, activeSetLogs } from './js/history.js';
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
@@ -32,7 +32,8 @@ import { FEELINGS, composeNote, parseNote } from './js/feel.js';
 import { NO_PROGRAM_YET } from './js/program-view.js';
 import { publishSync } from './js/sync-status.js';
 import { trackFill } from './js/track.js';
-import { isPending, overviewRows, renderOverview, positionLine } from './js/workout-view.js';
+import { isPending, overviewRows, renderOverview, positionLine, liftRuns } from './js/workout-view.js';
+import { swappedItem, programmed, swapSlot, swapsFromRows, recentSwaps, swapChoices } from './js/swap.js';
 import {
   unit,
   toDisplay,
@@ -99,6 +100,12 @@ const ui = {
   logLabel: el('log-label'),
   logSub: el('log-sub'),
   emomHost: el('emom-host'),
+  swapOpen: el('swap-open'),
+  swapper: el('swapper'),
+  swapTitle: el('swap-title'),
+  swapSearch: el('swap-search'),
+  swapList: el('swap-list'),
+  swapCancel: el('swap-cancel'),
   rehearseBar: el('rehearse-bar'),
   rehearseWhat: el('rehearse-what'),
 };
@@ -138,6 +145,16 @@ const state = {
   best: new Map(),
   increments: new Map(),
   equipment: new Map(),
+  // Every lift this client can read, their trainer's and the shared library, for the swap chooser.
+  exercises: [],
+  // Session start times by id, the history the plan was prefilled from, kept so a swap prefills the
+  // new lift from the same history rather than from one that includes the session being logged.
+  historyStarts: new Map(),
+  // The swap chooser, open or not, what has been typed into it, and the lifts this slot was swapped
+  // to before. A state of the screen like the overview, never a layer over it.
+  swapping: false,
+  swapQuery: '',
+  swapRecent: [],
   // Placeholder only. Every real value comes from history or from js/prefill.js before the
   // first render, so nothing this file invents ever reaches a stepper.
   weightKg: 0,
@@ -317,6 +334,7 @@ async function buildPlan(storage, day, sessions, { exclude = null } = {}) {
   const sessionStartById = new Map(
     sessions.filter((session) => session.id !== exclude).map((s) => [s.id, s.started_at]),
   );
+  state.historyStarts = sessionStartById;
   const plan = [];
 
   for (const item of sortedItems(day)) {
@@ -325,30 +343,42 @@ async function buildPlan(storage, day, sessions, { exclude = null } = {}) {
     // nothing.
     if (item.is_logged === false) continue;
 
-    const rows = await storage.query('set_logs', { exercise_id: item.exercise_id });
-    const mine = rows.filter((row) => sessionStartById.has(row.session_id));
-    const previous = lastPerformance(mine, sessionStartById);
-
-    state.best.set(item.exercise_id, bestEstimated1rm(mine, sessionStartById));
-
-    // The trainer's starting_weight_kg is the real answer for a lift with no history. When it is
-    // blank, prefill.js falls back to a fact about the equipment rather than a guess about the
-    // person, deliberately light.
-    //
-    // Optional chaining on the snapshot, deliberately. A snapshot is frozen JSON that can be
-    // written by the seed, by the builder, by an importer, or by hand, and one missing nested
-    // field must not take the whole logging screen down to a blank page mid gym. The live
-    // exercises table is the fallback, which is also where increment_kg is read from anyway.
-    const opening = openingWeight({
-      startingWeightKg: item.starting_weight_kg ?? null,
-      equipment: item.exercise?.equipment ?? state.equipment.get(item.exercise_id) ?? null,
-      incrementKg: incrementOf(item, state.increments.get(item.exercise_id)),
-    });
-
+    const { previous, opening } = await historyFor(storage, item, sessionStartById);
     plan.push(...planForItem(item, previous, opening));
   }
 
   return plan;
+}
+
+/**
+ * What one lift's sets are prefilled from: its last session, its opening weight, and its best.
+ *
+ * Split out of buildPlan so a swap reads the new lift exactly the way the plan read the old one. A
+ * swapped lift that prefilled any other way would be the one lift in the day whose numbers came
+ * from somewhere the rest did not.
+ */
+async function historyFor(storage, item, sessionStartById) {
+  const rows = await storage.query('set_logs', { exercise_id: item.exercise_id });
+  const mine = rows.filter((row) => sessionStartById.has(row.session_id));
+  const previous = lastPerformance(mine, sessionStartById);
+
+  state.best.set(item.exercise_id, bestEstimated1rm(mine, sessionStartById));
+
+  // The trainer's starting_weight_kg is the real answer for a lift with no history. When it is
+  // blank, prefill.js falls back to a fact about the equipment rather than a guess about the
+  // person, deliberately light.
+  //
+  // Optional chaining on the snapshot, deliberately. A snapshot is frozen JSON that can be
+  // written by the seed, by the builder, by an importer, or by hand, and one missing nested
+  // field must not take the whole logging screen down to a blank page mid gym. The live
+  // exercises table is the fallback, which is also where increment_kg is read from anyway.
+  const opening = openingWeight({
+    startingWeightKg: item.starting_weight_kg ?? null,
+    equipment: item.exercise?.equipment ?? state.equipment.get(item.exercise_id) ?? null,
+    incrementKg: incrementOf(item, state.increments.get(item.exercise_id)),
+  });
+
+  return { previous, opening };
 }
 
 // ------------------------------------------------------------------ rendering
@@ -397,6 +427,13 @@ function render() {
   // other one is in it.
   paintNotice();
 
+  // Before the overview, because the chooser is opened from inside it and replaces it.
+  ui.swapper.hidden = !state.swapping;
+  if (state.swapping) {
+    renderSwapper();
+    return;
+  }
+
   if (state.overview) {
     renderOverviewPanel();
     return;
@@ -443,9 +480,13 @@ function render() {
   // Built from the trainer's own cells rather than reassembled from numbers, so a target of
   // '50 FT' or '1-2 RIR' reaches the client as written.
   const written = targetLine(entry.item);
+  // A swapped lift says what it stands in for, on the line that says what the slot asks. Said here
+  // rather than once in a notice, because the lift name at the top no longer matches the program,
+  // and anybody glancing at the screen between sets should not have to remember why.
+  const standIn = entry.item.origin ? `In place of ${entry.item.origin.exercise?.name ?? 'the programmed lift'}. ` : '';
   ui.target.textContent = entry.isWarmup
-    ? 'Warmup. Move well, save it for the working sets.'
-    : written || 'No target set.';
+    ? `${standIn}Warmup. Move well, save it for the working sets.`
+    : `${standIn}${written || 'No target set.'}`;
 
   // Three different things this line can truthfully say, and they are not interchangeable. A set
   // the client has a row for at this exact index gets the date. A set made up to the trainer's
@@ -514,6 +555,10 @@ function renderOverviewPanel() {
   // screen saying both. See index.html.
   const rows = overviewRows(state.plan, state.cursor, state.day);
   ui.overviewBody.innerHTML = renderOverview(rows);
+
+  // Swap acts on the lift the client is on, so it is only offered while there is one. A finished
+  // session has nothing left to swap, and a clock-led day has no lift of its own to stand in for.
+  ui.swapOpen.hidden = !currentEntry() || isEmomDay();
 
   // Always offered. It used to leave once a set was logged, because it could only have answered
   // with a refusal at that point, and a control that argues is worse than one that is not there.
@@ -1060,6 +1105,7 @@ function logEmomWindow(minute) {
     supersedes_id: null,
     is_void: false,
     is_extra: minute.extra === true,
+    template_item_id: item.id ?? null,
     device_id: getDeviceId(),
   });
 
@@ -1204,6 +1250,8 @@ function logSet() {
     // Recorded at log time, not inferred later from the snapshot. Whether a set was asked for
     // is a fact about the moment it happened.
     is_extra: entry.isExtra === true,
+    // The slot, which after a swap is not the same fact as the lift. See set_logs in js/schema.js.
+    template_item_id: entry.item.id ?? null,
     device_id: getDeviceId(),
   });
 
@@ -1216,6 +1264,7 @@ function logSet() {
     // after it, and an undo stack holding numbers would then take back somebody else's set.
     entry,
     exerciseId: entry.item.exercise_id,
+    templateItemId: entry.item.id ?? null,
     setIndex: entry.setIndex,
     weightKg: state.weightKg,
     reps: state.reps,
@@ -1312,6 +1361,7 @@ function undoLast() {
     supersedes_id: last.id,
     is_void: true,
     is_extra: last.isExtra === true,
+    template_item_id: last.templateItemId ?? null,
     device_id: getDeviceId(),
   });
 
@@ -1483,6 +1533,138 @@ function addSet() {
 
   render();
   showNotice(`Extra set added to ${entry.item.exercise.name}.`);
+}
+
+// ------------------------------------------------------------------ swapping a lift
+//
+// The bench is taken, so it is machine press today. Logging that under bench press made a heavier
+// machine press into a bench record, a point on the bench chart and next week's bench prefill, all
+// wrong and all plausible. A swap changes the lift in the slot and nothing else. See js/swap.js.
+
+/**
+ * Opens the chooser for the lift the client is on.
+ *
+ * Reads this client's rows for the lifts swapped into this slot before, so the usual answer is at
+ * the top and needs no typing. Read when opened rather than kept, because a swap made on another
+ * day is a row on disk and nowhere else.
+ */
+async function openSwapper() {
+  const entry = currentEntry();
+  if (!entry || isEmomDay()) return;
+  const slot = programmed(entry.item);
+  const rows = await state.storage.query('set_logs', {});
+  state.swapRecent = recentSwaps(rows, slot.id, slot.exercise_id);
+  state.swapQuery = '';
+  ui.swapSearch.value = '';
+  state.swapping = true;
+  exitTypingMode();
+  render();
+  ui.swapList.querySelector('[data-swap]')?.focus();
+}
+
+function closeSwapper({ focus = false } = {}) {
+  if (!state.swapping) return;
+  state.swapping = false;
+  render();
+  if (focus) ui.swapOpen.focus();
+}
+
+function renderSwapper() {
+  const entry = currentEntry();
+  if (!entry) {
+    state.swapping = false;
+    render();
+    return;
+  }
+  ui.done.hidden = true;
+  ui.emomHost.hidden = true;
+  ui.overview.hidden = true;
+  ui.controls.hidden = true;
+  ui.rest.hidden = state.restTotal === 0;
+  ui.target.hidden = true;
+  ui.lastTime.hidden = true;
+  ui.prChip.hidden = true;
+  ui.screen.classList.remove('is-emom');
+  // The same fixed height column the overview uses, so the list scrolls and the page does not.
+  ui.screen.classList.add('is-overview');
+
+  // The lift being swapped is the heading directly above, so this line says what choosing does rather
+  // than naming it a second time. The Keep button names it, because a control says what it keeps.
+  const name = entry.item.exercise?.name ?? 'this lift';
+  ui.swapTitle.textContent = 'Pick what you are doing instead. Its sets count toward its own history and records.';
+  ui.swapCancel.textContent = `Keep ${name}`;
+  renderSwapList();
+}
+
+/** Just the list, so typing redraws the rows and never the field the caret is in. */
+function renderSwapList() {
+  const entry = currentEntry();
+  if (!entry) return;
+  const groups = swapChoices(state.exercises, {
+    current: entry.item,
+    recentIds: state.swapRecent,
+    query: state.swapQuery,
+  });
+  const origin = programmed(entry.item);
+  ui.swapList.innerHTML = groups.length
+    ? groups
+        .map(
+          (group) =>
+            `<p class="row-group">${escapeText(group.label)}</p>` +
+            group.lifts
+              .map(
+                (lift) =>
+                  `<button type="button" class="row" data-swap="${escapeText(lift.id)}">` +
+                  `<span class="row__body${lift.id === origin.exercise_id ? '' : ' is-single'}">` +
+                  `<span class="row__name">${escapeText(lift.name)}</span>` +
+                  (lift.id === origin.exercise_id ? `<span class="row__meta">As programmed</span>` : '') +
+                  `</span></button>`,
+              )
+              .join(''),
+        )
+        .join('')
+    : `<p class="liftpick__none">No lift matches ${escapeText(state.swapQuery)}. Try fewer letters.</p>`;
+}
+
+/**
+ * Puts a different lift in the slot the client is on, for the sets it still owes.
+ *
+ * Sets already logged stay as they were done. The rest are rebuilt from the new lift's own last
+ * session, or its opening weight if it has none, and its own best becomes the bar a record has to
+ * clear. Nothing is written: the first set logged under the new lift is the swap's only trace.
+ */
+async function swapTo(exerciseId) {
+  const entry = currentEntry();
+  if (!entry) return;
+  const origin = programmed(entry.item);
+  const exercise =
+    state.exercises.find((row) => row.id === exerciseId) ??
+    (exerciseId === origin.exercise_id ? { ...origin.exercise, id: origin.exercise_id } : null);
+  if (!exercise) return;
+
+  const next = swappedItem(entry.item, exercise);
+  const run = runOf(entry);
+  const { previous, opening } = await historyFor(state.storage, next, state.historyStarts);
+  const swapped = swapSlot(state.plan, run, next, previous, opening);
+  state.plan = swapped.plan;
+  state.cursor = swapped.cursor;
+
+  const first = currentEntry();
+  if (first) {
+    state.weightKg = first.weightKg;
+    state.reps = first.reps;
+  }
+  // An offer to go back to a set that no longer exists would be a way back to nowhere.
+  if (state.returnTo && !state.plan.includes(state.returnTo)) state.returnTo = null;
+
+  state.swapping = false;
+  state.overview = false;
+  exitTypingMode();
+  ui.prChip.hidden = true;
+  render();
+  // One line, because the band sits above the steppers on a screen that must not scroll, and the
+  // chooser has just said what a swap does to the history. The name is the only new fact.
+  showNotice(next === origin ? `Back to ${exercise.name}.` : `Swapped to ${exercise.name}.`);
 }
 
 /** Closes the session with whatever is in it. A session with two lifts in it is a session. */
@@ -1664,6 +1846,8 @@ async function chooseDay(dayIndex) {
 
   const carried = state.logged.length;
   state.day = picked;
+  // A chooser open for a lift on the day being left would swap a lift that is no longer on screen.
+  state.swapping = false;
   // Before anything else reads the day. Leaving an interval running against the day the client
   // just left would keep appending windows to a session that has moved on.
   setEmomDay(picked);
@@ -1755,6 +1939,27 @@ async function openDayOn(day, sessions, session) {
     return;
   }
 
+  // A slot the client had swapped before the phone locked is swapped again here, before any row is
+  // matched to a seat: the rows logged under the new lift need seats for the new lift to land in.
+  // Sets the slot had already logged as its programmed lift stay as they were, exactly as they did
+  // on the screen, and are read off the rows that say so.
+  for (const { item, exerciseId } of swapsFromRows(liftRuns(state.plan).map((run) => run.item), rows)) {
+    const exercise = state.exercises.find((row) => row.id === exerciseId);
+    // A lift this client can no longer read has nowhere to rebuild from. Its rows still count
+    // everywhere; they are simply not walked back onto this screen, the same as a row for a lift
+    // the program no longer has.
+    if (!exercise) continue;
+    const done = new Set(
+      activeSetLogs(rows)
+        .filter((row) => row.exercise_id === item.exercise_id && (row.template_item_id ?? item.id) === item.id)
+        .map((row) => row.set_index),
+    );
+    const next = swappedItem(item, exercise);
+    const { previous, opening } = await historyFor(state.storage, next, state.historyStarts);
+    const run = state.plan.filter((entry) => entry.item === item);
+    state.plan = swapSlot(state.plan, run, next, previous, opening, (entry) => done.has(entry.setIndex)).plan;
+  }
+
   if (rows.length) {
     const replayed = replaySession(state.plan, rows, state.best);
     state.plan = replayed.plan;
@@ -1804,6 +2009,17 @@ function wire() {
     if (row) jumpTo(Number(row.dataset.jump));
   });
 
+  ui.swapOpen.addEventListener('click', openSwapper);
+  ui.swapCancel.addEventListener('click', () => closeSwapper({ focus: true }));
+  ui.swapSearch.addEventListener('input', () => {
+    state.swapQuery = ui.swapSearch.value;
+    renderSwapList();
+  });
+  ui.swapList.addEventListener('click', (event) => {
+    const row = event.target.closest('[data-swap]');
+    if (row) swapTo(row.dataset.swap);
+  });
+
   ui.returnTo.addEventListener('click', () => {
     const back = state.returnTo;
     if (back) jumpTo(state.plan.indexOf(back));
@@ -1812,6 +2028,10 @@ function wire() {
   // Escape closes the panel, because a mode that can be entered by mistake has to be leavable
   // without hunting. Nothing else on this screen listens for a key, so there is nothing to fight.
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.swapping) {
+      closeSwapper({ focus: true });
+      return;
+    }
     if (event.key === 'Escape' && state.overview) closeOverview({ focus: true });
   });
 
@@ -1965,6 +2185,7 @@ async function main() {
   const exercises = await storage.query('exercises', {});
   state.increments = new Map(exercises.map((row) => [row.id, row.increment_kg]));
   state.equipment = new Map(exercises.map((row) => [row.id, row.equipment]));
+  state.exercises = exercises;
 
   const snapshot = assignment.snapshot;
 

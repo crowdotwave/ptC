@@ -127,26 +127,28 @@ export function replaySession(plan, rows, best = new Map()) {
   );
 
   for (const row of ordered) {
+    // A row that names its slot is matched to that slot, and one that does not falls back to the
+    // lift, which is every row written before a lift could be swapped. The slot is what a swap
+    // needs: a set of machine press done in bench's place belongs to bench's slot, and matching on
+    // the lift alone would seat it in any other slot that happens to program machine press too.
+    const belongs = (candidate) =>
+      candidate.item.exercise_id === row.exercise_id &&
+      (row.template_item_id == null || candidate.item.id === row.template_item_id);
+
     let entry = next.find(
-      (candidate) =>
-        !claimed.has(candidate) &&
-        candidate.item.exercise_id === row.exercise_id &&
-        candidate.setIndex === row.set_index,
+      (candidate) => !claimed.has(candidate) && belongs(candidate) && candidate.setIndex === row.set_index,
     );
 
     if (!entry) {
       // Not in the plan, so it was added with Add set. Put it back where addSet would have put
       // it, after the last set of its own lift, so the plan reads the way it did at the time.
-      const template = next.find((candidate) => candidate.item.exercise_id === row.exercise_id);
+      const template = next.find(belongs);
       // A lift that is not in this day at all. Only reachable if the program changed underneath
       // an open session, and there is nowhere honest to put the row, so it is left out of the
       // walk rather than guessed at. The row itself is untouched and still counts everywhere.
       if (!template) continue;
 
-      const insertAt = next.reduce(
-        (at, candidate, index) => (candidate.item.exercise_id === row.exercise_id ? index + 1 : at),
-        0,
-      );
+      const insertAt = next.reduce((at, candidate, index) => (belongs(candidate) ? index + 1 : at), 0);
 
       entry = {
         item: template.item,
@@ -175,6 +177,7 @@ export function replaySession(plan, rows, best = new Map()) {
       // would take back the wrong set. Identity cannot go stale.
       entry,
       exerciseId: row.exercise_id,
+      templateItemId: row.template_item_id ?? null,
       setIndex: row.set_index,
       weightKg: row.weight_kg,
       reps: countOf(row),
@@ -239,6 +242,7 @@ export function retractionOf(row) {
     supersedes_id: row.id,
     is_void: true,
     is_extra: row.is_extra === true,
+    template_item_id: row.template_item_id ?? null,
     device_id: getDeviceId(),
   });
 }
