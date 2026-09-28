@@ -315,7 +315,8 @@ Every table gets RLS enabled with no permissive default. Policies:
 - Clients have no read access to `clients` other than their own row, and no access to
   `program_templates`, `payments`, or any other client's `sessions` or `set_logs`.
 - Write a test that logs in as client A and attempts to read client B's set_logs. It must
-  return zero rows. This test runs before any release.
+  return zero rows. This test runs before any release. It is `supabase/tests/rls_isolation.sql`,
+  and how it runs is step 3 of Releasing below.
 
 ## The write map
 
@@ -1259,6 +1260,28 @@ the library did not load and asks them to reload.
 8. Export cards.
 
 Do not start step 5 until step 2 has been used by a real person for a real workout.
+
+## Releasing
+
+A release is a merge to `main`, because Pages serves `main` as it stands. Nothing here is optional,
+and the order matters.
+
+1. **Migrations first.** Any new file in `supabase/migrations` is applied to the live project before
+   the code that reads it is merged. The pull selects columns from the local schema, so code that
+   knows a column the server has not got fails every sync for every client until the server does.
+2. **The suite passes.** `test.html` through the preview server, read `window.__testResults`. Clear
+   the service worker caches first, or the page runs yesterday's `test.js` and passes it.
+3. **The isolation test passes against the live project.** Run `supabase/tests/rls_isolation.sql`
+   through the Supabase tool's `execute_sql`, the whole file exactly as it is in the repository, not
+   an excerpt and not a retyped copy. A pass returns one row, `RLS isolation: all checks passed`.
+   Anything else, an error or a missing row, blocks the release, including when the change looks
+   like it has nothing to do with the database: the test is cheap, and it is the only thing that
+   proves one client cannot read another's training. It is safe on live data because it rolls back.
+   Nobody should have to paste it into the SQL editor by hand; that route still works and is what
+   `supabase/README.md` describes for a person.
+4. **Merge,** on a branch named after the work, with `gh pr merge --rebase`.
+5. **Confirm Pages built the merge.** `gh api repos/crowdotwave/ptC/pages/builds/latest` should name
+   the merged commit with status `built`. A merge Pages has not built is not released.
 
 ## Attribution
 
