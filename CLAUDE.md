@@ -290,6 +290,16 @@ payments
   lie than the one it replaced. Assigning from that list carries `deload_weeks` forward exactly as
   the button in the editor does, and only within the same program: week 5 of a block somebody is
   leaving means nothing in the block they are joining.
+- **The shared exercise library is written by a migration and by nothing else.** 783 lifts from
+  free-exercise-db, cardio in and stretches out, as `is_global` rows with no trainer: every account
+  reads them through `exercises_select` and no account can write them, because
+  `exercises_trainer_write` requires a trainer. `supabase/library/build.mjs` is the source of
+  truth, with its renames and additions, and it generates `0019_exercise_library.sql`; ids are a
+  name based uuid of the slug, so the migration can be run again and a lift always lands on the
+  same id. **A trainer's own lift beats the library's of the same name**, in `js/library.js`,
+  because their row carries their clients' history and a chart split across two ids stops showing
+  progress. The isolation test counts private exercises only, since a count of everything now
+  includes the library.
 - **`payments.client_name_text` is denormalized on purpose.** Tax records must survive a
   client being deleted.
 - Money is `amount_cents` as an integer. Never floats.

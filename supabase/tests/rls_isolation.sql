@@ -14,9 +14,11 @@
 --
 -- One rule that keeps it safe once the database is no longer empty: any count taken as the owner
 -- must be scoped to a fixture, because the owner has bypassrls and sees real rows too. Counts
--- taken inside `set local role authenticated` need no such care, since RLS has already narrowed
--- them to the fixture trainer. An unscoped owner count passed on an empty database and started
--- failing the day the first real trainer existed.
+-- taken inside `set local role authenticated` are narrowed to the fixture trainer by RLS, with one
+-- exception: the shared exercise library is readable by every account, so exercise counts are
+-- scoped to private lifts. An unscoped owner count passed on an empty database and started
+-- failing the day the first real trainer existed, and an unscoped exercise count did the same the
+-- day the library arrived.
 --
 -- How to run: paste the whole file into the Supabase SQL editor and execute. A pass prints one
 -- row saying so. A failure raises with the name of the check that broke.
@@ -127,8 +129,16 @@ begin
   select count(*) into n from public.exercises where id = '30000000-0000-4000-8000-000000000003';
   if n <> 0 then raise exception 'ISOLATION FAILURE: client A read another trainer custom exercise'; end if;
 
-  select count(*) into n from public.exercises;
-  if n <> 2 then raise exception 'client A sees % exercises, expected the global one plus their trainer one', n; end if;
+  -- Counted among the private lifts only. The shared library is real data every account can read,
+  -- 783 rows since 0019, so a count of everything stopped meaning anything the day it arrived.
+  -- What isolation promises is about the private ones: their own trainer's and nobody else's.
+  select count(*) into n from public.exercises where not is_global;
+  if n <> 1 then raise exception 'client A sees % private exercises, expected only their trainer one', n; end if;
+
+  -- The library is read by everybody and written by nobody but a migration.
+  update public.exercises set name = 'Hijacked' where id = '30000000-0000-4000-8000-000000000001';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'ISOLATION FAILURE: client A edited the shared exercise library'; end if;
 
   -- ---- trainers. No row access at all, and the auth_user_id column is not even granted.
   select count(*) into n from public.trainers;
@@ -217,8 +227,15 @@ begin
   end;
   if not blocked then raise exception 'trainers.auth_user_id is selectable, the column grant did not apply'; end if;
 
-  select count(*) into n from public.exercises;
-  if n <> 2 then raise exception 'trainer One sees % exercises, expected the global one plus their own', n; end if;
+  -- Private lifts only, for the reason given under client A.
+  select count(*) into n from public.exercises where not is_global;
+  if n <> 1 then raise exception 'trainer One sees % private exercises, expected only their own', n; end if;
+
+  -- A trainer cannot edit the library either, which is why a trainer's own copy of a lift is a new
+  -- row rather than a change to the shared one.
+  update public.exercises set name = 'Hijacked' where id = '30000000-0000-4000-8000-000000000001';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'ISOLATION FAILURE: trainer One edited the shared exercise library'; end if;
 end $$;
 
 reset role;
