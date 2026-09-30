@@ -16,7 +16,18 @@
 // still prescribe effort or nothing, so supplying the actual weight is still the logging
 // screen's job almost every time.
 
-/** '8' -> 8/8, '6-8' -> 6/8, '50 FT' -> null. Text is always kept as typed. */
+// Seconds in the Reps column: '30 SEC', '30-45 SEC'. One pattern, read by parseReps for the numbers
+// and by inferLogging for the mode, because the two used to disagree: the mode matched '30 SEC' and
+// missed '30-45 SEC', and the numbers matched neither, so every hold came through with no goal and
+// the timer opened at its ten second fallback. Minutes are left out on purpose; see inferLogging.
+const HOLD_SECONDS = /^(\d+)(?:\s*-\s*(\d+))?\s*(?:sec|secs|second|seconds)\b/i;
+
+/**
+ * '8' -> 8/8, '6-8' -> 6/8, '30-45 SEC' -> 30/45, '50 FT' -> null. Text is always kept as typed.
+ *
+ * On a hold the count is seconds, which is what target_reps_low and high mean on a time_hold row:
+ * the hold timer's goal and the top of the range it passes.
+ */
 export function parseReps(raw) {
   const text = (raw ?? '').toString().trim();
   // NA is the trainer saying there is nothing here, not a value to show. Passing it through
@@ -34,8 +45,12 @@ export function parseReps(raw) {
   const perSide = text.match(/^(\d+)\s*(?:per|each)\b/i);
   if (perSide) return { low: Number(perSide[1]), high: Number(perSide[1]), text };
 
-  // A distance or a duration: 50 FT, 500M, 10 MINS, 30 SEC, AMRAP. No rep count exists, so none
-  // is invented. 23 of 306 rows land here.
+  // A hold, counted in seconds. 6 rows.
+  const hold = text.match(HOLD_SECONDS);
+  if (hold) return { low: Number(hold[1]), high: Number(hold[2] ?? hold[1]), text };
+
+  // A distance or a cardio duration: 50 FT, 500M, 10 MINS, AMRAP. No rep count exists, so none
+  // is invented.
   return { low: null, high: null, text };
 }
 
@@ -180,10 +195,10 @@ export function inferLogging({ repsText, loadText, adjustText, sets }) {
   const bodyweight = isBodyweightLoad(load) && !implement;
   const text = reps.text ?? '';
 
-  // Seconds in the Reps column is a hold, not a distance: '30 SEC'. 6 rows. Minutes are
-  // deliberately not included, because a Reps cell reading '10 MINS' is a cardio block rather
-  // than something anybody holds.
-  if (/^\d+\s*(sec|secs|second|seconds)\b/i.test(text)) {
+  // Seconds in the Reps column is a hold, not a distance: '30 SEC', '30-45 SEC'. 6 rows. Minutes
+  // are deliberately not included, because a Reps cell reading '10 MINS' is a cardio block rather
+  // than something anybody holds. Checked before the rep count below, which a hold now also has.
+  if (HOLD_SECONDS.test(text)) {
     return { isLogged: true, logMode: 'time_hold', certain: true };
   }
 

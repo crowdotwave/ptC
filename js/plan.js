@@ -180,10 +180,10 @@ export function planForItem(item, previous, opening) {
 
   // No history for this lift, so this runs exactly once per client per exercise.
   //
-  // A hold has no rep target at all, and a carry may not have one either, so the second stepper
-  // needs an opening value that is not null. Ten seconds and one rep are both obviously too little
-  // on purpose, the same bet the opening weight makes: erring low costs a few taps, erring high
-  // costs a failed set.
+  // A hold opens at the bottom of its range in seconds, but one typed without seconds has no goal
+  // at all, and a carry may have no count either, so the second stepper needs an opening value that
+  // is not null. Ten seconds and one rep are both obviously too little on purpose, the same bet the
+  // opening weight makes: erring low costs a few taps, erring high costs a failed set.
   const openingCount = item.target_reps_low ?? (logMode === 'time_hold' ? 10 : 1);
   const entries = [];
 

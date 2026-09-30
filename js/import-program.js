@@ -167,7 +167,9 @@ export function readSheet(rows, sheetName = '') {
       // bodyweight rep count. Structural rather than a guess about wording, and it is a real
       // layout: one workbook's mobility days are two columns, an exercise and a rep count, and
       // without this every one of them would ask a client to put a weight on a stretch.
-      if (columns.load === -1 && logging.isLogged && reps.low !== null) {
+      // A hold carries a count as well, in seconds, and is still a hold: a 30 SEC stretch here is
+      // timed, not counted.
+      if (columns.load === -1 && logging.isLogged && reps.low !== null && logging.logMode !== 'time_hold') {
         // Certain, and structurally so: there is no Load column on this day for anything to be
         // ambiguous about.
         logging = { isLogged: true, logMode: 'bodyweight_reps', certain: true };
