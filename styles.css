@@ -1598,6 +1598,101 @@ button.worknav__row:active {
   box-shadow: none;
 }
 
+/* ---------------------------------------------------------------- the hold timer */
+
+/* The EMOM clock's treatment, and for the same reasons: flat and bordered on the base surface,
+ * because a clock is read and never pressed, and cyan numerals measure 11.79 on the base against
+ * 4.70 on --surface-raised. Time is the data axis, so it is cyan, and it is never green: passing
+ * the goal is said in words on the line above, not by a colour change nobody can see with their
+ * hips in the air.
+ *
+ * The track FILLS rather than drains, the one way it differs from the rest timer, because this
+ * clock counts up. It fills toward the top of the trainer's range, and the mark on it is the goal.
+ * Same js/track.js arithmetic, same clipping container. */
+.iso {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-3) calc(var(--s-3) + var(--rest-track-height));
+  border: 1px solid var(--surface-raised);
+  border-radius: var(--radius);
+  background: var(--surface-base);
+  overflow: hidden;
+  text-align: center;
+}
+
+.iso[hidden] {
+  display: none;
+}
+
+.iso__line {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+/* Weight and wording carry the goal, never hue alone. */
+.iso[data-passed='goal'] .iso__line,
+.iso[data-passed='top'] .iso__line {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.iso__time {
+  display: block;
+  color: var(--accent-data);
+  font-size: var(--t-xl);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The count in reads as a count in, not as a clock at zero. */
+.iso[data-phase='lead'] .iso__time {
+  color: var(--text-primary);
+}
+
+.iso__track {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: var(--rest-track-height);
+  background: var(--surface-raised-shade);
+}
+
+.iso__fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent-data);
+  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.25s linear;
+}
+
+/* The goal on the track: a hairline notch in the text colour, so it reads against both the empty
+ * track and the cyan passing under it. Shape and position, not hue. */
+.iso__mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-primary);
+}
+
+.iso__mark[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iso__fill {
+    transition: none;
+  }
+}
+
 /* ---------------------------------------------------------------- done and errors */
 
 /* The one green in the app.

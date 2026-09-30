@@ -193,6 +193,20 @@
           <button type="button" class="button-secondary" id="undo" disabled>Undo</button>
         </div>
 
+        <!-- The hold timer, on a time_hold lift once Start hold is pressed. It takes the seconds
+             stepper's place rather than sitting above it, because while somebody is holding there
+             is nothing to step, and this screen must never scroll. Flat and bordered on the base
+             surface like the rest timer, since a clock is read and never pressed. It counts up:
+             a hold ends when the body says so, not when a number runs out. See js/iso.js. -->
+        <div class="iso" id="iso" hidden>
+          <p class="iso__line" id="iso-line" aria-live="polite"></p>
+          <span class="iso__time num" id="iso-time" role="timer" aria-live="off">0:00</span>
+          <span class="iso__track" aria-hidden="true">
+            <span class="iso__fill" id="iso-fill"></span>
+            <span class="iso__mark" id="iso-mark" hidden></span>
+          </span>
+        </div>
+
         <div class="stepper" id="stepper-weight">
           <button type="button" class="stepper__btn" id="weight-down" aria-label="Less weight">&minus;</button>
           <div class="stepper__readout">
