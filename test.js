@@ -65,7 +65,7 @@ import {
   emomWithRounds, emomChangeRounds, emomRoundFloor, emomBlockFor, emomShape, EMOM_MAX_ROUNDS,
 } from './js/emom.js';
 import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.js';
-import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine } from './js/iso.js';
+import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine, isoSparks } from './js/iso.js';
 
 const results = [];
 
@@ -5626,7 +5626,7 @@ test('the clock face and the line under it', () => {
   eq(isoLine(isoReading({ startedAt: pressed, now: pressed, ...marks }), marks), 'Get set');
   eq(at(5_000), 'Hold to 30s');
   eq(at(31_000), 'Goal reached. Range tops out at 45s.');
-  eq(at(46_000), 'Top of the range. Stop when you are done.');
+  eq(at(46_000), 'Top of the range reached.');
   eq(isoLine(isoReading({ startedAt: pressed, now: heldFor(1_000), goal: null, top: null }), {}), 'Hold');
 });
 
@@ -5635,6 +5635,27 @@ test('nothing on the hold line says a hold was short', () => {
   for (let ms = 0; ms <= 60_000; ms += 1_000) {
     const line = isoLine(isoReading({ startedAt: pressed, now: heldFor(ms), ...marks }), marks);
     ok(!/short|miss|fail|only/i.test(line), `"${line}" grades the hold`);
+  }
+});
+
+test('the goal burst throws sparks all the way round, inside the clock box', () => {
+  const sparks = isoSparks(16, { rx: 150, ry: 58 });
+  eq(sparks.length, 16);
+  for (const spark of sparks) {
+    ok(Math.abs(spark.dx) <= 150 && Math.abs(spark.dy) <= 58, `spark at ${spark.dx},${spark.dy} leaves the box`);
+    ok(spark.dy !== 0, 'no spark runs along the baseline of the numerals');
+  }
+  // Every quarter of the ring gets its share, so the burst is round rather than lopsided.
+  const quarter = (s) => `${Math.sign(s.dx)}${Math.sign(s.dy)}`;
+  const counts = {};
+  for (const spark of sparks) counts[quarter(spark)] = (counts[quarter(spark)] ?? 0) + 1;
+  eq(Object.values(counts), [4, 4, 4, 4]);
+});
+
+test('a spark flies along its own length', () => {
+  for (const spark of isoSparks(12)) {
+    const heading = (Math.atan2(spark.dy, spark.dx) * 180) / Math.PI;
+    ok(Math.abs(heading - spark.angle) <= 1, `pointing ${spark.angle} while flying ${heading}`);
   }
 });
 

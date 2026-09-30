@@ -1588,14 +1588,18 @@ button.worknav__row:active {
 
 /* ---------------------------------------------------------------- the hold timer */
 
-/* The EMOM clock's treatment, and for the same reasons: flat and bordered on the base surface,
- * because a clock is read and never pressed, and cyan numerals measure 11.79 on the base against
- * 4.70 on --surface-raised. Time is the data axis, so it is cyan, and it is never green: passing
- * the goal is said in words on the line above, not by a colour change nobody can see with their
- * hips in the air.
+/* The EMOM clock's treatment until the goal: flat and bordered on the base surface, because a clock
+ * is read and never pressed, and cyan numerals measure 11.79 on the base against 4.70 on
+ * --surface-raised. Time is the data axis, so a hold that is still climbing is cyan.
+ *
+ * Reaching the goal turns it emerald, and that is the fourth place --done is allowed, argued in
+ * CLAUDE.md under the fence. The claim is the same one the summary card makes: this is done, the
+ * thing asked for has happened. --done measures 11.77 on the base, a hair under the cyan it
+ * replaces, so the numerals lose nothing by changing colour. The words on the line and the burst
+ * still say it too, so colour is never the only signal.
  *
  * The track FILLS rather than drains, the one way it differs from the rest timer, because this
- * clock counts up. It fills toward the top of the trainer's range, and the mark on it is the goal.
+ * clock counts up. It fills toward the top of the trainer's range, and the notch on it is the goal.
  * Same js/track.js arithmetic, same clipping container. */
 .iso {
   position: relative;
@@ -1609,20 +1613,46 @@ button.worknav__row:active {
   background: var(--surface-base);
   overflow: hidden;
   text-align: center;
+  --iso-hue: var(--accent-data);
+  transition:
+    border-color 0.3s ease-out,
+    box-shadow 0.4s ease-out;
 }
 
 .iso[hidden] {
   display: none;
 }
 
+/* Past the goal. The container edge takes the glow, never the numerals: glow on text read mid hold
+ * is the one thing the glow rules forbid outright. Lit along the top like everything else that
+ * matters on this screen. */
+.iso[data-passed='goal'],
+.iso[data-passed='top'] {
+  --iso-hue: var(--done);
+  border-color: color-mix(in srgb, var(--done) 70%, transparent);
+  --glow-tint: color-mix(in srgb, var(--done) var(--glow-strength-rest), transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--done) 55%, transparent),
+    0 0 var(--glow-radius-rest) 0 var(--glow-tint);
+}
+
+.iso[data-passed='top'] {
+  --glow-tint: color-mix(in srgb, var(--done) var(--glow-strength-celebrate), transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--done) 70%, transparent),
+    0 0 var(--glow-radius-celebrate) 2px var(--glow-tint);
+}
+
 .iso__line {
+  position: relative;
+  z-index: 1;
   margin: 0;
   min-height: 1.2em;
   color: var(--text-secondary);
   font-size: var(--t-small);
 }
 
-/* Weight and wording carry the goal, never hue alone. */
+/* Weight and wording carry the goal as well as the hue. */
 .iso[data-passed='goal'] .iso__line,
 .iso[data-passed='top'] .iso__line {
   color: var(--text-primary);
@@ -1630,12 +1660,15 @@ button.worknav__row:active {
 }
 
 .iso__time {
+  position: relative;
+  z-index: 1;
   display: block;
-  color: var(--accent-data);
+  color: var(--iso-hue);
   font-size: var(--t-xl);
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease-out;
 }
 
 /* The count in reads as a count in, not as a clock at zero. */
@@ -1648,20 +1681,24 @@ button.worknav__row:active {
   inset: auto 0 0 0;
   height: var(--rest-track-height);
   background: var(--surface-raised-shade);
+  overflow: hidden;
 }
 
 .iso__fill {
   display: block;
   height: 100%;
   width: 100%;
-  background: var(--accent-data);
-  --glow-tint: color-mix(in srgb, var(--accent-data) var(--glow-strength-rest), transparent);
+  background: var(--iso-hue);
+  --glow-tint: color-mix(in srgb, var(--iso-hue) var(--glow-strength-rest), transparent);
+  box-shadow: 0 0 var(--glow-radius-rest) 0 var(--glow-tint);
   transform: translateX(-100%);
-  transition: transform 0.25s linear;
+  transition:
+    transform 0.25s linear,
+    background-color 0.3s ease-out;
 }
 
 /* The goal on the track: a hairline notch in the text colour, so it reads against both the empty
- * track and the cyan passing under it. Shape and position, not hue. */
+ * track and whatever colour is passing under it. Shape and position, not hue. */
 .iso__mark {
   position: absolute;
   top: 0;
@@ -1675,9 +1712,204 @@ button.worknav__row:active {
   display: none;
 }
 
+/* ------------------------------------------------ the goal burst
+ *
+ * One shot, about seven tenths of a second, fired by app.js setting data-burst the instant a mark
+ * is passed. Everything here sits BEHIND the numerals (they are z-index 1) and is gone before the
+ * eye comes back to read them, so it celebrates the moment without costing the number any
+ * contrast after it. The top of the range fires the same burst, bigger.
+ *
+ *   the numerals   spring up and settle, so the number itself is what jumps
+ *   two waves      rings expanding out of the clock
+ *   the sparks     short emerald streaks thrown outward, placed by isoSparks in js/iso.js
+ *   the sweep      a band of light run along the track, left to right
+ *   the notch      flares where the goal sits
+ */
+.iso__burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.iso__wave {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  width: 7rem;
+  height: 7rem;
+  margin: -3.5rem 0 0 -3.5rem;
+  border: 2px solid var(--done);
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.iso__spark {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  width: 1.1rem;
+  height: 3px;
+  margin: -1.5px 0 0 -0.55rem;
+  border-radius: 2px;
+  background: var(--done);
+  opacity: 0;
+  transform: translate(0, 0) rotate(var(--r)) scaleX(0.4);
+}
+
+.iso__track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-primary) 85%, transparent),
+    transparent
+  );
+  transform: translateX(-120%);
+  opacity: 0;
+}
+
+.iso[data-burst] .iso__time {
+  animation: iso-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.iso[data-burst] .iso__wave {
+  animation: iso-wave 0.75s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.iso[data-burst] .iso__wave + .iso__wave {
+  animation-delay: 0.12s;
+}
+
+.iso[data-burst] .iso__spark {
+  animation: iso-spark 0.7s cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
+  animation-delay: var(--d);
+}
+
+.iso[data-burst] .iso__track::after {
+  animation: iso-sweep 0.8s ease-out forwards;
+}
+
+.iso[data-burst] .iso__mark {
+  animation: iso-notch 0.7s ease-out;
+}
+
+/* The top of the range is the bigger moment, so everything throws further and the waves run wider. */
+.iso[data-burst='top'] .iso__wave {
+  animation-name: iso-wave-big;
+  animation-duration: 0.9s;
+}
+
+.iso[data-burst='top'] .iso__spark {
+  animation-name: iso-spark-big;
+  animation-duration: 0.85s;
+}
+
+@keyframes iso-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.16);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes iso-wave {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes iso-wave-big {
+  0% {
+    transform: scale(0.35);
+    opacity: 1;
+    border-width: 3px;
+  }
+  100% {
+    transform: scale(4);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
+@keyframes iso-spark {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(var(--r)) scaleX(0.4);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scaleX(1);
+  }
+}
+
+@keyframes iso-spark-big {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(var(--r)) scaleX(0.5);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--dx) * 1.45), calc(var(--dy) * 1.35)) rotate(var(--r)) scaleX(1.4);
+  }
+}
+
+@keyframes iso-sweep {
+  0% {
+    transform: translateX(-120%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(260%);
+    opacity: 0.6;
+  }
+}
+
+@keyframes iso-notch {
+  0%,
+  100% {
+    transform: scaleX(1);
+    box-shadow: none;
+  }
+  30% {
+    transform: scaleX(2.5);
+    box-shadow: 0 0 12px 2px color-mix(in srgb, var(--done) 80%, transparent);
+  }
+}
+
+/* A burst is motion, so reduced motion drops all of it. The colour change and the glow on the edge
+ * stay, because a glow is light rather than motion: the same terms the record celebration keeps. */
 @media (prefers-reduced-motion: reduce) {
-  .iso__fill {
+  .iso,
+  .iso__fill,
+  .iso__time {
     transition: none;
+  }
+
+  .iso[data-burst] .iso__time,
+  .iso[data-burst] .iso__wave,
+  .iso[data-burst] .iso__spark,
+  .iso[data-burst] .iso__track::after,
+  .iso[data-burst] .iso__mark {
+    animation: none;
   }
 }
 

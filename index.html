@@ -176,6 +176,13 @@
              surface like the rest timer, since a clock is read and never pressed. It counts up:
              a hold ends when the body says so, not when a number runs out. See js/iso.js. -->
         <div class="iso" id="iso" hidden>
+          <!-- The goal burst. Behind the numerals and gone in under a second, so the moment is
+               marked without the number ever being harder to read. The sparks are placed by
+               isoSparks in js/iso.js when the screen wires up. -->
+          <span class="iso__burst" id="iso-burst" aria-hidden="true">
+            <span class="iso__wave"></span>
+            <span class="iso__wave"></span>
+          </span>
           <p class="iso__line" id="iso-line" aria-live="polite"></p>
           <span class="iso__time num" id="iso-time" role="timer" aria-live="off">0:00</span>
           <span class="iso__track" aria-hidden="true">

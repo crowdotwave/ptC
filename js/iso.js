@@ -16,6 +16,9 @@
 //             telling them to stop early. The goal and the top of the trainer's range are marks
 //             the clock passes, not ends it reaches
 //
+// Passing the goal is a moment rather than a line of text: the clock turns emerald and bursts. See
+// isoSparks below and the burst in styles.css.
+//
 // Stopping is logging. One tap ends the hold and writes the seconds actually held, and the rest
 // timer starts behind it the way it does after any other set. A hold that should not count is
 // undo, the same as any other set, so there is no cancel control and no confirmation.
@@ -88,6 +91,35 @@ export function isoSeconds(heldMs) {
   return Math.max(1, Math.floor(Math.max(0, heldMs) / 1000));
 }
 
+/**
+ * Where the sparks of the goal burst fly, as offsets in pixels from the centre of the clock.
+ *
+ * On an ellipse rather than a circle, because the clock box is about three times wider than it is
+ * tall and clips what leaves it: a circle wide enough to read across the box flies straight out of
+ * the top and bottom and is gone before it is seen. The ring is turned by half a step so no spark
+ * runs exactly along the numerals' baseline, and the delays stagger by position round the ring so
+ * the burst reads as spinning out rather than as one flat pop.
+ *
+ *   dx, dy   where the spark ends up, relative to where it starts
+ *   angle    degrees, which way the streak points, so it flies along its own length
+ *   delay    milliseconds before it leaves
+ */
+export function isoSparks(count = 16, { rx = 150, ry = 58 } = {}) {
+  const sparks = [];
+  for (let i = 0; i < count; i += 1) {
+    const theta = ((i + 0.5) / count) * Math.PI * 2;
+    const dx = Math.cos(theta) * rx;
+    const dy = Math.sin(theta) * ry;
+    sparks.push({
+      dx: Math.round(dx),
+      dy: Math.round(dy),
+      angle: Math.round((Math.atan2(dy, dx) * 180) / Math.PI),
+      delay: (i % 4) * 25,
+    });
+  }
+  return sparks;
+}
+
 /** The clock face. 0:07, 0:45, 1:12. */
 export function isoClock(seconds) {
   const whole = Math.max(0, Math.floor(seconds));
@@ -103,7 +135,7 @@ export function isoClock(seconds) {
  */
 export function isoLine(reading, { goal = null, top = null } = {}) {
   if (reading.phase === 'lead') return 'Get set';
-  if (reading.passed === 'top') return 'Top of the range. Stop when you are done.';
+  if (reading.passed === 'top') return 'Top of the range reached.';
   if (reading.passed === 'goal') return top !== null ? `Goal reached. Range tops out at ${top}s.` : 'Goal reached.';
   return goal !== null ? `Hold to ${goal}s` : 'Hold';
 }

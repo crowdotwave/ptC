@@ -375,8 +375,12 @@ Requirements:
   other count. The press gives three seconds to get into position, then the clock counts UP, never
   down: a hold ends when the body says so, and a countdown hitting zero mid hold would be the app
   telling somebody to let go early. The goal and the top of the trainer's range are marks the clock
-  passes, said in words on the line above it and by a vibration pattern where the phone has one,
-  never by a green. The same button is then Stop and log, so ending the hold is writing it, and a
+  passes, said in words on the line above it, by a vibration pattern where the phone has one, and
+  by the one moment of motion on this screen besides the record: the numerals spring, two rings
+  and a ring of sparks burst out behind them, light runs along the track, and the clock turns
+  `--done` emerald and stays that way. Bigger again at the top of the range. All of it sits behind
+  the numerals and is gone in under a second, so the number is never harder to read than it was,
+  and reduced motion keeps the colour and the edge glow and drops the movement. The same button is then Stop and log, so ending the hold is writing it, and a
   hold that should not count is Undo like any other set. The goal is what carries to the next set,
   not the time just held, which is the adjustment rule below applied to a stepper that now means a
   target. The screen holds a wake lock for the length of the hold, because phones lock after thirty
@@ -673,6 +677,13 @@ Constraints:
   that ended empty is not a success and keeps the neutral card. Before adding a fifth hue, check
   what it will sit next to and measure it, which is the step that was skipped when the ground
   went teal.
+- **The fourth place is a hold that has reached its goal.** The hold timer's numerals, track and
+  edge turn `--done` the moment the goal is passed, with a one shot burst. That is the same claim
+  the summary card makes, the thing asked for has happened, arriving on the one timer that has a
+  goal to reach, and it was asked for by the person training on it. What it is NOT: the rest timer,
+  the EMOM clock, or a hold still climbing, which all stay cyan. `--done` and `--accent-data`
+  measure identical in luminance, so the numerals change colour without losing any contrast, and
+  the words on the line and the burst say it too, so colour is never the only signal.
 - **That fence is a claim, not a token count, and it now covers three places.** The emerald also
   faces slot 2 of the consistency grid, because a filled cell there IS a finished session: same
   claim, drawn as a calendar square rather than as a card. The third is the feelings row inside
