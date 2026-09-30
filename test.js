@@ -69,6 +69,7 @@ import { mountEmomView, drawEmom, readyEmom, emomSummary } from './js/emom-view.
 import { windowCues, cueKey, createCountdown, COUNT_IN_SECONDS } from './js/countdown.js';
 import { libraryOrder, findByName, suggestionNames } from './js/library.js';
 import { swappedItem, programmed, swapSlot, swapsFromRows, recentSwaps, swapChoices, standInFor } from './js/swap.js';
+import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine } from './js/iso.js';
 
 const results = [];
 
@@ -5990,6 +5991,91 @@ test('a real answer about the data is not retried', async () => {
   eq(error?.name, 'ConstraintError');
   ok(!isStorageStalled(error), 'and is not dressed up as a stall');
   eq(opened, 0, 'a refusal would only be refused again on a new connection');
+});
+
+// ------------------------------------------------------------------ the hold timer
+
+// A coach asking for 30 to 45 second glute bridge holds, which is what this clock was built for.
+const bridge = { target_reps_low: 30, target_reps_high: 45 };
+const pressed = 1_000_000;
+const heldFor = (ms) => pressed + ISO_LEAD_MS + ms;
+
+test('a hold counts in before it counts, and the count in is 3 2 1', () => {
+  const marks = isoMarks(bridge, 30);
+  const read = (now) => isoReading({ startedAt: pressed, now, ...marks });
+  eq(read(pressed).phase, 'lead');
+  eq(read(pressed).leadLeft, 3);
+  eq(read(pressed + 1500).leadLeft, 2);
+  eq(read(pressed + 2999).leadLeft, 1);
+  eq(read(pressed + 2999).seconds, 0, 'nothing is held while getting set');
+  eq(read(heldFor(0)).phase, 'holding');
+  eq(read(heldFor(0)).seconds, 0);
+});
+
+test('a hold counts up and passes the goal and then the top of the range', () => {
+  const marks = isoMarks(bridge, 30);
+  eq(marks, { goal: 30, top: 45 });
+  const read = (ms) => isoReading({ startedAt: pressed, now: heldFor(ms), ...marks });
+  eq(read(29_999).seconds, 29);
+  eq(read(29_999).passed, 'none');
+  eq(read(30_000).passed, 'goal');
+  eq(read(44_999).passed, 'goal');
+  eq(read(45_000).passed, 'top');
+  eq(read(90_000).seconds, 90, 'it keeps counting past the range: the body ends a hold, not the clock');
+});
+
+test('the track fills toward the top of the range and stops full', () => {
+  const marks = isoMarks(bridge, 30);
+  const fill = (ms) => isoReading({ startedAt: pressed, now: heldFor(ms), ...marks }).fill;
+  eq(fill(0), 0);
+  eq(Math.round(fill(22_500)), 50);
+  eq(fill(45_000), 100);
+  eq(fill(60_000), 100, 'past the last mark there is nothing to measure against');
+});
+
+test('a ceiling at or below the goal is not a mark', () => {
+  eq(isoMarks(bridge, 45), { goal: 45, top: null }, 'last time already hit the top');
+  eq(isoMarks(bridge, 50), { goal: 50, top: null });
+  eq(isoMarks({ target_reps_low: null, target_reps_high: null }, 10), { goal: 10, top: null },
+     'a max hold with no range has only the goal');
+  const read = isoReading({ startedAt: pressed, now: heldFor(10_000), goal: 20, top: null });
+  eq(read.fill, 50, 'with no ceiling the track fills to the goal');
+});
+
+test('a throttled tab reads the same hold as one ticked every frame', () => {
+  const marks = isoMarks(bridge, 30);
+  // One call after twenty silent seconds, against the same moment reached a quarter second at a time.
+  const once = isoReading({ startedAt: pressed, now: heldFor(20_000), ...marks });
+  let every;
+  for (let t = pressed; t <= heldFor(20_000); t += 250) every = isoReading({ startedAt: pressed, now: t, ...marks });
+  eq(once, every);
+});
+
+test('the seconds written are the seconds on the clock, and never zero', () => {
+  eq(isoSeconds(37_900), 37, 'rounded down, because 0:37 is what was on screen');
+  eq(isoSeconds(400), 1, 'hold_seconds is checked above zero, and undo is how a hold is unsaid');
+  eq(isoSeconds(-5), 1);
+});
+
+test('the clock face and the line under it', () => {
+  eq(isoClock(7), '0:07');
+  eq(isoClock(45), '0:45');
+  eq(isoClock(72), '1:12');
+  const marks = { goal: 30, top: 45 };
+  const at = (ms) => isoLine(isoReading({ startedAt: pressed, now: heldFor(ms), ...marks }), marks);
+  eq(isoLine(isoReading({ startedAt: pressed, now: pressed, ...marks }), marks), 'Get set');
+  eq(at(5_000), 'Hold to 30s');
+  eq(at(31_000), 'Goal reached. Range tops out at 45s.');
+  eq(at(46_000), 'Top of the range. Stop when you are done.');
+  eq(isoLine(isoReading({ startedAt: pressed, now: heldFor(1_000), goal: null, top: null }), {}), 'Hold');
+});
+
+test('nothing on the hold line says a hold was short', () => {
+  const marks = { goal: 30, top: 45 };
+  for (let ms = 0; ms <= 60_000; ms += 1_000) {
+    const line = isoLine(isoReading({ startedAt: pressed, now: heldFor(ms), ...marks }), marks);
+    ok(!/short|miss|fail|only/i.test(line), `"${line}" grades the hold`);
+  }
 });
 
 // ------------------------------------------------------------------ report
