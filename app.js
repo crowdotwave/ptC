@@ -35,7 +35,7 @@ import { publishSync } from './js/sync-status.js';
 import { trackFill } from './js/track.js';
 import { isPending, overviewRows, renderOverview, positionLine, liftRuns } from './js/workout-view.js';
 import { swappedItem, programmed, swapSlot, swapsFromRows, recentSwaps, swapChoices } from './js/swap.js';
-import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine } from './js/iso.js';
+import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine, isoSparks } from './js/iso.js';
 import {
   unit,
   toDisplay,
@@ -106,6 +106,7 @@ const ui = {
   isoTime: el('iso-time'),
   isoFill: el('iso-fill'),
   isoMark: el('iso-mark'),
+  isoBurst: el('iso-burst'),
   emomHost: el('emom-host'),
   swapOpen: el('swap-open'),
   swapper: el('swapper'),
@@ -1021,6 +1022,31 @@ function startHold() {
   tickHold();
 }
 
+/**
+ * The goal burst: numerals pop, rings and sparks fly, light runs along the track. All of it is
+ * CSS keyed off data-burst, so this only has to restart it. Removing the attribute and reading a
+ * layout property in between is what makes the second burst, at the top of the range, play again
+ * rather than being seen as the same animation already finished.
+ */
+function burstHold(kind) {
+  delete ui.iso.dataset.burst;
+  void ui.iso.offsetWidth;
+  ui.iso.dataset.burst = kind;
+}
+
+/** Places the sparks once. Their geometry is js/iso.js isoSparks, so it can be asserted. */
+function mountHoldBurst() {
+  for (const spark of isoSparks()) {
+    const streak = document.createElement('span');
+    streak.className = 'iso__spark';
+    streak.style.setProperty('--dx', `${spark.dx}px`);
+    streak.style.setProperty('--dy', `${spark.dy}px`);
+    streak.style.setProperty('--r', `${spark.angle}deg`);
+    streak.style.setProperty('--d', `${spark.delay}ms`);
+    ui.isoBurst.append(streak);
+  }
+}
+
 /** Tears the hold down without writing anything. Used by cancel and by stop, which then logs. */
 function clearHold() {
   if (!state.iso) return;
@@ -1028,6 +1054,10 @@ function clearHold() {
   state.iso.wake?.release?.().catch?.(() => {});
   state.iso = null;
   ui.iso.hidden = true;
+  // A fresh hold starts cyan and quiet. Left behind, the last burst's attribute would replay the
+  // pop the moment the clock was shown again.
+  delete ui.iso.dataset.burst;
+  delete ui.iso.dataset.passed;
 }
 
 function cancelHold() {
@@ -1059,6 +1089,7 @@ function tickHold() {
   }
   if (reading.passed !== state.iso.passed) {
     state.iso.passed = reading.passed;
+    if (reading.passed !== 'none') burstHold(reading.passed);
     // Two short for the goal, one long for the top of the range. A pattern rather than a
     // strength, because strength is the one thing a phone on a gym floor cannot be relied on for.
     buzz(reading.passed === 'top' ? 400 : [120, 80, 120]);
@@ -2211,6 +2242,7 @@ function wire() {
   bindHold(ui.repsUp, () => adjustReps(1));
   bindHold(ui.repsDown, () => adjustReps(-1));
   ui.log.addEventListener('click', onLogPress);
+  mountHoldBurst();
 
   // A wake lock is dropped by the browser whenever the page is hidden, so a hold that survives a
   // glance at another app has to ask again. The clock itself needs nothing: it reads the wall.
