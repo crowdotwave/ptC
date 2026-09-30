@@ -13,7 +13,7 @@ import { openingWeight, openingCopy, EMPTY_BARBELL_KG } from './js/prefill.js';
 import { buildProgression, evidenceLevel, weekIndexOf, MAX_LOAD_LINES, suggestDeloadWeeks } from './js/progression.js';
 import {
   parseReps, parseRest, parseLoad, parseSets, parseGroup, inferLogging, targetLine,
-  isBodyweightLoad, prescribesLoad,
+  isBodyweightLoad, prescribesLoad, rowToItem,
 } from './js/program.js';
 import {
   buildSnapshot, pickDay, sortedDays, sortedItems, dayTitle, currentAssignment, sameSnapshot,
@@ -767,6 +767,18 @@ test('a plain rep count and a rep range both parse', () => {
   eq(parseReps('8'), { low: 8, high: 8, text: '8' });
   eq(parseReps('6-8'), { low: 6, high: 8, text: '6-8' });
   eq(parseReps('12-15'), { low: 12, high: 15, text: '12-15' });
+});
+
+// A hold is counted in seconds, and on a time_hold row target_reps_low and high are the hold
+// timer's goal and the top of its range. These came through null, so every imported hold opened
+// the timer at its ten second fallback with no range to pass.
+test('seconds in the reps cell count a hold in seconds', () => {
+  eq(parseReps('30 SEC'), { low: 30, high: 30, text: '30 SEC' });
+  eq(parseReps('30-45 SEC'), { low: 30, high: 45, text: '30-45 SEC' });
+  eq(parseReps('30 - 45 SECONDS'), { low: 30, high: 45, text: '30 - 45 SECONDS' });
+  eq(parseReps('45 secs').low, 45, 'case and plural do not matter');
+  eq(parseReps('10 MINS').low, null, 'minutes are a cardio block, not a hold');
+  eq(parseReps('500M').low, null, 'and a distance is still not a count');
 });
 
 // 16 of 61 rows. A distance or a duration has no rep count, and none is invented for it.
@@ -3025,6 +3037,29 @@ test('seconds in the reps column is a hold, minutes are not', () => {
      { isLogged: false, logMode: 'weight_reps', certain: true }, 'a ten minute block is not a hold');
 });
 
+// '30-45 SEC' is how a coach writes a hold with room in it, and the seconds rule used to match a
+// single number only, so a range read as a distance with no load and was not logged at all.
+test('a seconds range is a hold, and its numbers reach the row and the timer', () => {
+  eq(inferLogging({ repsText: '30-45 SEC', loadText: '', sets: 3 }),
+     { isLogged: true, logMode: 'time_hold', certain: true });
+  eq(inferLogging({ repsText: '30-45 SEC', loadText: 'BW', sets: 3 }),
+     { isLogged: true, logMode: 'time_hold', certain: true }, 'a hold, not bodyweight reps of 30');
+
+  const item = rowToItem({
+    number: '5', exercise: 'GLUTE BRIDGE HOLD', adjust: 'BODYWEIGHT', sets: '3', reps: '30-45 SEC', load: '', rest: '60 SEC',
+  });
+  eq([item.log_mode, item.target_reps_low, item.target_reps_high, item.target_reps_text],
+     ['time_hold', 30, 45, '30-45 SEC']);
+  eq(planForItem(item, null, holdOpening)[0].reps, 30, 'the goal opens at the bottom of the range, not at 10');
+  eq(isoMarks(item, 30), { goal: 30, top: 45 }, 'and the clock has the top of the range to pass');
+
+  // A distance and a cardio duration are read exactly as they were.
+  eq(inferLogging({ repsText: '500M', loadText: '', sets: 3 }),
+     { isLogged: false, logMode: 'weight_reps', certain: true });
+  eq(inferLogging({ repsText: '10 MINS', loadText: '', sets: null }),
+     { isLogged: false, logMode: 'weight_reps', certain: true });
+});
+
 // 9 rows. A Load cell naming the body is a bodyweight lift, which now has its own mode rather
 // than being a weighted lift that happens to weigh nothing.
 test('a load naming the body makes it a bodyweight lift', () => {
@@ -3167,6 +3202,22 @@ test('a table with no load column logs bodyweight reps', () => {
   eq(first.targetRepsLow, 3, 'a per side count is still a count');
   eq(first.restSeconds, null, 'nothing was read as a rest, because there is no rest column');
   eq(out.warnings, [], 'and nothing was dropped, so nothing is warned about');
+});
+
+// A hold now carries a count, in seconds, and the rule above turns any count on a day with no Load
+// column into bodyweight reps. A timed stretch on a mobility day is still timed.
+test('a hold on a table with no load column stays a hold', () => {
+  const rows = [];
+  const day = new Array(17).fill(''); day[0] = 'DAY 3'; day[2] = 'MOBILITY'; day[9] = 'HIP FOCUSED';
+  rows.push(day);
+  const header = new Array(17).fill(''); header[0] = '#'; header[1] = 'WORKING SETS'; header[16] = 'REPS';
+  rows.push(header);
+  const item = new Array(17).fill(''); item[0] = '1'; item[1] = 'COUCH STRETCH'; item[16] = '30-45 SEC';
+  rows.push(item);
+
+  const first = readSheet(rows, 'Sheet2').days[0].items[0];
+  eq(first.logMode, 'time_hold');
+  eq([first.targetRepsLow, first.targetRepsHigh], [30, 45]);
 });
 
 // Three days that are all FULL BODY, separated only by their type. Three identical entries in

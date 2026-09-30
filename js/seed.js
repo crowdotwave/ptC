@@ -16,7 +16,7 @@ import { buildSnapshot } from './snapshot.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 9;
+const SEED_VERSION = 10;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -108,25 +108,10 @@ const DAY_TWO = [
   ['2', 'romanian-deadlift', 'DUMBELL', '3', '6-10', '1-2 RIR', '150 SEC', 'Stop when the hamstrings run out, not when the bar hits the floor.'],
   ['3', 'leg-press', 'MACHINE', '3', '10-15', '1 RIR', '120 SEC', 'Slow on the way down, three seconds.'],
   ['4', 'face-pull', 'CABLE', '3', '12-15', '1 RIR', '60 SEC', 'Light. This is for the shoulders staying healthy.'],
+  // A timed hold, closing the lower day, so ?local=1 can run the hold timer rather than only a
+  // stepper. No load, so the Load cell is blank, and the seconds range is the timer's goal and top.
+  ['5', 'glute-bridge-hold', 'BODYWEIGHT', '3', '30-45 SEC', '', '60 SEC', 'Push through the glutes, get the hips up high and hold it there.'],
 ];
-
-// A timed hold, closing the lower day, so ?local=1 can run the hold timer rather than only a stepper.
-//
-// Written the way the builder writes a row, not as sheet cells, and that is the one place the seed
-// steps off the importer's path on purpose. A '30-45 SEC' cell reads as a hold with no goal at all:
-// parseReps finds no number it recognises, target_reps_low stays null, and the timer opens at the
-// ten second fallback with no top of the range to pass. The builder sets both, and so does every
-// hold on a real program, so this is the row a client actually meets.
-const LOWER_HOLD = {
-  slug: 'glute-bridge-hold',
-  variation: 'BODYWEIGHT',
-  sets: 3,
-  low: 30,
-  high: 45,
-  text: '30-45 sec',
-  rest: 60,
-  notes: 'Push through the glutes, get the hips up high and hold it there.',
-};
 
 // The clock-led day. Four stations, four rounds, sixteen minutes, which is short enough to sit
 // through at 1x while checking it and long enough to cross a round boundary several times.
@@ -465,30 +450,6 @@ export async function seed(storage, { force = false } = {}) {
     });
   });
 
-  trainerItems.push(
-    makeRecord(
-      'template_items',
-      {
-        day_id: trainerDays[1].id,
-        exercise_id: bySlug[LOWER_HOLD.slug].id,
-        order_index: DAY_TWO.length,
-        group_label: String(DAY_TWO.length + 1),
-        variation: LOWER_HOLD.variation,
-        target_sets: LOWER_HOLD.sets,
-        target_reps_low: LOWER_HOLD.low,
-        target_reps_high: LOWER_HOLD.high,
-        target_reps_text: LOWER_HOLD.text,
-        target_load: null,
-        target_rpe: null,
-        rest_seconds: LOWER_HOLD.rest,
-        notes: LOWER_HOLD.notes,
-        starting_weight_kg: null,
-        is_logged: true,
-        log_mode: 'time_hold',
-      },
-      { created_at: seededAt },
-    ),
-  );
   items.push(...trainerItems);
 
   // The snapshot freezes the program as assigned. Editing the template later must not rewrite
