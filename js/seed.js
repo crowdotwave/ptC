@@ -2,7 +2,7 @@
 // no backend. Everything here is invented. Nothing in this file ships to a real trainer.
 //
 // It produces one trainer, three clients, a shared exercise library, one program template
-// with three days, one of them clock led, an assignment per client with a frozen snapshot, and
+// with three days, one of them clock led and one closing on a timed hold, an assignment per client with a frozen snapshot, and
 // eight weeks of session
 // and set_log history with enough shape that a progression chart has something to draw.
 //
@@ -16,7 +16,7 @@ import { buildSnapshot } from './snapshot.js';
 
 // Bump when the shape of the generated data changes, so devices holding the old fixture
 // replace it instead of stacking a second one on top.
-const SEED_VERSION = 8;
+const SEED_VERSION = 9;
 const SEED_META_KEY = 'seed';
 const WEEKS = 8;
 const SESSIONS_PER_WEEK = 2;
@@ -88,6 +88,9 @@ const EXERCISE_LIBRARY = [
   ['Leg Press', 'leg-press', 'quadriceps', 'machine', 130, 10, false],
   ['Face Pull', 'face-pull', 'rear delts', 'cable', 20, 2.5, false],
   ['Walking Lunge', 'walking-lunge', 'glutes', 'dumbbell', 16, 2, false],
+  // No load and no reps, only seconds. The working weight is zero because there is nothing in the
+  // hands, and the history below writes hold_seconds for it instead of anything prescribe() says.
+  ['Glute Bridge Hold', 'glute-bridge-hold', 'glutes', 'bodyweight', 0, 2.5, false],
 ];
 
 // Written the way the trainer writes it, as spreadsheet cells, so the seed exercises the same
@@ -106,6 +109,24 @@ const DAY_TWO = [
   ['3', 'leg-press', 'MACHINE', '3', '10-15', '1 RIR', '120 SEC', 'Slow on the way down, three seconds.'],
   ['4', 'face-pull', 'CABLE', '3', '12-15', '1 RIR', '60 SEC', 'Light. This is for the shoulders staying healthy.'],
 ];
+
+// A timed hold, closing the lower day, so ?local=1 can run the hold timer rather than only a stepper.
+//
+// Written the way the builder writes a row, not as sheet cells, and that is the one place the seed
+// steps off the importer's path on purpose. A '30-45 SEC' cell reads as a hold with no goal at all:
+// parseReps finds no number it recognises, target_reps_low stays null, and the timer opens at the
+// ten second fallback with no top of the range to pass. The builder sets both, and so does every
+// hold on a real program, so this is the row a client actually meets.
+const LOWER_HOLD = {
+  slug: 'glute-bridge-hold',
+  variation: 'BODYWEIGHT',
+  sets: 3,
+  low: 30,
+  high: 45,
+  text: '30-45 sec',
+  rest: 60,
+  notes: 'Push through the glutes, get the hips up high and hold it there.',
+};
 
 // The clock-led day. Four stations, four rounds, sixteen minutes, which is short enough to sit
 // through at 1x while checking it and long enough to cross a round boundary several times.
@@ -443,6 +464,31 @@ export async function seed(storage, { force = false } = {}) {
       );
     });
   });
+
+  trainerItems.push(
+    makeRecord(
+      'template_items',
+      {
+        day_id: trainerDays[1].id,
+        exercise_id: bySlug[LOWER_HOLD.slug].id,
+        order_index: DAY_TWO.length,
+        group_label: String(DAY_TWO.length + 1),
+        variation: LOWER_HOLD.variation,
+        target_sets: LOWER_HOLD.sets,
+        target_reps_low: LOWER_HOLD.low,
+        target_reps_high: LOWER_HOLD.high,
+        target_reps_text: LOWER_HOLD.text,
+        target_load: null,
+        target_rpe: null,
+        rest_seconds: LOWER_HOLD.rest,
+        notes: LOWER_HOLD.notes,
+        starting_weight_kg: null,
+        is_logged: true,
+        log_mode: 'time_hold',
+      },
+      { created_at: seededAt },
+    ),
+  );
   items.push(...trainerItems);
 
   // The snapshot freezes the program as assigned. Editing the template later must not rewrite
@@ -504,6 +550,34 @@ export async function seed(storage, { force = false } = {}) {
         for (const item of dayItems) {
           const exercise = exercises.find((ex) => ex.id === item.exercise_id);
           const config = configBySlug[exercise.slug];
+
+          // A hold is seconds and nothing else: no load, no reps, no warmup. The best hold starts
+          // near the bottom of the range and climbs a second or two a week, so the chart has a
+          // line to draw, and later holds in a session break a little sooner than the first.
+          if (item.log_mode === 'time_hold') {
+            const best = Math.round(item.target_reps_low * (0.75 + 0.2 * spec.strength) + week * 1.5 + between(-2, 2));
+            for (let s = 0; s < item.target_sets; s += 1) {
+              cursorMs += (item.rest_seconds + intBetween(20, 40)) * 1000;
+              sessionLogs.push({
+                session_id: sessionId,
+                exercise_id: exercise.id,
+                set_index: s,
+                weight_kg: 0,
+                reps: null,
+                rpe: null,
+                is_warmup: false,
+                logged_at: iso(new Date(cursorMs)),
+                supersedes_id: null,
+                is_void: false,
+                is_extra: false,
+                rounds: null,
+                hold_seconds: Math.max(5, best - (s === 0 ? 0 : intBetween(0, 4))),
+                template_item_id: item.id ?? null,
+                device_id: deviceId,
+              });
+            }
+            continue;
+          }
 
           const plan = prescribe(spec, config, item, week);
           const working = plan.weight;
@@ -594,7 +668,7 @@ export async function seed(storage, { force = false } = {}) {
   // One correction, so the append only path has a worked example in the data. The original
   // row stays. The correction is a new row pointing at it. Anything that reads set_logs has
   // to exclude rows that have been superseded.
-  const correctable = setLogs.filter((log) => !log.is_warmup);
+  const correctable = setLogs.filter((log) => !log.is_warmup && log.reps !== null);
   if (correctable.length) {
     const original = correctable[Math.floor(correctable.length * 0.4)];
     setLogs.push(
