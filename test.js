@@ -23,7 +23,8 @@ import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from '
 import { syncMessage, publishSync } from './js/sync-status.js';
 import { mountShell } from './js/nav.js';
 import { createStorage, isStorageStalled } from './js/storage.js';
-import { createIndexedDbDriver } from './js/storage-indexeddb.js';
+import { createIndexedDbDriver, StorageStalledError } from './js/storage-indexeddb.js';
+import { createWriteQueue } from './js/write-queue.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
 import { can, staysSignedIn, routeWithoutSession } from './js/boot.js';
 import {
@@ -5899,12 +5900,17 @@ test('re-cueing silences pending beeps but never one already sounding', () => {
  * settles on a later tick, or never does when `stuck`. Counts aborts and closes so a test can see
  * the stuck transaction was let go and the stuck connection shut.
  */
-function fakeConnection({ stuck = false, throwName = null } = {}) {
+function fakeConnection({ stuck = false, throwName = null, held = false } = {}) {
   const rows = new Map();
+  // A held transaction is slow rather than stuck: it finishes the moment `release` is called.
+  const waiting = [];
   const conn = {
     rows,
     aborted: 0,
     closed: false,
+    release() {
+      for (const finish of waiting.splice(0)) finish();
+    },
     close() {
       conn.closed = true;
     },
@@ -5936,7 +5942,8 @@ function fakeConnection({ stuck = false, throwName = null } = {}) {
           };
         },
       };
-      if (!stuck) setTimeout(() => tx.oncomplete?.());
+      if (held) waiting.push(() => tx.oncomplete?.());
+      else if (!stuck) setTimeout(() => tx.oncomplete?.());
       return tx;
     },
   };
@@ -5945,9 +5952,13 @@ function fakeConnection({ stuck = false, throwName = null } = {}) {
 
 const STUCK_MS = 20;
 
+// A page that is on screen and running, which is the only kind of page a stall can be called on.
+// Passed explicitly so these tests do not depend on whether the tab running them is in front.
+const AWAKE = { now: () => Date.now(), hidden: () => false };
+
 test('a write that never finishes is given up on, not waited on forever', async () => {
   const stuck = fakeConnection({ stuck: true });
-  const driver = createIndexedDbDriver(stuck, { stallMs: STUCK_MS });
+  const driver = createIndexedDbDriver(stuck, { stallMs: STUCK_MS, clock: AWAKE });
   let error = null;
   try {
     await driver.put('clients', { id: 'c1' });
@@ -5965,6 +5976,7 @@ test('a stuck connection is replaced and the write tried once more', async () =>
   let opened = 0;
   const driver = createIndexedDbDriver(stuck, {
     stallMs: STUCK_MS,
+    clock: AWAKE,
     reopen: async () => {
       opened += 1;
       return fresh;
@@ -5982,6 +5994,7 @@ test('several stalls at once share one new connection', async () => {
   let opened = 0;
   const driver = createIndexedDbDriver(stuck, {
     stallMs: STUCK_MS,
+    clock: AWAKE,
     reopen: async () => {
       opened += 1;
       return fakeConnection();
@@ -5999,6 +6012,7 @@ test('a second stall goes to the caller instead of retrying for ever', async () 
   let opened = 0;
   const driver = createIndexedDbDriver(fakeConnection({ stuck: true }), {
     stallMs: STUCK_MS,
+    clock: AWAKE,
     reopen: async () => {
       opened += 1;
       return fakeConnection({ stuck: true });
@@ -6018,6 +6032,7 @@ test('a connection WebKit reports as lost is replaced too', async () => {
   const fresh = fakeConnection();
   const driver = createIndexedDbDriver(fakeConnection({ throwName: 'InvalidStateError' }), {
     stallMs: STUCK_MS,
+    clock: AWAKE,
     reopen: async () => fresh,
   });
   await driver.put('clients', { id: 'c1' });
@@ -6028,6 +6043,7 @@ test('a real answer about the data is not retried', async () => {
   let opened = 0;
   const driver = createIndexedDbDriver(fakeConnection({ throwName: 'ConstraintError' }), {
     stallMs: STUCK_MS,
+    clock: AWAKE,
     reopen: async () => {
       opened += 1;
       return fakeConnection();
@@ -6042,6 +6058,147 @@ test('a real answer about the data is not retried', async () => {
   eq(error?.name, 'ConstraintError');
   ok(!isStorageStalled(error), 'and is not dressed up as a stall');
   eq(opened, 0, 'a refusal would only be refused again on a new connection');
+});
+
+const settledYet = (promise) => {
+  let settled = false;
+  promise.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  return () => settled;
+};
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('a write held up by a locked phone is not called stuck', async () => {
+  // Every reading of the clock is far past the last, which is what a timer firing on a page that
+  // was just woken sees: it was due long ago.
+  let tick = 0;
+  const frozen = { now: () => (tick += 1) * 60_000, hidden: () => false };
+  const conn = fakeConnection({ held: true });
+  let opened = 0;
+  const driver = createIndexedDbDriver(conn, {
+    stallMs: STUCK_MS,
+    clock: frozen,
+    reopen: async () => {
+      opened += 1;
+      return fakeConnection();
+    },
+  });
+  const writing = driver.putWithOutbox('set_logs', { id: 's1' }, { id: 'o1' });
+  const settled = settledYet(writing);
+  await wait(STUCK_MS * 4);
+  ok(!settled(), 'still waiting, several windows on');
+  conn.release();
+  await writing;
+  eq(conn.aborted, 0, 'the transaction was never abandoned');
+  eq(opened, 0, 'and no second connection was opened to write it again');
+});
+
+test('a write is not called stuck while the page is hidden', async () => {
+  let hidden = true;
+  const conn = fakeConnection({ held: true });
+  const driver = createIndexedDbDriver(conn, {
+    stallMs: STUCK_MS,
+    clock: { now: () => Date.now(), hidden: () => hidden },
+  });
+  const writing = driver.put('set_logs', { id: 's1' });
+  const settled = settledYet(writing);
+  await wait(STUCK_MS * 4);
+  ok(!settled(), 'a pocketed phone is not a stuck database');
+  hidden = false;
+  conn.release();
+  await writing;
+  eq(conn.aborted, 0);
+});
+
+test('a page back in front still calls a real stall', async () => {
+  let hidden = true;
+  const driver = createIndexedDbDriver(fakeConnection({ stuck: true }), {
+    stallMs: STUCK_MS,
+    clock: { now: () => Date.now(), hidden: () => hidden },
+  });
+  const writing = driver.put('set_logs', { id: 's1' });
+  const settled = settledYet(writing);
+  await wait(STUCK_MS * 3);
+  ok(!settled(), 'nothing is called while hidden');
+  hidden = false;
+  let error = null;
+  try {
+    await writing;
+  } catch (caught) {
+    error = caught;
+  }
+  ok(isStorageStalled(error), 'and once it is on screen the deadline means what it says');
+});
+
+// ------------------------------------------------------------------ the logging screen's writes
+
+/** A write that stalls the first `times` it runs and lands after that. */
+function flakyWrite(log, name, times = 1) {
+  let runs = 0;
+  return async () => {
+    runs += 1;
+    if (runs <= times) {
+      log.push(`${name} stalled`);
+      throw new StorageStalledError();
+    }
+    log.push(name);
+  };
+}
+
+test('a stalled write is held and goes in ahead of the next one', async () => {
+  const log = [];
+  const heard = [];
+  const writes = createWriteQueue({
+    onStall: () => heard.push('stall'),
+    onSaved: () => heard.push('saved'),
+    onError: () => heard.push('error'),
+  });
+  await writes.add(flakyWrite(log, 'set 1'));
+  eq(writes.held, 1, 'the set is kept, not forgotten');
+  await writes.add(flakyWrite(log, 'set 2', 0));
+  eq(log, ['set 1 stalled', 'set 1', 'set 2'], 'the held set lands first, so the order holds');
+  eq(writes.held, 0);
+  eq(heard, ['stall', 'saved'], 'and the screen hears it landed, so the notice can go');
+});
+
+test('a write behind a stalled one waits rather than overtaking it', async () => {
+  const log = [];
+  const writes = createWriteQueue();
+  await writes.add(flakyWrite(log, 'session', 5));
+  await writes.add(flakyWrite(log, 'set', 0));
+  eq(log, ['session stalled', 'session stalled'], 'a set never lands ahead of its session row');
+  eq(writes.held, 2);
+  await writes.retry();
+  eq(writes.held, 2, 'still stuck, still both held');
+});
+
+test('retry runs what is held and nothing else', async () => {
+  const log = [];
+  const heard = [];
+  const writes = createWriteQueue({ onSaved: () => heard.push('saved') });
+  await writes.retry();
+  eq(heard, [], 'nothing held, nothing to say');
+  await writes.add(flakyWrite(log, 'set 1'));
+  await writes.retry();
+  eq(log, ['set 1 stalled', 'set 1']);
+  eq(heard, ['saved']);
+});
+
+test('a refused write is reported and not held', async () => {
+  const errors = [];
+  const log = [];
+  const writes = createWriteQueue({ onError: (error) => errors.push(error.name) });
+  await writes.add(async () => {
+    const error = new Error('refused');
+    error.name = 'ConstraintError';
+    throw error;
+  });
+  await writes.add(flakyWrite(log, 'next', 0));
+  eq(errors, ['ConstraintError']);
+  eq(writes.held, 0, 'the same write would only be refused again');
+  eq(log, ['next'], 'and what comes after it still lands');
 });
 
 // ------------------------------------------------------------------ the hold timer

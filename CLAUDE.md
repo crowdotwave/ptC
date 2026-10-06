@@ -118,6 +118,17 @@ stalled one is not. So the logging screen says "Not saved" for it rather than "S
 only", and a stall nobody caught shows `js/stalled.js`'s message telling the person to close the
 app, which boot installs on every page before its first read.
 
+**A deadline counts only time the page could run.** A locked phone freezes the page and the
+database together mid write, and on unlock the timer fires before the transaction can report in:
+a client got "Not saved" on two sets that the server shows arriving half a minute later. So a timer
+that fires while the page is hidden, or fires more than its own length late (which is what waking
+up looks like, since the timer can beat `visibilitychange`), gives the transaction a fresh window
+instead of calling it stuck. **And a stalled set is held, not dropped.** The screen is optimistic,
+so a stalled write is a set already drawn as logged, and the notice saying otherwise was cleared by
+the very next tap. `js/write-queue.js` keeps it, runs it again ahead of the next write and when the
+page comes back to the front, and lets nothing overtake it, so a set never lands before its session
+row.
+
 ### Offline sync rules
 
 - All record IDs are UUIDs generated client-side with `crypto.randomUUID()`. Never use

@@ -121,6 +121,7 @@ const SHELL = [
   'js/units.js',
   'js/worker.js',
   'js/workout-view.js',
+  'js/write-queue.js',
   'js/xlsx.js',
 ];
 
