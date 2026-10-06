@@ -289,14 +289,46 @@ export class StorageStalledError extends Error {
   }
 }
 
-/** Settles with `promise`, or rejects stalled after `ms`, calling `onStall` first. */
-function deadline(promise, ms, onStall = null) {
+/**
+ * What a deadline reads to tell a stuck database from a page that was not running.
+ *
+ * A locked phone freezes the page, and the database with it, partway through whatever it was
+ * doing. A client logged two sets, the phone locked, and she came back four minutes later to "Not
+ * saved", while the server shows both rows arriving half a minute before her next set: the
+ * transactions were fine, and the timer watching them had run out while nothing could run. Time
+ * spent frozen or hidden says nothing about the database, so it does not count.
+ */
+const pageClock = {
+  now: () => Date.now(),
+  hidden: () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
+};
+
+/**
+ * Settles with `promise`, or rejects stalled after `ms` of time the page could run, calling
+ * `onStall` first.
+ *
+ * Two ways to find out the page could not run, because neither is guaranteed on its own. Hidden is
+ * the obvious one. Late is the one that covers waking up: the timer can fire on resume before
+ * `visibilitychange` has, and a timer due in `ms` that arrives more than `ms` late has been
+ * waiting on a frozen page, not on a transaction. Either way the transaction gets a whole
+ * fresh window from now. A real stall is unaffected, since its timer fires on time on a visible
+ * page, which is the iPad case this exists for.
+ */
+function deadline(promise, ms, onStall = null, clock = pageClock) {
   let timer = null;
   const stalled = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      if (onStall) onStall();
-      reject(new StorageStalledError());
-    }, ms);
+    const arm = () => {
+      const armedAt = clock.now();
+      timer = setTimeout(() => {
+        if (clock.hidden() || clock.now() - armedAt > ms * 2) {
+          arm();
+          return;
+        }
+        if (onStall) onStall();
+        reject(new StorageStalledError());
+      }, ms);
+    };
+    arm();
   });
   return Promise.race([promise, stalled]).finally(() => clearTimeout(timer));
 }
@@ -315,7 +347,7 @@ function abandon(tx) {
   }
 }
 
-function promisify(request, tx, ms) {
+function promisify(request, tx, ms, clock) {
   return deadline(
     new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
@@ -323,10 +355,11 @@ function promisify(request, tx, ms) {
     }),
     ms,
     () => abandon(tx),
+    clock,
   );
 }
 
-function txDone(tx, ms) {
+function txDone(tx, ms, clock) {
   return deadline(
     new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -335,6 +368,7 @@ function txDone(tx, ms) {
     }),
     ms,
     () => abandon(tx),
+    clock,
   );
 }
 
@@ -408,9 +442,13 @@ export function openDatabase(name = DB_NAME, version = DB_VERSION, { stallMs = O
  * says the storage underneath is stuck rather than this connection, and waiting longer would only
  * put off the one message that helps. Every operation here is safe to run twice: a put writes by
  * id, the outbox entry carries its own id made before the first try, and a delete of a row already
- * gone is a no op. Without `reopen` a stall goes straight to the caller.
+ * gone is a no op. Without `reopen` a stall goes straight to the caller. `clock` is for tests,
+ * which need to freeze and hide a page that is neither.
  */
-export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } = {}) {
+export function createIndexedDbDriver(
+  db,
+  { reopen = null, stallMs = STALL_MS, clock = pageClock } = {},
+) {
   let conn = db;
   let reopening = null;
 
@@ -455,7 +493,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
     get(store, id) {
       return run(async (on) => {
         const tx = read(on, [store]);
-        const row = await promisify(tx.objectStore(store).get(id), tx, stallMs);
+        const row = await promisify(tx.objectStore(store).get(id), tx, stallMs, clock);
         return row ?? null;
       });
     },
@@ -470,9 +508,9 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const tx = read(on, [store]);
         const objectStore = tx.objectStore(store);
         if (indexField && objectStore.indexNames.contains(indexField) && indexValue !== undefined) {
-          return promisify(objectStore.index(indexField).getAll(indexValue), tx, stallMs);
+          return promisify(objectStore.index(indexField).getAll(indexValue), tx, stallMs, clock);
         }
-        return promisify(objectStore.getAll(), tx, stallMs);
+        return promisify(objectStore.getAll(), tx, stallMs, clock);
       });
     },
 
@@ -480,7 +518,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
       return run(async (on) => {
         const tx = write(on, [store]);
         tx.objectStore(store).put(record);
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
         return record;
       });
     },
@@ -491,7 +529,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const tx = write(on, [store, OUTBOX_STORE]);
         tx.objectStore(store).put(record);
         if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
         return record;
       });
     },
@@ -501,14 +539,14 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const tx = write(on, [store, OUTBOX_STORE]);
         tx.objectStore(store).delete(id);
         if (outboxEntry) tx.objectStore(OUTBOX_STORE).put(outboxEntry);
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
       });
     },
 
     count(store) {
       return run((on) => {
         const tx = read(on, [store]);
-        return promisify(tx.objectStore(store).count(), tx, stallMs);
+        return promisify(tx.objectStore(store).count(), tx, stallMs, clock);
       });
     },
 
@@ -518,7 +556,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const tx = write(on, [store]);
         const objectStore = tx.objectStore(store);
         for (const record of records) objectStore.put(record);
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
         return records.length;
       });
     },
@@ -530,7 +568,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const tx = write(on, [store]);
         const objectStore = tx.objectStore(store);
         for (const id of ids) objectStore.delete(id);
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
         return ids.length;
       });
     },
@@ -540,14 +578,14 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
         const stores = [...TABLE_NAMES, OUTBOX_STORE, META_STORE];
         const tx = write(on, stores);
         for (const store of stores) tx.objectStore(store).clear();
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
       });
     },
 
     getMeta(key) {
       return run(async (on) => {
         const tx = read(on, [META_STORE]);
-        const row = await promisify(tx.objectStore(META_STORE).get(key), tx, stallMs);
+        const row = await promisify(tx.objectStore(META_STORE).get(key), tx, stallMs, clock);
         return row ? row.value : null;
       });
     },
@@ -556,7 +594,7 @@ export function createIndexedDbDriver(db, { reopen = null, stallMs = STALL_MS } 
       return run(async (on) => {
         const tx = write(on, [META_STORE]);
         tx.objectStore(META_STORE).put({ key, value });
-        await txDone(tx, stallMs);
+        await txDone(tx, stallMs, clock);
       });
     },
 

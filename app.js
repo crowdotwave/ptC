@@ -11,7 +11,8 @@
 //
 // The adapter is the only persistence surface here. This file never touches IndexedDB.
 
-import { makeRecord, getDeviceId, isStorageStalled } from './js/storage.js';
+import { makeRecord, getDeviceId } from './js/storage.js';
+import { createWriteQueue } from './js/write-queue.js';
 import { boot, gate } from './js/boot.js';
 import './js/press.js';
 import { mountShell } from './js/nav.js';
@@ -202,20 +203,28 @@ function stepSize(entry = currentEntry()) {
 
 // ------------------------------------------------------------------ optimistic writes
 
-// Serial so a set_log never reaches the adapter before the session row it points at. Nothing
-// in the UI awaits this queue: a tap updates the screen and the write catches up.
-let writeQueue = Promise.resolve();
+// Serial, and a write that stalls is held and run again ahead of the next one rather than dropped.
+// See js/write-queue.js.
+const writes = createWriteQueue({
+  // A stall is the one failure that is NOT on this device, so "saved on this device only" would be
+  // the notice claiming a row it does not have. The set is on screen and nowhere else, yet.
+  onStall: (error) => showNotice(`Not saved. ${error.message}`, 'attention'),
+  // Whatever was held has landed, so a notice still saying otherwise is now the wrong one.
+  onSaved: () => {
+    if (state.notice?.text.startsWith('Not saved.')) clearNotice();
+  },
+  onError: (error) => showNotice(`Saved on this device only. ${error.message}`, 'attention'),
+});
 
 function write(task) {
-  writeQueue = writeQueue.then(task).catch((error) => {
-    // A stall is the one failure that is NOT on this device, so "saved on this device only" would
-    // be the notice claiming a row it does not have. The set is on screen and nowhere else.
-    showNotice(
-      isStorageStalled(error) ? `Not saved. ${error.message}` : `Saved on this device only. ${error.message}`,
-      'attention',
-    );
-  });
+  writes.add(task);
 }
+
+// Coming back from a lock is when a held write is most likely to go through, and waiting for the
+// next tap would leave the notice up through a whole rest period for nothing.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') writes.retry();
+});
 
 /**
  * How long a flush waits for the tap after it. Comfortably inside a rest period, so a set is on
@@ -251,9 +260,7 @@ function flushSoon() {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
     flushTimer = null;
-    writeQueue = writeQueue
-      .then(() => state.storage.push())
-      .then(publishSync, () => {});
+    writes.after(() => state.storage.push().then(publishSync, () => {}));
   }, FLUSH_DELAY_MS);
 }
 
