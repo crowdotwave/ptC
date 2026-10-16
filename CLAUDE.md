@@ -132,6 +132,15 @@ the note on the summary card and there is no next write after it: a note that st
 until the app closed. That card says "Saved" when the row is on the device, not when Done is
 pressed, and keeps the unsent draft until then.
 
+**Closing the app on a stall loses nothing, which is what makes it safe to tell people to.** The
+stalled message has always said to close the app completely, because that is the only cure seen for
+a stuck database, and for as long as held writes lived in memory and the draft in sessionStorage
+that advice threw away the very set it was about: closing a Home Screen app empties both. So every
+`storage.put` that stalls is also kept in localStorage (`keptWrites` in `js/storage.js`), a
+different store from the one that is stuck, and `openStorage` puts it back before any page reads.
+A kept row loses to a copy on the device that is as new or newer, a row that lands releases its
+kept copy, and a wipe drops them all, since a wipe is a change of person.
+
 ### Offline sync rules
 
 - All record IDs are UUIDs generated client-side with `crypto.randomUUID()`. Never use

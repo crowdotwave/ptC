@@ -50,6 +50,46 @@ export function newId() {
   return crypto.randomUUID();
 }
 
+/**
+ * Writes that stalled, kept somewhere that survives closing the app.
+ *
+ * A stall means IndexedDB is not answering, and the only cure seen for a stuck one is closing the
+ * app completely, which is what the stalled message tells people to do. Until this existed that
+ * advice destroyed exactly what it was meant to rescue: a stalled set or note lived in the page's
+ * memory and in sessionStorage, and closing a Home Screen app empties both. So every put that
+ * stalls is also written here, in localStorage, which is a different store and not the one that is
+ * stuck, and the next page to open storage puts it back before anything reads.
+ *
+ * Kept per row, latest version in place, so a session stamped twice is replayed once and still
+ * ahead of the sets that point at it. Every call is wrapped, because private mode can refuse
+ * localStorage, and a failed rescue must never turn into a second failure on top of the first.
+ */
+const KEPT_KEY = 'ptc.kept_writes';
+
+export const keptWrites = {
+  read() {
+    try {
+      return JSON.parse(localStorage.getItem(KEPT_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  },
+  write(rows) {
+    try {
+      if (rows.length) localStorage.setItem(KEPT_KEY, JSON.stringify(rows));
+      else localStorage.removeItem(KEPT_KEY);
+    } catch {
+      // Refused. The write is still held in memory and still retried there.
+    }
+  },
+};
+
+/** For every store but the device's own: rehearsals and tests keep nothing. */
+const keepNothing = {
+  read: () => [],
+  write: () => {},
+};
+
 // Outbox replay order has to be stable, so never hand out a timestamp that is not strictly
 // after the previous one, even when the clock stands still between two fast writes.
 let lastStamp = 0;
@@ -99,8 +139,24 @@ function compare(a, b) {
   return a < b ? -1 : 1;
 }
 
-export function createStorage(driver) {
+export function createStorage(driver, { kept = keepNothing } = {}) {
   let remote = null;
+
+  function keep(table, record) {
+    const rows = kept.read();
+    const at = rows.findIndex((row) => row.table === table && row.record.id === record.id);
+    if (at === -1) rows.push({ table, record });
+    else rows[at] = { table, record };
+    kept.write(rows);
+  }
+
+  // A row that reached the device needs no rescue, and an older stalled version of it must not be
+  // put back over the one that landed.
+  function release(table, id) {
+    const rows = kept.read();
+    const rest = rows.filter((row) => !(row.table === table && row.record.id === id));
+    if (rest.length !== rows.length) kept.write(rest);
+  }
   // One flush at a time. push() and sync() both drain the same outbox, and two of them in the air
   // at once would hand the same entries to the server twice and then race to mark them done. They
   // queue rather than coalesce: a set logged while a flush is in flight is not in the queue that
@@ -195,18 +251,50 @@ export function createStorage(driver) {
 
       const next = validate(table, record);
 
-      if (def.appendOnly) {
-        const existing = await driver.get(table, next.id);
-        if (existing) {
-          if (JSON.stringify(existing) === JSON.stringify(next)) return existing;
-          throw new Error(
-            `${table} is append only. Write a new row with supersedes_id set to ${next.id} instead of updating it.`,
-          );
+      try {
+        if (def.appendOnly) {
+          const existing = await driver.get(table, next.id);
+          if (existing) {
+            if (JSON.stringify(existing) === JSON.stringify(next)) {
+              release(table, next.id);
+              return existing;
+            }
+            throw new Error(
+              `${table} is append only. Write a new row with supersedes_id set to ${next.id} instead of updating it.`,
+            );
+          }
         }
-      }
 
-      await driver.putWithOutbox(table, next, outboxEntry('put', table, next));
+        await driver.putWithOutbox(table, next, outboxEntry('put', table, next));
+      } catch (error) {
+        if (isStorageStalled(error)) keep(table, next);
+        throw error;
+      }
+      release(table, next.id);
       return next;
+    },
+
+    /**
+     * Puts back whatever stalled before the app was last closed. Run once, when storage opens and
+     * before anything reads, so a set kept this way is on the logging screen like any other.
+     *
+     * A kept row loses to one already on the device that is as new or newer: the stuck write may
+     * have landed late after all, and a later edit to the same row must not be undone by an
+     * earlier one coming back. Append only rows are only ever missing or present.
+     */
+    async restoreKept() {
+      for (const { table, record } of kept.read()) {
+        const def = TABLES[table];
+        if (!def) {
+          release(table, record.id);
+          continue;
+        }
+        const existing = await driver.get(table, record.id);
+        const stale =
+          existing && (def.appendOnly || !((record.updated_at ?? '') > (existing.updated_at ?? '')));
+        if (stale) release(table, record.id);
+        else await storage.put(table, record);
+      }
     },
 
     async delete(table, id) {
@@ -380,6 +468,8 @@ export function createStorage(driver) {
       return driver.bulkPut(table, validated);
     },
     async _clearAll() {
+      // A wipe is a change of person or a sign out, and a kept write is the previous person's.
+      kept.write([]);
       return driver.clearAll();
     },
 
@@ -442,7 +532,16 @@ export async function openStorage() {
   if (!instance) {
     const db = await openDatabase();
     // A connection that sticks is replaced and the operation tried again. See the driver.
-    instance = createStorage(createIndexedDbDriver(db, { reopen: () => openDatabase() }));
+    instance = createStorage(createIndexedDbDriver(db, { reopen: () => openDatabase() }), {
+      kept: keptWrites,
+    });
+    // Best effort. Whatever cannot be put back now stays kept for the next page, and a page that
+    // cannot open because of it would be the stall all over again.
+    try {
+      await instance.restoreKept();
+    } catch {
+      // Still stuck. The rows are still in localStorage.
+    }
   }
   return instance;
 }
