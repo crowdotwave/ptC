@@ -213,11 +213,18 @@ function stepSize(entry = currentEntry()) {
 const RETRY_HELD_MS = 15000;
 let retryTimer = null;
 
+// A stall is the one failure that is NOT on this device, so "saved on this device only" would be
+// the notice claiming a row it does not have. It is not the generic stalled message either, which
+// says only to close the app: that used to throw away the very set it was about, and now it does
+// not, because a stalled write is also kept in localStorage and put back on the next open (see
+// keptWrites in js/storage.js). So this says what is true here: it is still trying, closing the
+// app is the cure if it stays stuck, and closing it costs nothing.
+const NOT_SAVED_YET =
+  'Not saved yet, still trying. If this stays, close the app completely and reopen it. Nothing you logged will be lost.';
+
 const writes = createWriteQueue({
-  // A stall is the one failure that is NOT on this device, so "saved on this device only" would be
-  // the notice claiming a row it does not have. The set is on screen and nowhere else, yet.
-  onStall: (error) => {
-    showNotice(`Not saved. ${error.message}`, 'attention');
+  onStall: () => {
+    showNotice(NOT_SAVED_YET, 'attention');
     clearTimeout(retryTimer);
     retryTimer = setTimeout(() => writes.retry(), RETRY_HELD_MS);
   },
@@ -226,7 +233,7 @@ const writes = createWriteQueue({
   // while they were still stuck, and nothing else is about to send them.
   onSaved: () => {
     clearTimeout(retryTimer);
-    if (state.notice?.text.startsWith('Not saved.')) clearNotice();
+    if (state.notice?.text === NOT_SAVED_YET) clearNotice();
     flushSoon();
   },
   onError: (error) => showNotice(`Saved on this device only. ${error.message}`, 'attention'),

@@ -22,7 +22,7 @@ import { renderProgram, dayLoad, loadLine, groupItems } from './js/program-view.
 import { toWire, fromWire, batchQueue, collapseDuplicates, createRemote } from './js/remote.js';
 import { syncMessage, publishSync } from './js/sync-status.js';
 import { mountShell } from './js/nav.js';
-import { createStorage, isStorageStalled } from './js/storage.js';
+import { createStorage, isStorageStalled, makeRecord } from './js/storage.js';
 import { createIndexedDbDriver, StorageStalledError } from './js/storage-indexeddb.js';
 import { createWriteQueue } from './js/write-queue.js';
 import { readSheet, mapColumns, dayName, summarise } from './js/import-program.js';
@@ -6199,6 +6199,100 @@ test('a refused write is reported and not held', async () => {
   eq(errors, ['ConstraintError']);
   eq(writes.held, 0, 'the same write would only be refused again');
   eq(log, ['next'], 'and what comes after it still lands');
+});
+
+// ------------------------------------------------------------------ closing the app on a stall
+
+/** localStorage, without touching the real one. */
+function fakeKept() {
+  let rows = [];
+  return { read: () => JSON.parse(JSON.stringify(rows)), write: (next) => (rows = next) };
+}
+
+/** A device whose writes stall while `stuck.on` is true, over rows that outlive the "app". */
+function stallableDevice() {
+  const disk = createMemoryDriver();
+  const stuck = { on: false };
+  const driver = {
+    ...disk,
+    putWithOutbox(...args) {
+      if (stuck.on) return Promise.reject(new StorageStalledError());
+      return disk.putWithOutbox(...args);
+    },
+  };
+  return { disk, driver, stuck };
+}
+
+const sessionRow = (fields = {}) =>
+  makeRecord('sessions', {
+    client_id: crypto.randomUUID(),
+    assignment_id: null,
+    day_index: 0,
+    started_at: '2026-10-15T22:34:40.000Z',
+    completed_at: null,
+    client_note: null,
+    discarded_at: null,
+    ...fields,
+  });
+
+test('a stalled write survives closing the app and comes back on the next open', async () => {
+  const kept = fakeKept();
+  const device = stallableDevice();
+  device.stuck.on = true;
+  const note = sessionRow({ client_note: 'Solid. Shoulder fine' });
+  let error = null;
+  try {
+    await createStorage(device.driver, { kept }).put('sessions', note);
+  } catch (caught) {
+    error = caught;
+  }
+  ok(isStorageStalled(error), 'the write stalled');
+  eq(kept.read().length, 1, 'and was kept outside the stuck store');
+
+  // The app is closed and opened again, and storage answers this time.
+  device.stuck.on = false;
+  const reopened = createStorage(device.driver, { kept });
+  await reopened.restoreKept();
+  eq((await reopened.get('sessions', note.id))?.client_note, 'Solid. Shoulder fine', 'the note is back');
+  ok(
+    (await reopened.pending()).some((entry) => entry.record_id === note.id),
+    'and owed to the server like any other write',
+  );
+  eq(kept.read(), [], 'and nothing is kept twice');
+});
+
+test('a kept row never puts an older version back over a newer one', async () => {
+  const kept = fakeKept();
+  const device = stallableDevice();
+  const older = sessionRow({ client_note: 'older', updated_at: '2026-10-15T23:19:00.000Z' });
+  const newer = { ...older, client_note: 'newer', updated_at: '2026-10-15T23:20:00.000Z' };
+  kept.write([{ table: 'sessions', record: older }]);
+  await createStorage(device.disk).put('sessions', newer);
+  const storage = createStorage(device.driver, { kept });
+  await storage.restoreKept();
+  eq((await storage.get('sessions', older.id)).client_note, 'newer');
+  eq(kept.read(), [], 'the stale copy is let go rather than kept for ever');
+});
+
+test('a write that lands lets go of its kept copy', async () => {
+  const kept = fakeKept();
+  const device = stallableDevice();
+  const storage = createStorage(device.driver, { kept });
+  const row = sessionRow();
+  device.stuck.on = true;
+  await storage.put('sessions', row).catch(() => {});
+  eq(kept.read().length, 1);
+  device.stuck.on = false;
+  await storage.put('sessions', { ...row, client_note: 'landed' });
+  eq(kept.read(), [], 'the held retry landing is what releases it');
+});
+
+test('a wipe drops what was kept, because it was the previous person', async () => {
+  const kept = fakeKept();
+  kept.write([{ table: 'sessions', record: sessionRow() }]);
+  const storage = createStorage(stallableDevice().driver, { kept });
+  await storage._clearAll();
+  eq(kept.read(), []);
 });
 
 // ------------------------------------------------------------------ the hold timer
