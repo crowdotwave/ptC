@@ -206,13 +206,28 @@ function stepSize(entry = currentEntry()) {
 
 // Serial, and a write that stalls is held and run again ahead of the next one rather than dropped.
 // See js/write-queue.js.
+//
+// Held writes also try again on their own, because "the next write" may never come. The note on
+// the summary card is the last thing anybody writes in a session: a client pressed Done, the note
+// stalled, and with no set left to log it sat in memory until the app was closed, then was gone.
+const RETRY_HELD_MS = 15000;
+let retryTimer = null;
+
 const writes = createWriteQueue({
   // A stall is the one failure that is NOT on this device, so "saved on this device only" would be
   // the notice claiming a row it does not have. The set is on screen and nowhere else, yet.
-  onStall: (error) => showNotice(`Not saved. ${error.message}`, 'attention'),
-  // Whatever was held has landed, so a notice still saying otherwise is now the wrong one.
+  onStall: (error) => {
+    showNotice(`Not saved. ${error.message}`, 'attention');
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => writes.retry(), RETRY_HELD_MS);
+  },
+  // Whatever was held has landed, so a notice still saying otherwise is now the wrong one. And the
+  // rows are on the device but not on the server: the flush that followed the original write ran
+  // while they were still stuck, and nothing else is about to send them.
   onSaved: () => {
+    clearTimeout(retryTimer);
     if (state.notice?.text.startsWith('Not saved.')) clearNotice();
+    flushSoon();
   },
   onError: (error) => showNotice(`Saved on this device only. ${error.message}`, 'attention'),
 });
@@ -276,11 +291,15 @@ function flushSoon() {
  * session would have gone on offering itself up for resume for six hours.
  *
  * So there is one writer now and it updates both. Nothing awaits it, per the optimistic rule.
+ * `onWritten` runs once the row is on the device, for the one caller that has to say so.
  */
-function stampSession(patch) {
+function stampSession(patch, { onWritten = null } = {}) {
   const next = { ...state.sessionRecord, ...patch, updated_at: new Date().toISOString() };
   state.sessionRecord = next;
-  write(() => state.storage.put('sessions', next));
+  write(async () => {
+    await state.storage.put('sessions', next);
+    if (onWritten) onWritten();
+  });
   return next;
 }
 
@@ -863,9 +882,28 @@ function setFeel(word) {
 function saveNote() {
   if (!state.sessionRecord) return;
   const note = composeNote(state.feel, state.feelText);
-  state.feelSaved = true;
-  dropDraft();
-  if (note !== (state.sessionRecord.client_note ?? null)) stampSession({ client_note: note });
+
+  // "Saved" is said when the row is on the device and not before, and the draft is the only other
+  // copy of the answer, so it goes at the same moment. Both used to happen on the press: a note
+  // that then stalled read "Saved" above a notice saying it was not, and a reload lost it outright.
+  // Ignored if the answer has changed since, so an older note landing late cannot call a newer
+  // one saved.
+  const landed = () => {
+    if (composeNote(state.feel, state.feelText) !== note) return;
+    state.feelSaved = true;
+    dropDraft();
+    renderFeel();
+  };
+
+  if (note !== (state.sessionRecord.client_note ?? null)) {
+    stampSession({ client_note: note }, { onWritten: landed });
+  } else if (writes.held) {
+    // The row in hand already carries this note because an earlier press stamped it, and that
+    // write is the one stuck. Pressing again is asking for it to be tried again.
+    writes.retry();
+  } else {
+    landed();
+  }
   // Said once, at the end, on a screen somebody is about to close. For a calisthenics block this
   // is most of what the coach needs, and it is the last thing written before the phone goes away.
   flushSoon();

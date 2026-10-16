@@ -127,7 +127,10 @@ instead of calling it stuck. **And a stalled set is held, not dropped.** The scr
 so a stalled write is a set already drawn as logged, and the notice saying otherwise was cleared by
 the very next tap. `js/write-queue.js` keeps it, runs it again ahead of the next write and when the
 page comes back to the front, and lets nothing overtake it, so a set never lands before its session
-row.
+row. It also tries again on its own every fifteen seconds, because the last write of a session is
+the note on the summary card and there is no next write after it: a note that stalled sat in memory
+until the app closed. That card says "Saved" when the row is on the device, not when Done is
+pressed, and keeps the unsent draft until then.
 
 ### Offline sync rules
 
