@@ -139,7 +139,14 @@ export function planForItem(item, previous, opening) {
     : [];
 
   if (performed.length) {
+    // History longer than the prescription is cut back to it, which is the same rule as the padding
+    // below run in the other direction. A trainer taking a lift from four sets to two left the plan
+    // at four, because only the shortfall was ever corrected: Chris's pullups were split into two
+    // wide and two close, and the wide row opened as "Set 1 of 4" under a line reading "2 sets".
+    // Warmups are not counted, as everywhere else, and the earliest working sets are the ones kept.
+    let workingKept = 0;
     const entries = performed
+      .filter(([, row]) => row.is_warmup === true || (workingKept += 1) <= setCount)
       .map(([setIndex, row]) => ({
         item,
         setIndex,

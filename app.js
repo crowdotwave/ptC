@@ -529,9 +529,13 @@ function render() {
   // rather than once in a notice, because the lift name at the top no longer matches the program,
   // and anybody glancing at the screen between sets should not have to remember why.
   const standIn = entry.item.origin ? `In place of ${entry.item.origin.exercise?.name ?? 'the programmed lift'}. ` : '';
+  // The variation is how the lift is done ("Wide overhand", "Bench at 75-85°"), and the workout panel
+  // and the Programs tab both printed it while this screen, the one the lift is done from, did not.
+  // So a day with one exercise programmed twice read as the same lift twice.
+  const variation = entry.item.variation ? `${entry.item.variation}. ` : '';
   ui.target.textContent = entry.isWarmup
-    ? `${standIn}Warmup. Move well, save it for the working sets.`
-    : `${standIn}${written || 'No target set.'}`;
+    ? `${standIn}${variation}Warmup. Move well, save it for the working sets.`
+    : `${standIn}${variation}${written || 'No target set.'}`;
 
   // Three different things this line can truthfully say, and they are not interchangeable. A set
   // the client has a row for at this exact index gets the date. A set made up to the trainer's

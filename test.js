@@ -3434,6 +3434,31 @@ test('a session cut short does not shorten the program', () => {
   eq(entries.map((e) => e.setIndex), [0, 1, 2, 3]);
 });
 
+// The same cascade run the other way, and it happened mid workout: Chris's pullups went from four
+// sets to two wide and two close, and the wide row opened as "Set 1 of 4" under "2 sets".
+test('a program cut to fewer sets than last time is cut, not left at last time', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 2 }),
+    prev([[0, row({ weight_kg: 0, reps: 6 })], [1, row({ weight_kg: 0, reps: 6 })],
+          [2, row({ weight_kg: 0, reps: 5 })], [3, row({ weight_kg: 0, reps: 5 })]]),
+    opening,
+  );
+  eq(entries.length, 2, 'four logged last time, two prescribed now');
+  eq(entries.map((e) => e.setIndex), [0, 1], 'and the first two are the ones kept');
+  eq(entries.map((e) => e.lastReps), [6, 6]);
+});
+
+test('cutting a program back keeps the warmups', () => {
+  const entries = planForItem(
+    planItem({ target_sets: 1 }),
+    prev([[0, row({ is_warmup: true, weight_kg: 40 })], [1, row({ weight_kg: 80 })], [2, row({ weight_kg: 80 })]]),
+    opening,
+  );
+  eq(entries.length, 2, 'one warmup plus the one working set asked for');
+  eq(entries[0].isWarmup, true);
+  eq(entries.filter((e) => !e.isWarmup).length, 1);
+});
+
 test('the sets history did not reach are carried from the last one that it did', () => {
   const entries = planForItem(planItem(), prev([[0, row({ weight_kg: 60, reps: 12 })]]), opening);
   eq(entries.map((e) => e.weightKg), [60, 60, 60, 60]);
