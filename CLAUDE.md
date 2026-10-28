@@ -296,7 +296,10 @@ payments
   on a live program can send it, and what that does is write a fresh assignment per client carrying
   the current snapshot, starting today. Sessions already logged keep pointing at the assignment they
   were logged under, so history stays attached to the program it was actually done against, and
-  `currentAssignment` picks the new row up for the next session. `deload_weeks` carries forward,
+  `currentAssignment` picks the new row up for the next session. **A new row is not a new block on
+  the charts.** `js/progression.js` starts a block where the program or that lift's rep range
+  changes, never at an assignment boundary as such: when it did, every update cut a block, and a
+  client who went from 9 to 12 reps at one load was told "First session logged". `deload_weeks` carries forward,
   because a back off week is marked from the client's chart months later and losing it as a side
   effect of a rest time edit would be a silent change to somebody's training. Before this the rule
   was enforced and unexplained: the builder warned that edits reach new assignments only and said

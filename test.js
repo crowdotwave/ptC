@@ -459,7 +459,7 @@ const sess = (id, day, assignment = 'a1') => ({
   client_note: null,
 });
 
-const assign = (id, startsOn, deloadWeeks = []) => ({
+const assign = (id, startsOn, deloadWeeks = [], over = {}) => ({
   id,
   client_id: 'c1',
   template_id: 't1',
@@ -467,6 +467,12 @@ const assign = (id, startsOn, deloadWeeks = []) => ({
   starts_on: startsOn,
   ends_on: null,
   deload_weeks: deloadWeeks,
+  ...over,
+});
+
+// A snapshot holding one squat slot at a rep range, which is all a block boundary reads.
+const squatAt = (low, high) => ({
+  snapshot: { days: [{ day_index: 0, items: [{ exercise_id: 'squat', target_reps_low: low, target_reps_high: high }] }] },
 });
 
 test('evidence escalates with the number of points', () => {
@@ -592,8 +598,7 @@ test('a deload cannot set a record', () => {
   eq(p.points[1].isRecord, false);
 });
 
-// Volume is never compared across a rep scheme change. A block is an assignment, and since the
-// snapshot freezes the rep range, an assignment boundary is a prescription change.
+// Volume is never compared across a rep scheme change, so a change of rep range opens a block.
 test('volume is segmented by block and strength is not', () => {
   const sessions = [
     sess('s1', '2026-07-01', 'a1'),
@@ -610,13 +615,93 @@ test('volume is segmented by block and strength is not', () => {
   const p = buildProgression({
     setLogs: logs,
     sessions,
-    assignments: [assign('a1', '2026-07-01'), assign('a2', '2026-08-05')],
+    assignments: [assign('a1', '2026-07-01', [], squatAt(8, 12)), assign('a2', '2026-08-05', [], squatAt(3, 5))],
     exerciseId: 'squat',
   });
   eq(p.blocks.length, 2);
   eq(p.volume.segments.map((s) => s.points.length), [2, 2], 'volume is cut at the boundary');
   eq(p.e1rm.series.length, 4, 'strength crosses it, which is the reason it exists');
   eq(p.leadView, 'e1rm', 'two blocks means the six month question exists, so strength leads');
+});
+
+// Sending an update writes a new assignment with the same prescription. Measured on a real
+// client: a shoulder press at 9, 9, 9 and then 12, 11, 11 at one load was drawn as two blocks of one
+// session, and the second read "First session logged".
+test('a resent program with the same rep range is one block', () => {
+  const sessions = [sess('s1', '2026-10-15', 'a1'), sess('s2', '2026-10-25', 'a2')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 15.876, reps: 9 }),
+    row({ session_id: 's2', weight_kg: 15.876, reps: 12 }),
+  ];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-10-14', [], squatAt(8, 12)), assign('a2', '2026-10-20', [], squatAt(8, 12))],
+    exerciseId: 'squat',
+  });
+  eq(p.blocks.length, 1);
+  eq(p.volume.evidence, 'compare', 'the second session is compared with the first');
+  eq(p.repsAtLoad.lines[0].points.map((x) => x.reps), [9, 12]);
+  eq(p.leadView, 'volume');
+});
+
+test('a new program opens a block even with the same rep range', () => {
+  const sessions = [sess('s1', '2026-07-01', 'a1'), sess('s2', '2026-08-05', 'a2')];
+  const logs = [row({ session_id: 's1' }), row({ session_id: 's2' })];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [
+      assign('a1', '2026-07-01', [], squatAt(8, 12)),
+      assign('a2', '2026-08-05', [], { template_id: 't2', ...squatAt(8, 12) }),
+    ],
+    exerciseId: 'squat',
+  });
+  eq(p.blocks.length, 2);
+});
+
+test('going back to an earlier program is a third block, not the first one again', () => {
+  const sessions = [sess('s1', '2026-07-01', 'a1'), sess('s2', '2026-07-08', 'a2'), sess('s3', '2026-07-15', 'a1')];
+  const logs = [row({ session_id: 's1' }), row({ session_id: 's2' }), row({ session_id: 's3' })];
+  const p = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [assign('a1', '2026-07-01', [], squatAt(8, 12)), assign('a2', '2026-07-08', [], squatAt(3, 5))],
+    exerciseId: 'squat',
+  });
+  eq(p.volume.segments.map((s) => s.points.length), [1, 1, 1]);
+});
+
+// A block can span assignments, and a back off week is still counted from the assignment it was
+// marked on, which is also what the consistency grid reads.
+test('a deload is read off the session own assignment inside a merged block', () => {
+  const sessions = [sess('s1', '2026-07-01', 'a1'), sess('s2', '2026-07-15', 'a2'), sess('s3', '2026-07-22', 'a2')];
+  const logs = [
+    row({ session_id: 's1', weight_kg: 100, reps: 5 }),
+    row({ session_id: 's2', weight_kg: 70, reps: 5 }),
+    row({ session_id: 's3', weight_kg: 105, reps: 5 }),
+  ];
+  const first = assign('a1', '2026-07-01', [], squatAt(5, 5));
+  const marked = buildProgression({
+    setLogs: logs,
+    sessions,
+    assignments: [first, assign('a2', '2026-07-15', [0], squatAt(5, 5))],
+    exerciseId: 'squat',
+  });
+  eq(marked.blocks.length, 1);
+  eq(marked.points.map((x) => x.isDeload), [false, true, false]);
+
+  const asked = suggestDeloadWeeks(
+    buildProgression({
+      setLogs: logs,
+      sessions,
+      assignments: [first, assign('a2', '2026-07-15', [], squatAt(5, 5))],
+      exerciseId: 'squat',
+    }),
+  );
+  eq(asked.length, 1);
+  eq(asked[0].assignmentId, 'a2', 'the answer is stored on the assignment the session was logged under');
+  eq(asked[0].week, 0, 'counted from that assignment start');
 });
 
 test('one block leads with volume, since there is no cross block story yet', () => {
@@ -643,7 +728,7 @@ test('the rep scheme change that breaks volume is exactly what strength is for',
   const p = buildProgression({
     setLogs: logs,
     sessions,
-    assignments: [assign('a1', '2026-07-01'), assign('a2', '2026-08-05')],
+    assignments: [assign('a1', '2026-07-01', [], squatAt(8, 12)), assign('a2', '2026-08-05', [], squatAt(3, 5))],
     exerciseId: 'squat',
   });
   eq(p.points[0].prescribed, 1800);

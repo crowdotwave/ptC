@@ -393,13 +393,15 @@ function renderDeloadSuggestion() {
   const first = suggestions[0];
   node.hidden = false;
   node.innerHTML =
-    `<span>Week ${first.week + 1} of block ${first.blockIndex + 1} dropped ${first.dropPercent} percent ` +
-    `on ${esc(dayLabel(first.day))}. Was that a planned deload?</span>` +
-    `<button type="button" class="button-secondary" id="mark-deload" data-block="${esc(first.blockKey)}" ` +
-    `data-week="${first.week}">Mark as planned deload</button>`;
+    // No week number. The week is counted from the start of the assignment it is stored on, and a
+    // block on the chart can span several of those, so "week 2 of block 1" could name a week the
+    // chart does not call week 2.
+    `<span>Load dropped ${first.dropPercent} percent on ${esc(dayLabel(first.day))}. ` +
+    `Was that a planned deload?</span>` +
+    `<button type="button" class="button-secondary" id="mark-deload">Mark as planned deload</button>`;
 
   el('mark-deload').addEventListener('click', async () => {
-    const assignment = await state.storage.get('assignments', first.blockKey);
+    const assignment = await state.storage.get('assignments', first.assignmentId);
     if (!assignment) return;
     const weeks = Array.isArray(assignment.deload_weeks) ? assignment.deload_weeks : [];
     if (!weeks.includes(first.week)) {

@@ -54,32 +54,65 @@ export function weekIndexOf(startedAt, startsOn) {
 }
 
 /**
- * A block is an assignment. Because assignments.snapshot freezes target_reps_low and high, a
- * rep range cannot change inside one, so segmenting on assignment is the same thing as
- * segmenting on prescription change, without having to diff two JSON blobs.
+ * What this lift was prescribed under one assignment: the program it belongs to and the rep range
+ * of every slot holding it. Two assignments that agree on this are one block for this lift.
+ *
+ * Null for a session with no assignment, which is its own kind of block.
  */
-function buildBlocks(sessions, assignments) {
+function prescriptionOf(assignment, exerciseId) {
+  if (!assignment) return null;
+  const ranges = new Set();
+  for (const day of assignment.snapshot?.days ?? []) {
+    for (const item of day.items ?? []) {
+      if (item.exercise_id === exerciseId) {
+        ranges.add(`${item.target_reps_low ?? ''}-${item.target_reps_high ?? ''}`);
+      }
+    }
+  }
+  return `${assignment.template_id ?? ''}|${[...ranges].sort().join(',')}`;
+}
+
+/**
+ * A block is a run of sessions under one prescription for this lift, and NOT an assignment.
+ *
+ * It used to be an assignment, on the grounds that a snapshot freezes the rep range so an
+ * assignment boundary is a prescription change. That stopped being true when sending an update
+ * became a new assignment: fixing a rest time hands every client a fresh row with the same rep
+ * ranges, and each one cut a block. Measured on a real client, seven assignments of one program in
+ * eleven weeks, so a shoulder press logged at 9, 9, 9 and then 12, 11, 11 at the same 35 lb was
+ * drawn as two blocks of one session each, and the screen said "First session logged" under the
+ * second one. The comparison the whole product exists to show was the one it hid.
+ *
+ * So a new block starts where the program changes or where this lift's rep range does, which is
+ * the change that makes volume incomparable. Consecutive only: going back to an old program after
+ * a different one is a third block, not a return to the first.
+ *
+ * Deloads are not decided here. A back off week is marked on an assignment and counted from that
+ * assignment's own start, by the trainer and by the consistency grid alike, so a block spanning
+ * several assignments still reads each session's deload off its own row.
+ */
+function buildBlocks(sessions, assignments, exerciseId) {
   const byId = new Map(assignments.map((a) => [a.id, a]));
   const order = [];
-  const seen = new Map();
+  let open = null;
 
   for (const session of [...sessions].sort((a, b) => a.started_at.localeCompare(b.started_at))) {
-    const key = session.assignment_id ?? '__unassigned__';
-    if (!seen.has(key)) {
-      const assignment = byId.get(session.assignment_id) ?? null;
-      const block = {
-        key,
-        assignmentId: assignment ? assignment.id : null,
+    const assignment = byId.get(session.assignment_id) ?? null;
+    const prescription = prescriptionOf(assignment, exerciseId);
+    if (!open || open.prescription !== prescription) {
+      open = {
+        // By position rather than by assignment, since one assignment can open two blocks when a
+        // client goes back to it after another program.
+        key: `block-${order.length}`,
+        prescription,
         startsOn: assignment ? assignment.starts_on : session.started_at.slice(0, 10),
-        deloadWeeks: new Set(Array.isArray(assignment?.deload_weeks) ? assignment.deload_weeks : []),
         index: order.length,
         label: `Block ${order.length + 1}`,
         sessionIds: new Set(),
       };
-      seen.set(key, block);
-      order.push(block);
+      order.push(open);
     }
-    seen.get(key).sessionIds.add(session.id);
+    open.sessionIds.add(session.id);
   }
   return order;
 }
@@ -93,7 +126,8 @@ function buildBlocks(sessions, assignments) {
  */
 export function buildProgression({ setLogs = [], sessions = [], assignments = [], exerciseId } = {}) {
   const sessionById = new Map(sessions.map((s) => [s.id, s]));
-  const blocks = buildBlocks(sessions, assignments);
+  const assignmentById = new Map(assignments.map((a) => [a.id, a]));
+  const blocks = buildBlocks(sessions, assignments, exerciseId);
   const blockOfSession = new Map();
   for (const block of blocks) {
     for (const id of block.sessionIds) blockOfSession.set(id, block);
@@ -115,7 +149,15 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
     .map(([sessionId, rows]) => {
       const session = sessionById.get(sessionId);
       const block = blockOfSession.get(sessionId) ?? null;
-      const week = block ? weekIndexOf(session.started_at, block.startsOn) : null;
+      // The week and the deload come from the session's own assignment, which is where a back off
+      // week is marked and what it is counted from. See buildBlocks.
+      const assignment = assignmentById.get(session.assignment_id) ?? null;
+      const week = assignment
+        ? weekIndexOf(session.started_at, assignment.starts_on)
+        : block
+          ? weekIndexOf(session.started_at, block.startsOn)
+          : null;
+      const deloadWeeks = Array.isArray(assignment?.deload_weeks) ? assignment.deload_weeks : [];
       const prescribedRows = rows.filter((r) => !r.is_extra);
 
       // A carry or a sled records a weight and no reps, and an AMRAP records rounds. Neither
@@ -164,9 +206,10 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
         date: session.started_at,
         day: session.started_at.slice(0, 10),
         blockIndex: block ? block.index : 0,
-        blockKey: block ? block.key : '__unassigned__',
+        blockKey: block ? block.key : null,
+        assignmentId: assignment ? assignment.id : null,
         week,
-        isDeload: Boolean(block && week !== null && block.deloadWeeks.has(week)),
+        isDeload: week !== null && deloadWeeks.includes(week),
         prescribed: Math.round(prescribed),
         extra: Math.round(extra),
         setCount: rows.length,
@@ -220,7 +263,6 @@ export function buildProgression({ setLogs = [], sessions = [], assignments = []
       key: b.key,
       label: b.label,
       startsOn: b.startsOn,
-      deloadWeeks: [...b.deloadWeeks],
     })),
     points,
     // The strength line spans everything and is never broken at a block boundary. Crossing
@@ -291,9 +333,14 @@ export function suggestDeloadWeeks(progression) {
     if (point.topSet === null) continue;
     const load = point.topSet.weightKg;
 
-    if (best !== null && !point.isDeload && point.week !== null && load <= best * (1 - DELOAD_SUGGESTION_DROP)) {
+    // An assignment to mark it on, since that is where a back off week is stored. A session with
+    // no program behind it has nowhere to hold the answer, so it is not asked about.
+    if (
+      best !== null && !point.isDeload && point.week !== null && point.assignmentId &&
+      load <= best * (1 - DELOAD_SUGGESTION_DROP)
+    ) {
       suggestions.push({
-        blockKey: point.blockKey,
+        assignmentId: point.assignmentId,
         blockIndex: point.blockIndex,
         week: point.week,
         day: point.day,
@@ -307,7 +354,7 @@ export function suggestDeloadWeeks(progression) {
   // One suggestion per week, since a week can hold more than one session of the same lift.
   const seen = new Set();
   return suggestions.filter((s) => {
-    const key = `${s.blockKey}:${s.week}`;
+    const key = `${s.assignmentId}:${s.week}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
