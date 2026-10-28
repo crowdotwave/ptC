@@ -464,7 +464,15 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   // headroom above a series that never gets there.
   const { domain, ticks } = axisTicks(0, max, { target: 5 });
 
-  const x = linear(timeDomain(every), [pad.left, pad.left + plotW]);
+  // One slot per day trained, not a calendar. Spaced by date, a week off opened a gap as wide as a
+  // week of sessions and pushed the visits either side of it together, so the eye compared
+  // distances that only measured time off. Every line shares the slots, so two days trained on one
+  // date still stand one above the other, and left to right is still the order they happened in.
+  const trained = [...new Set(every.map((p) => p.day))].sort();
+  const slotOf = new Map(trained.map((day, index) => [day, index]));
+  const toSlot = linear(trained.length > 1 ? [0, trained.length - 1] : [-1, 1], [pad.left, pad.left + plotW]);
+  const x = (point) => toSlot(slotOf.get(point.day));
+  const byDate = [...every].sort((p, q) => p.date.localeCompare(q.date));
   const y = linear(domain, [pad.top + plotH, pad.top]);
   const base = pad.top + plotH;
   const uid = `sv${(gradientSeq += 1)}`;
@@ -502,7 +510,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   // disappeared under the lower day's wash. Washes are the background, so they go in the
   // background. Within each pass, slot order, so a redraw cannot shuffle the stacking.
   const plottedByLine = lines.map((line) =>
-    line.points.map((p) => ({ x: x(Date.parse(p.date)), y: y(at(p)) })),
+    line.points.map((p) => ({ x: x(p), y: y(at(p)) })),
   );
 
   plottedByLine.forEach((plotted, index) => {
@@ -520,7 +528,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
     }
 
     for (const point of line.points) {
-      const cx = x(Date.parse(point.date));
+      const cx = x(point);
       const cy = y(at(point));
       if (point.isDeload) {
         // Planned, so it takes the shape the deload has everywhere else rather than a dip in a
@@ -539,7 +547,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   for (const line of lines) {
     for (const point of line.points) {
       if ((point.sessionIds ?? []).some((id) => focused(focus, id))) {
-        out += focusMark(x(Date.parse(point.date)), y(at(point)), base);
+        out += focusMark(x(point), y(at(point)), base);
       }
     }
   }
@@ -548,7 +556,7 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   // In --text-primary rather than in the slot's own rim: a rim is a lit edge at about 3.5 against
   // black, which is a fine stroke and an illegal colour for 12px text.
   for (const end of ends) {
-    const cx = x(Date.parse(end.line.points[end.line.points.length - 1].date));
+    const cx = x(end.line.points[end.line.points.length - 1]);
     out +=
       `<text class="chart__glyph" x="${(cx + 7).toFixed(1)}" y="${(end.labelY + 4).toFixed(1)}">` +
       `${esc(end.line.glyph)}</text>`;
@@ -558,10 +566,10 @@ export function renderSessionVolumeChart(container, built, { height = 208, scale
   if (firstDeload) {
     out += `<text class="chart__note" x="${pad.left}" y="${height - 8}">Squares are planned deloads</text>`;
   } else {
-    out += `<text class="chart__axis" x="${pad.left}" y="${height - 8}">${esc(shortDay(every[0].date))}</text>`;
+    out += `<text class="chart__axis" x="${pad.left}" y="${height - 8}">${esc(shortDay(byDate[0].date))}</text>`;
   }
   out += `<text class="chart__axis" x="${width - pad.right}" y="${height - 8}" text-anchor="end">${esc(
-    shortDay(every[every.length - 1].date),
+    shortDay(byDate[byDate.length - 1].date),
   )}</text>`;
   out += '</svg>';
 

@@ -1297,6 +1297,8 @@ the library did not load and asks them to reload.
    apart they are four dots inside one pixel of an eight week axis, so they read as a vertical wall
    rather than as the day's work. They sum, exactly as the grid puts two sessions in one cell. Two
    sessions of DIFFERENT days on one date stay apart: those are different lines.
+   **The x axis is one slot per day trained, not a calendar.** Rest days are not drawn, so a week
+   off is not a gap that makes neighbouring sessions harder to compare. All lines share the slots.
    Neither rule hides a short session. A finished session holding one set is a point at the height
    of one set and the line drops to meet it, because that is the week somebody did almost nothing.
    No guilt is a rule about words and colour. It is not licence to move the data.
