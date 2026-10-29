@@ -77,8 +77,14 @@ function renderRow(entry, armedId, discardable) {
           `<button type="button" class="button-secondary history__keep" data-act="keep">Keep</button>` +
           `<button type="button" class="button-secondary history__go" data-act="discard">Discard</button>` +
           `</div>`
-        : `<button type="button" class="button-secondary history__arm" data-act="arm" ` +
-          `aria-label="Discard ${esc(entry.label)}, ${esc(stamp(entry.startedAt))}">Discard</button>`) +
+        : // Edit opens the session on the logging screen again, on its own day, to add the sets
+          // that were missed or take back the ones that were wrong. See js/past.js.
+          `<div class="history__confirm">` +
+          `<a class="button-secondary history__edit" href="index.html?session=${encodeURIComponent(entry.id)}" ` +
+          `aria-label="Edit ${esc(entry.label)}, ${esc(stamp(entry.startedAt))}">Edit</a>` +
+          `<button type="button" class="button-secondary history__arm" data-act="arm" ` +
+          `aria-label="Discard ${esc(entry.label)}, ${esc(stamp(entry.startedAt))}">Discard</button>` +
+          `</div>`) +
     `</li>`
   );
 }

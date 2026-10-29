@@ -4803,9 +4803,45 @@ button.navlink:disabled {
 
 .history__arm,
 .history__keep,
-.history__go {
+.history__go,
+.history__edit {
   flex: 0 0 auto;
   min-height: var(--tap);
+}
+
+/* Logging a workout on a day that has gone. In the same plain type as the list, because it is the
+ * same kind of housekeeping: it fixes the record rather than adding to the point of the page. */
+.history__past {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--divider);
+}
+
+/* A link, because it goes to another screen, dressed as the button beside it so the row reads as
+ * two choices of one kind. */
+.history__edit {
+  text-decoration: none;
+}
+
+.history__past[hidden] {
+  display: none;
+}
+
+.history__pastlabel {
+  color: var(--text-secondary);
+  font-size: var(--t-small);
+}
+
+.history__pastrow {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.history__pastrow .field__input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Both choices are the same size and the same colour. Making Discard smaller or quieter than

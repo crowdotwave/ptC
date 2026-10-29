@@ -174,6 +174,14 @@ function canonical(value) {
  */
 export async function currentAssignment(storage, clientId) {
   const rows = await storage.query('assignments', { client_id: clientId });
+  return latestAssignment(rows);
+}
+
+/**
+ * The rule currentAssignment applies, over rows already read. Exported for js/past.js, which asks
+ * the same question about a day that has already gone.
+ */
+export function latestAssignment(rows) {
   if (!rows.length) return null;
 
   // Ordered here rather than by the adapter, which sorts on one column and cannot express the

@@ -109,6 +109,16 @@
         <div class="history__head">
           <h3 class="history__title" id="history-title">Session history</h3>
         </div>
+        <!-- A workout that happened and never got logged: trained with a partner, phone in the bag.
+             The client's alone, like Discard, since only they can write their sessions. Above the
+             list rather than under it, which can run to thirty rows. -->
+        <form class="history__past" id="history-past" hidden>
+          <label class="history__pastlabel" for="past-day">Log a workout you missed</label>
+          <div class="history__pastrow">
+            <input class="field__input" id="past-day" type="date" required />
+            <button type="submit" class="button-secondary">Log it</button>
+          </div>
+        </form>
         <div id="history-body"></div>
         <p class="history__said" id="history-said" role="status" aria-live="polite"></p>
       </section>
