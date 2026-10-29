@@ -179,6 +179,22 @@ screen and not on the others.
 Discard is offered to the client and to nobody else, including the trainer reading with `?client=`.
 That is not a UI decision, it is what the policies allow.
 
+### Logging a past day
+
+A client who trained and did not log (with a partner, phone in the bag) logs it afterwards from the
+Session history card on Progress: a date in the last two weeks opens the logging screen with
+`?on=YYYY-MM-DD`, and Edit on any row opens that session again with `?session=id`. It is the same
+screen with the same rows. What changes is the clock: `state.clock` in `app.js` is the one source of
+`started_at`, `logged_at` and `completed_at`, and on a past day it is `js/past.js` `shiftedClock`,
+the real clock moved back to that day and still ticking. A new one starts at local noon; an edit
+continues a minute after the last row already in the session, so added sets sort after the old ones.
+The program is the assignment that applied that day, the prefill reads only sessions started before
+it, rest timers do not run, and the session is finished from its first set because an open session
+never reaches the work chart. After the first set the address becomes `?session=`, since a past day
+has no resume of its own. Clock-led days are left off the picker: an interval block rebuilds its
+position from the gaps between its rows, which mean nothing typed in later. Nothing here loosens
+append only: a past set is an ordinary insert, and a wrong one is undone with a retraction.
+
 ## Schema
 
 All tables have `id uuid primary key` and `created_at timestamptz not null default now()`.
@@ -356,6 +372,7 @@ cannot name the policy that permits it, that is the finding rather than a formal
 | `set_logs` | logging screen | the client | `set_logs_client_insert`, insert only |
 | `sessions` | logging screen, the session note | the client | `sessions_client_all` |
 | `sessions` | progress screen, on discard | the client | `sessions_client_all` |
+| `sessions`, `set_logs` | logging screen on a past day (`?on=`, `?session=`) | the client | `sessions_client_all`, `set_logs_client_insert` |
 | `set_logs` | progress screen, on discard | the client | `set_logs_client_insert`, insert only |
 | `program_templates` | builder, importer | the trainer | `program_templates_trainer_all` |
 | `template_days` | builder, importer | the trainer | `template_days_trainer_all` |

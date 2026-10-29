@@ -18,6 +18,7 @@ import { renderLiftPicker, groupLifts, liftSummaries } from './js/lift-picker.js
 import { activeSetLogs } from './js/history.js';
 import { openSession, loadSessions, summarise, discardSession } from './js/session.js';
 import { renderHistory, discardedMessage } from './js/session-view.js';
+import { pastWindow, pastDayFrom } from './js/past.js';
 import { isoDate, localDayOf } from './js/dates.js';
 import { currentAssignment } from './js/snapshot.js';
 import {
@@ -748,6 +749,33 @@ async function discard(entry) {
   location.reload();
 }
 
+/**
+ * The way into a workout that was done and never logged. The date is bounded by js/past.js, which
+ * is also what the logging screen checks it against, so a day the picker allows is a day that
+ * screen accepts.
+ */
+function mountPastDay() {
+  const form = el('history-past');
+  const input = el('past-day');
+  const { earliest, latest } = pastWindow();
+  input.min = earliest;
+  input.max = latest;
+  input.value = latest;
+  form.hidden = false;
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const day = pastDayFrom(input.value);
+    if (!day) {
+      el('history-said').textContent = `Pick a day between ${shortDay(earliest)} and ${shortDay(latest)}.`;
+      return;
+    }
+    location.href = `index.html?on=${day}`;
+  });
+}
+
+const shortDay = (day) =>
+  new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
 function mountHistory(sessions, logs) {
   state.sessionsById = new Map(sessions.map((session) => [session.id, session]));
   state.history = summarise(sessions, logs, (session) =>
@@ -756,6 +784,7 @@ function mountHistory(sessions, logs) {
 
   el('history').hidden = false;
   drawHistory();
+  if (state.isSelf) mountPastDay();
 
   try {
     const said = sessionStorage.getItem(SAID_KEY);

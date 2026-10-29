@@ -106,6 +106,7 @@ const SHELL = [
   'js/seed.js',
   'js/session-readout.js',
   'js/session-view.js',
+  'js/past.js',
   'js/session-volume.js',
   'js/session.js',
   'js/snapshot.js',

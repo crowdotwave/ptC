@@ -71,6 +71,8 @@ import { windowCues, cueKey, createCountdown, COUNT_IN_SECONDS } from './js/coun
 import { libraryOrder, findByName, suggestionNames } from './js/library.js';
 import { swappedItem, programmed, swapSlot, swapsFromRows, recentSwaps, swapChoices, standInFor } from './js/swap.js';
 import { ISO_LEAD_MS, isoMarks, isoReading, isoSeconds, isoClock, isoLine, isoSparks } from './js/iso.js';
+import { PAST_DAYS, pastDayFrom, pastWindow, noonOn, resumeAnchor, shiftedClock, sessionsBefore, assignmentOn } from './js/past.js';
+import { latestAssignment } from './js/snapshot.js';
 
 const results = [];
 
@@ -6509,6 +6511,80 @@ test('a spark flies along its own length', () => {
     const heading = (Math.atan2(spark.dy, spark.dx) * 180) / Math.PI;
     ok(Math.abs(heading - spark.angle) <= 1, `pointing ${spark.angle} while flying ${heading}`);
   }
+});
+
+// ------------------------------------------------------------------ past days
+//
+// js/past.js, which is what lets a workout done with a partner and never logged land on the day
+// it happened rather than today.
+
+test('a past day is the last two weeks, never today and never the future', () => {
+  const now = new Date(2026, 9, 29, 9, 0);
+  eq(pastWindow(now), { earliest: '2026-10-15', latest: '2026-10-28' });
+  eq(PAST_DAYS, 14);
+  eq(pastDayFrom('2026-10-28', now), '2026-10-28', 'yesterday');
+  eq(pastDayFrom('2026-10-15', now), '2026-10-15', 'the far edge');
+  eq(pastDayFrom('2026-10-29', now), null, 'today is the ordinary screen');
+  eq(pastDayFrom('2026-10-30', now), null, 'a future day is a session nobody did');
+  eq(pastDayFrom('2026-10-14', now), null, 'past the window');
+  eq(pastDayFrom('2026-02-30', now), null, 'not a real date');
+  eq(pastDayFrom(null, now), null);
+  eq(pastDayFrom('<script>', now), null);
+});
+
+test('the window crosses a month boundary', () => {
+  eq(pastWindow(new Date(2026, 10, 3, 9, 0)), { earliest: '2026-10-20', latest: '2026-11-02' });
+});
+
+test('a new past workout starts at local noon, which stays on its own day', () => {
+  const at = noonOn('2026-10-21');
+  eq(localDayOf(at), '2026-10-21');
+  eq(new Date(at).getHours(), 12);
+});
+
+test('an edit continues after everything already in the session', () => {
+  const session = { started_at: '2026-10-21T16:00:00.000Z' };
+  const rows = [
+    { logged_at: '2026-10-21T16:10:00.000Z' },
+    // The server's spelling, which does not sort against the device's as text.
+    { logged_at: '2026-10-21 16:40:00.123456+00' },
+  ];
+  eq(resumeAnchor(session, rows), '2026-10-21T16:41:00.123Z');
+  eq(resumeAnchor(session, []), '2026-10-21T16:01:00.000Z', 'an empty session continues after its start');
+});
+
+test('the shifted clock reads the anchor now and keeps ticking', () => {
+  let real = Date.parse('2026-10-29T13:00:00.000Z');
+  const clock = shiftedClock('2026-10-21T16:00:00.000Z', () => real);
+  eq(clock(), '2026-10-21T16:00:00.000Z');
+  real += 90 * 1000;
+  eq(clock(), '2026-10-21T16:01:30.000Z', 'so sets keep the order they were logged in');
+});
+
+test('a past workout is prefilled from what came before it, not after', () => {
+  const sessions = [
+    { id: 'mon', started_at: '2026-10-20T18:00:00.000Z' },
+    { id: 'fri', started_at: '2026-10-24T18:00:00.000Z' },
+    { id: 'synced', started_at: '2026-10-19 18:00:00+00' },
+  ];
+  eq(sessionsBefore(sessions, '2026-10-22T16:00:00.000Z').map((s) => s.id), ['mon', 'synced']);
+});
+
+test('a past workout belongs to the program as it stood that day', () => {
+  const rows = [
+    { id: 'first', starts_on: '2026-09-01', created_at: '2026-09-01T10:00:00Z' },
+    { id: 'update', starts_on: '2026-10-27', created_at: '2026-10-27T10:00:00Z' },
+  ];
+  eq(assignmentOn(rows, '2026-10-21', latestAssignment).id, 'first', 'last week, before the update');
+  eq(assignmentOn(rows, '2026-10-28', latestAssignment).id, 'update');
+  eq(assignmentOn(rows, '2026-08-01', latestAssignment).id, 'first', 'before any program, the nearest one');
+  eq(assignmentOn([], '2026-10-21', latestAssignment), null);
+});
+
+test('the history list offers edit to the client and not to anyone reading', () => {
+  const entry = summarised([hist()], [])[0];
+  ok(renderHistory([entry]).includes(`index.html?session=${entry.id}`), 'the client can go back in');
+  ok(!renderHistory([entry], { discard: false }).includes('index.html?session'), 'a trainer cannot write it');
 });
 
 // ------------------------------------------------------------------ report

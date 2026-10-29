@@ -21,7 +21,11 @@ import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
 import { targetLine } from './js/program.js';
-import { pickDay, sortedDays, sortedItems, currentAssignment, dayTitle } from './js/snapshot.js';
+import { pickDay, sortedDays, sortedItems, currentAssignment, latestAssignment, dayTitle } from './js/snapshot.js';
+import {
+  pastDayFrom, noonOn, resumeAnchor, shiftedClock, sessionsBefore, assignmentOn,
+} from './js/past.js';
+import { localDayOf } from './js/dates.js';
 import {
   emomBlock, emomCursor, emomStart, emomResume, emomAdvance, emomWhere, emomAddMinute,
   emomChangeRounds, emomBlockFor,
@@ -188,6 +192,13 @@ const state = {
   // clock through js/iso.js, so the interval can be throttled or stopped without the number
   // drifting. See js/iso.js for the shape and why it counts up.
   iso: null,
+  // A workout logged after the fact, or null for today. { day, editing, before }: the local
+  // 'YYYY-MM-DD' it is landing on, whether its session row exists yet, and the instant the prefill
+  // history is cut at. See js/past.js.
+  past: null,
+  // Every time this screen writes down goes through here. The wall clock, except on a past day,
+  // where js/past.js shiftedClock moves it back to that day and lets it keep ticking.
+  clock: () => new Date().toISOString(),
 };
 
 // ------------------------------------------------------------------ units
@@ -1201,7 +1212,7 @@ document.addEventListener('visibilitychange', () => {
  */
 function setEmomDay(day) {
   stopEmom();
-  const block = emomBlock(day, sortedItems(day), (item) => item.target_reps_low ?? 0);
+  const block = clockLed(day);
   state.emom = block ? { block, cursor: emomCursor(), rows: [], view: null, handle: null, cued: null } : null;
 }
 
@@ -1209,6 +1220,10 @@ function stopEmom() {
   if (state.emom?.handle) clearInterval(state.emom.handle);
   if (state.emom) state.emom.handle = null;
   countdown.cancel();
+}
+
+function clockLed(day) {
+  return emomBlock(day, sortedItems(day), (item) => item.target_reps_low ?? 0);
 }
 
 /** Whether this day is run against a clock, which decides which screen the client gets. */
@@ -1381,7 +1396,7 @@ function logEmomWindow(minute) {
     hold_seconds: null,
     rpe: null,
     is_warmup: false,
-    logged_at: new Date().toISOString(),
+    logged_at: state.clock(),
     supersedes_id: null,
     is_void: false,
     is_extra: minute.extra === true,
@@ -1479,6 +1494,17 @@ async function ensureSessionWritten(session) {
   if (state.sessionWritten) return;
   await state.storage.put('sessions', session);
   state.sessionWritten = true;
+  // A past day has no resume of its own: openSession only offers a session started in the last six
+  // hours. So once the row exists the address names it, and a reload comes back into this
+  // session rather than opening a second one on the same day.
+  if (state.past && !state.past.editing) {
+    state.past.editing = true;
+    // Kept rather than rebuilt, because the dev and local screens carry their own parameters.
+    const params = new URLSearchParams(location.search);
+    params.delete('on');
+    params.set('session', session.id);
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+  }
 }
 
 function ensureSessionRecord() {
@@ -1495,8 +1521,11 @@ function ensureSessionRecord() {
     client_id: state.client.id,
     assignment_id: state.assignment ? state.assignment.id : null,
     day_index: state.day.day_index,
-    started_at: new Date().toISOString(),
-    completed_at: null,
+    started_at: state.clock(),
+    // Finished from the first set on a past day. An open session is one somebody may still be in,
+    // and a workout from last Tuesday is not: left open, it would never reach the work chart,
+    // which waits for a session to end before it counts it.
+    completed_at: state.past ? state.clock() : null,
     client_note: null,
     discarded_at: null,
   });
@@ -1540,7 +1569,7 @@ function logSet({ count = null } = {}) {
     hold_seconds: entry.logMode === 'time_hold' ? performed : null,
     rpe: null,
     is_warmup: entry.isWarmup,
-    logged_at: new Date().toISOString(),
+    logged_at: state.clock(),
     supersedes_id: null,
     is_void: false,
     // Recorded at log time, not inferred later from the snapshot. Whether a set was asked for
@@ -1597,7 +1626,8 @@ function logSet({ count = null } = {}) {
 
   // Only when there is something to rest for. The last set of the day is followed by the summary,
   // not by another set.
-  if (next) startRest(entry.item.rest_seconds);
+  // No rest on a past day. Nobody is resting between sets they are typing in from memory.
+  if (next && !state.past) startRest(entry.item.rest_seconds);
   else stopRest();
   exitTypingMode();
   clearNotice();
@@ -1624,7 +1654,7 @@ function logSet({ count = null } = {}) {
   // row that closes the session still cannot overtake the set that closed it.
   if (shouldComplete) {
     state.sessionClosed = true;
-    stampSession({ completed_at: new Date().toISOString() });
+    stampSession({ completed_at: state.clock() });
   }
 
   // Per set rather than per session, because a session that is abandoned rather than ended is the
@@ -1656,7 +1686,7 @@ function undoLast() {
     hold_seconds: last.logMode === 'time_hold' ? last.reps : null,
     rpe: null,
     is_warmup: last.isWarmup,
-    logged_at: new Date().toISOString(),
+    logged_at: state.clock(),
     supersedes_id: last.id,
     is_void: true,
     is_extra: last.isExtra === true,
@@ -1687,7 +1717,8 @@ function undoLast() {
   // and taking one back does not unsay it.
   if (wasClosed) {
     state.sessionClosed = false;
-    stampSession({ completed_at: null });
+    // A past day stays finished, for the reason ensureSessionRecord gives.
+    if (!state.past) stampSession({ completed_at: null });
   }
 
   // A retraction is a row like any other and is owed to the server like any other. Leaving it here
@@ -1985,7 +2016,7 @@ function endSession() {
   // queue, so asking here is both synchronous and correct.
   if (!state.sessionRecord) return;
   state.sessionClosed = true;
-  stampSession({ completed_at: new Date().toISOString() });
+  stampSession({ completed_at: state.clock() });
   // The one moment somebody has said they are finished. Everything logged in this session is on
   // the queue behind this, and the phone is about to go away.
   flushSoon();
@@ -2164,7 +2195,7 @@ async function chooseDay(dayIndex) {
     if (state.sessionWritten) write(() => state.storage.put('sessions', moved));
   }
 
-  const sessions = await loadSessions(state.storage, state.client.id);
+  const sessions = planningHistory(await loadSessions(state.storage, state.client.id));
   await openDayOn(picked, sessions, state.sessionRecord);
 
   state.returnTo = null;
@@ -2414,6 +2445,87 @@ function nothingToLog(name) {
 }
 
 /**
+ * What a `?on=` or `?session=` address is asking for, or null for an ordinary day.
+ *
+ * `?on=YYYY-MM-DD` is a new workout on a past day, from the Session history card. `?session=id` is
+ * one already logged, opened again to add to it or take sets back. Both come back as the program
+ * that applied that day, the moment the clock should stand at, and the cut the prefill history is
+ * taken at. A day that cannot be logged against is `{ refused }` with the sentence to show.
+ */
+async function resolvePast(storage, clientId, sessions) {
+  const params = new URLSearchParams(location.search);
+  const sessionId = params.get('session');
+  const onParam = params.get('on');
+  if (!sessionId && !onParam) return null;
+
+  const assignments = await storage.query('assignments', { client_id: clientId });
+
+  if (sessionId) {
+    // From loadSessions, so a discarded session and anybody else's are both simply not found.
+    const session = sessions.find((row) => row.id === sessionId);
+    if (!session) return { refused: 'That session is not in your history any more.' };
+    const day = localDayOf(session.started_at);
+    const assignment =
+      assignments.find((row) => row.id === session.assignment_id) ??
+      assignmentOn(assignments, day, latestAssignment);
+    const rows = await storage.query('set_logs', { session_id: session.id });
+    // Never ahead of the real clock, which is what reopening this morning's session would do.
+    const anchor = resumeAnchor(session, rows);
+    return {
+      day,
+      session,
+      assignment: withoutClockLed(assignment),
+      anchor: anchor > new Date().toISOString() ? new Date().toISOString() : anchor,
+      before: session.started_at,
+    };
+  }
+
+  // Outside the window is an old link or a hand edited address, and today is the answer to both.
+  const day = pastDayFrom(onParam);
+  if (!day) return null;
+  const anchor = noonOn(day);
+  return {
+    day,
+    session: null,
+    assignment: withoutClockLed(assignmentOn(assignments, day, latestAssignment)),
+    anchor,
+    before: anchor,
+  };
+}
+
+/**
+ * The program without its clock-led days.
+ *
+ * An interval block is run against a timer and rebuilds its position from the gaps between its
+ * rows, so it has no meaning typed in from memory a week later. It is left off the picker rather
+ * than offered and refused.
+ */
+function withoutClockLed(assignment) {
+  if (!assignment?.snapshot) return assignment;
+  const days = (assignment.snapshot.days ?? []).filter((day) => !clockLed(day));
+  return { ...assignment, snapshot: { ...assignment.snapshot, days } };
+}
+
+/** The history a plan is prefilled from: everything, or on a past day, what came before it. */
+function planningHistory(sessions) {
+  return state.past ? sessionsBefore(sessions, state.past.before) : sessions;
+}
+
+/** The bar that says these sets are landing on another day, and the way back to Progress. */
+function showPastBar(past) {
+  const when = new Date(noonOn(past.day)).toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
+  el('past-bar').hidden = false;
+  el('past-what').textContent = `${past.session ? 'Editing' : 'Logging'} ${when}.`;
+  const params = new URLSearchParams(location.search);
+  params.delete('on');
+  params.delete('session');
+  const rest = params.toString();
+  el('past-bar').querySelector('a').href = `progress.html${rest ? `?${rest}` : ''}`;
+}
+
+/**
  * The bar that says this screen is not real training.
  *
  * Named, because "Rehearsal" alone does not say whose program is on screen and a trainer with six
@@ -2466,9 +2578,26 @@ async function main() {
     showNotice('Switch to a client with the dev role control.');
     return;
   }
-  const { client, assignment, sessions } = await loadClientData(storage, actor.clientId);
+  const { client, assignment: today, sessions } = await loadClientData(storage, actor.clientId);
   state.client = client;
+
+  // A past day, if the address asks for one. Resolved before anything is planned, because it
+  // changes which program applies, which history the prefill reads, and the clock every row is
+  // stamped with. See js/past.js.
+  const past = await resolvePast(storage, actor.clientId, sessions);
+  if (past?.refused) {
+    nothingToLog('Nothing to edit');
+    showNotice(past.refused);
+    return;
+  }
+  const assignment = past ? past.assignment : today;
   state.assignment = assignment;
+  if (past) {
+    state.past = { day: past.day, editing: Boolean(past.session), before: past.before };
+    state.clock = shiftedClock(past.anchor);
+    showPastBar(past);
+  }
+  const history = past ? sessionsBefore(sessions, past.before) : sessions;
 
   // The state every client is in for the minutes or days between being added and being given a
   // program. It used to throw on assignment.snapshot and leave the word "Loading" on screen
@@ -2509,9 +2638,19 @@ async function main() {
   // shoulders. Choosing the right day again then rebuilt the plan from history that now included
   // the half finished session, so the day shrank to the sets already done and closed itself on
   // the next tap.
-  const open = openSession(sessions);
+  //
+  // On a past day the session to open is the one the address named, or none for a new one.
+  const open = past ? past.session : openSession(sessions);
   const openDay = open ? sortedDays(snapshot).find((day) => day.day_index === open.day_index) : null;
-  state.day = openDay ?? pickDay(snapshot, sessions);
+  if (past?.session && !openDay) {
+    // The day is gone from the program, or it was run against the clock and resolvePast took it
+    // out. Either way there is no seat to put its sets back in, and opening some other day under
+    // this session would move it.
+    nothingToLog('Nothing to edit');
+    showNotice('This session can only be changed on the day it was logged.');
+    return;
+  }
+  state.day = openDay ?? pickDay(snapshot, history);
 
   // A program with no days in it. Reachable today, because deleting the last day of a template
   // in the builder is allowed. From this side of the app it is the same situation as no program
@@ -2527,7 +2666,7 @@ async function main() {
   // The same function the day picker goes through. A set on disk is a set that was done, wherever
   // in the day it sits, and both ways of arriving on a day have to put those sets back the same
   // way or they are two answers to one question.
-  await openDayOn(state.day, sessions, openDay ? open : null);
+  await openDayOn(state.day, history, openDay ? open : null);
 
   if (openDay) {
     state.sessionRecord = open;
@@ -2549,7 +2688,7 @@ async function main() {
     if (restoreDraft(open.id)) state.feelSaved = false;
   }
 
-  renderDayPicker(snapshot, sessions);
+  renderDayPicker(snapshot, history);
   ui.weightInput.step = unit() === 'lb' ? '5' : '2.5';
 
   // Flipping mid session is safe: state.weightKg is kilograms and stays put, so the number on the
@@ -2569,7 +2708,7 @@ async function main() {
   // having no way to tell whether the session was still going. The count is what makes it
   // checkable against the room: somebody who has done four sets and reads four knows the app
   // kept up. Neutral tone, since nothing went wrong and being interrupted is not a failure.
-  if (openDay && state.logged.length) {
+  if (openDay && state.logged.length && !past) {
     const sets = state.logged.length;
     showNotice(`Back in ${dayTitle(state.day)}, ${sets} ${sets === 1 ? 'set' : 'sets'} in.`);
   }
