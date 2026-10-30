@@ -2,6 +2,12 @@
 
 Context file for this repo. Read fully before writing code.
 
+## Before starting work
+
+This repo is worked on from more than one PC. Before touching anything, run `git fetch` and
+`git status`. If the branch is behind origin, pull. If there are local uncommitted changes or the
+pull would conflict, stop and ask rather than stashing, resetting, or merging on your own.
+
 ## What this is
 
 A two-sided workout logging app. A personal trainer builds a program, assigns it to a
