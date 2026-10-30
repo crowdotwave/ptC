@@ -24,6 +24,7 @@ import { makeRecord, getDeviceId } from './storage.js';
 // refusal, and a client sat on 82 unsynced changes for two days over a fallback that differed by
 // one character from the one twelve lines of comment in js/plan.js explain.
 import { countOf } from './plan.js';
+import { nextAfter } from './superset.js';
 
 /**
  * The sessions that still happened.
@@ -208,12 +209,19 @@ export function replaySession(plan, rows, best = new Map()) {
  * Wrapping to the top is the last resort, for a client who was working through the day backwards.
  * Nothing left anywhere means the day is done, and the plan length is what the screen reads as
  * that.
+ *
+ * "The one after" is js/superset.js nextAfter, the same walk a tap on Log set takes. Inside a
+ * superset that is the other lift, not the next set of this one, and a locked phone between the
+ * triceps and the biceps has to come back on the biceps.
  */
 function resumeAt(plan, claimed, last) {
-  const from = last ? plan.indexOf(last) + 1 : 0;
-  for (let i = from; i < plan.length; i += 1) if (!claimed.has(plan[i])) return i;
-  for (let i = 0; i < from; i += 1) if (!claimed.has(plan[i])) return i;
-  return plan.length;
+  const isOpen = (entry) => !claimed.has(entry);
+  if (!last) {
+    const first = plan.findIndex(isOpen);
+    return first === -1 ? plan.length : first;
+  }
+  const { index } = nextAfter(plan, plan.indexOf(last), isOpen);
+  return index === -1 ? plan.length : index;
 }
 
 /**

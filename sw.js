@@ -116,6 +116,7 @@ const SHELL = [
   'js/storage-memory.js',
   'js/storage.js',
   'js/supabase.js',
+  'js/superset.js',
   'js/swap.js',
   'js/sync-status.js',
   'js/track.js',

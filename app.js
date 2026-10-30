@@ -20,6 +20,7 @@ import { lastPerformance, bestEstimated1rm, epley1rm, activeSetLogs } from './js
 import { HOLD_DELAY_MS, HOLD_START_MS, nextHoldInterval } from './js/hold.js';
 import { openingWeight, openingCopy } from './js/prefill.js';
 import { planForItem, nextSteppers, incrementOf } from './js/plan.js';
+import { nextAfter, supersetOf } from './js/superset.js';
 import { targetLine } from './js/program.js';
 import { pickDay, sortedDays, sortedItems, currentAssignment, latestAssignment, dayTitle } from './js/snapshot.js';
 import {
@@ -460,21 +461,6 @@ function runOf(entry) {
   return state.plan.slice(from, to + 1);
 }
 
-/**
- * The next set to open, walking from `index` and wrapping once.
- *
- * The wrap is what makes moving around safe. Logging the last set in the plan used to mean the
- * session was over, which was true only while the lifts could only be done in order: now the last
- * set on the list can be the first one somebody does, and closing the session on it would file a
- * workout that had barely started. Returns -1 when nothing is left anywhere, which is the only
- * thing that ends a session besides the client saying so.
- */
-function nextPending(index) {
-  for (let i = index; i < state.plan.length; i += 1) if (isPending(state.plan[i])) return i;
-  for (let i = 0; i < index; i += 1) if (isPending(state.plan[i])) return i;
-  return -1;
-}
-
 function render() {
   const entry = currentEntry();
   renderHeader();
@@ -527,11 +513,14 @@ function render() {
   const position = siblings.indexOf(entry) + 1;
 
   ui.exerciseName.textContent = exercise.name;
+  // The trainer's own label in front, so a lift that changed on its own after Log set reads as the
+  // superset it is: "3B · Set 2 of 3" straight after "3A · Set 2 of 3".
+  const grouped = supersetOf(state.plan, entry) ? `${entry.item.group_label.trim().toUpperCase()} · ` : '';
   ui.setPosition.textContent = entry.isWarmup
-    ? `Warmup set, ${position} of ${siblings.length}`
+    ? `${grouped}Warmup set, ${position} of ${siblings.length}`
     : entry.isExtra
-      ? `Extra set, ${position} of ${siblings.length}`
-      : `Set ${position} of ${siblings.length}`;
+      ? `${grouped}Extra set, ${position} of ${siblings.length}`
+      : `${grouped}Set ${position} of ${siblings.length}`;
 
   // Built from the trainer's own cells rather than reassembled from numbers, so a target of
   // '50 FT' or '1-2 RIR' reaches the client as written.
@@ -1547,6 +1536,23 @@ function asStepped(row) {
   return row.stepperReps === undefined ? row : { ...row, reps: row.stepperReps };
 }
 
+/**
+ * What the steppers read on arriving at `entry`, from wherever the client arrived.
+ *
+ * Through the same rule a tap on Log set goes through, and for the same reason the resume path
+ * does: an adjustment the client made on this lift has to survive leaving it and coming back.
+ * Reading the entry's own prefill would put them back on the number the plan opened with, which is
+ * the deliberately light fallback on a lift with no history, and they would correct it twice. Every
+ * superset round leaves a lift and comes back to it, so this is the common case there rather than
+ * the jump it was written for.
+ */
+function steppersFor(entry) {
+  const previous = [...state.logged].reverse().find((row) => row.entry.item === entry.item);
+  return previous
+    ? nextSteppers(asStepped(previous), previous.entry, entry)
+    : { weightKg: entry.weightKg, reps: entry.reps };
+}
+
 function logSet({ count = null } = {}) {
   const entry = currentEntry();
   if (!entry) return;
@@ -1608,17 +1614,17 @@ function logSet({ count = null } = {}) {
   const isPr = !entry.isWarmup && previousBest !== null && achieved > previousBest;
   if (isPr) state.best.set(entry.item.exercise_id, achieved);
 
-  // What was actually on the bar, before the cursor moves off the set it belongs to.
-  const justLogged = { weightKg: state.weightKg, reps: state.reps };
-
   entry.status = 'logged';
-  const from = state.cursor;
-  const at = nextPending(from + 1);
-  const wrapped = at !== -1 && at < from;
-  state.cursor = at === -1 ? state.plan.length : at;
+  // Inside a superset the next set is the other lift's, not this one's. js/superset.js.
+  const move = nextAfter(state.plan, state.cursor, isPending);
+  const wrapped = move.wrapped;
+  state.cursor = move.index === -1 ? state.plan.length : move.index;
 
   const next = currentEntry();
-  const steppers = nextSteppers(justLogged, entry, next);
+  // The lift just logged is the last one logged, so for the same lift this is the carry it always
+  // was. For the other half of a superset it is that lift's own last set this round, which is what
+  // keeps an adjustment made on round one from being lost on round two.
+  const steppers = next ? steppersFor(next) : null;
   if (steppers) {
     state.weightKg = steppers.weightKg;
     state.reps = steppers.reps;
@@ -1627,7 +1633,9 @@ function logSet({ count = null } = {}) {
   // Only when there is something to rest for. The last set of the day is followed by the summary,
   // not by another set.
   // No rest on a past day. Nobody is resting between sets they are typing in from memory.
-  if (next && !state.past) startRest(entry.item.rest_seconds);
+  // And none between the halves of a superset round, which is the point of a superset: the rest is
+  // after the round, and it is the rest the trainer set on the lift that closed it.
+  if (next && !state.past && move.rest) startRest(entry.item.rest_seconds);
   else stopRest();
   exitTypingMode();
   clearNotice();
@@ -1744,13 +1752,15 @@ function skipExercise() {
     if (isPending(sibling)) sibling.status = 'skipped';
   }
 
-  const at = nextPending(state.cursor);
+  // Skipping one half of a superset goes to the other half, which still has its sets.
+  const { index: at } = nextAfter(state.plan, state.cursor, isPending);
   state.cursor = at === -1 ? state.plan.length : at;
 
   const next = currentEntry();
   if (next) {
-    state.weightKg = next.weightKg;
-    state.reps = next.reps;
+    const steppers = steppersFor(next);
+    state.weightKg = steppers.weightKg;
+    state.reps = steppers.reps;
   }
 
   // The lift being left was chosen against rather than postponed, so the offer to go back to it
@@ -1813,14 +1823,7 @@ function jumpTo(index) {
 
   state.cursor = index;
 
-  // Through the same rule a tap on Log set goes through, and for the same reason the resume path
-  // does: an adjustment the client made on this lift has to survive leaving it and coming back.
-  // Reading the entry's own prefill would put them back on the number the plan opened with, which
-  // is the deliberately light fallback on a lift with no history, and they would correct it twice.
-  const previous = [...state.logged].reverse().find((row) => row.entry.item === entry.item);
-  const steppers = previous
-    ? nextSteppers(asStepped(previous), previous.entry, entry)
-    : { weightKg: entry.weightKg, reps: entry.reps };
+  const steppers = steppersFor(entry);
   state.weightKg = steppers.weightKg;
   state.reps = steppers.reps;
   exitTypingMode();

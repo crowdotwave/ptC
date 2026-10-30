@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": [".claude/serve.py"],
       "port": 8123
+    },
+    {
+      "name": "ptc-node",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [".claude/serve.mjs"],
+      "port": 8123
     }
   ]
 }

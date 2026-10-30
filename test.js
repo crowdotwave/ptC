@@ -39,6 +39,7 @@ import { buildConsistency, splitGlyphs } from './js/consistency.js';
 import { buildSessionVolume, MAX_DAY_LINES } from './js/session-volume.js';
 import { smoothPath, renderRepsAtLoadChart } from './js/charts.js';
 import { planForItem, setCountOf, countOf, nextSteppers, incrementOf } from './js/plan.js';
+import { nextAfter, supersetOf, supersetRuns } from './js/superset.js';
 import {
   openSession,
   replaySession,
@@ -2505,6 +2506,156 @@ test('a locked phone mid superset comes back on the prescription', () => {
   eq(resumingOn.item.group_label, '1B', 'the holds are done, the reps are next');
   eq(steppers.reps, 12, 'and this was 0, which the server refuses and always will');
   ok(steppers.reps > 0, 'anything that fails set_logs_reps_check must not reach a set row');
+});
+
+// ------------------------------------------------------------------ a superset alternates
+//
+// Clay, about his arms day: a triceps and biceps superset made him log every triceps set before
+// the first biceps set, when he goes straight from one to the other. js/superset.js decides where
+// the cursor goes after a set, and the plan itself stays in program order.
+
+const ssOpening = { kg: 20, source: 'lightest' };
+const ssItem = (id, label, sets) => ({
+  id,
+  exercise_id: 'ex-' + id,
+  exercise: { id: 'ex-' + id, name: id, equipment: 'machine', increment_kg: 2.5 },
+  log_mode: 'weight_reps',
+  target_sets: sets,
+  target_reps_low: 10,
+  group_label: label,
+  rest_seconds: 90,
+});
+const ssPlan = (...items) => items.flatMap((item) => planForItem(item, null, ssOpening));
+
+/** Logs from the top the way the screen does, and reads back where it went and whether it rested. */
+function walkPlan(plan) {
+  const done = new Set();
+  const isOpen = (entry) => !done.has(entry);
+  const steps = [];
+  let at = 0;
+  while (at !== -1) {
+    const entry = plan[at];
+    done.add(entry);
+    const move = nextAfter(plan, at, isOpen);
+    steps.push(`${entry.item.id}${entry.setIndex + 1}` + (move.index !== -1 && !move.rest ? '>' : ''));
+    at = move.index;
+  }
+  return steps.join(' ');
+}
+
+test('a lettered pair alternates, and rests after the round rather than inside it', () => {
+  const plan = ssPlan(ssItem('tri', '1A', 3), ssItem('bi', '1B', 3), ssItem('row', '2', 2));
+  // '>' marks a move with no rest before it.
+  eq(walkPlan(plan), 'tri1> bi1 tri2> bi2 tri3> bi3 row1 row2');
+});
+
+test('the plan stays in program order, so counting and adding sets read it as they always did', () => {
+  const plan = ssPlan(ssItem('tri', '1A', 3), ssItem('bi', '1B', 3));
+  eq(plan.map((entry) => entry.item.id).join(' '), 'tri tri tri bi bi bi');
+});
+
+test('an uneven superset drops the shorter lift out when it runs out of sets', () => {
+  eq(walkPlan(ssPlan(ssItem('curl', '3A', 3), ssItem('ext', '3B', 2))), 'curl1> ext1 curl2> ext2 curl3');
+  eq(walkPlan(ssPlan(ssItem('curl', '3A', 2), ssItem('ext', '3B', 3))), 'curl1> ext1 curl2> ext2 ext3');
+});
+
+test('three letters is a round of three', () => {
+  const plan = ssPlan(ssItem('a', '2A', 2), ssItem('b', '2B', 2), ssItem('c', '2C', 2));
+  eq(walkPlan(plan), 'a1> b1> c1 a2> b2> c2');
+});
+
+test('a warmup is not half of a round', () => {
+  // Found on the real screen: an overhead press warmup went straight to the pulldown.
+  const press = ssItem('press', '3A', 2);
+  const pulldown = ssItem('pull', '3B', 2);
+  const warm = { ...planForItem(press, null, ssOpening)[0], setIndex: -1, isWarmup: true };
+  const plan = [warm, ...planForItem(press, null, ssOpening), ...planForItem(pulldown, null, ssOpening)];
+  eq(walkPlan(plan), 'press0 press1> pull1 press2> pull2');
+});
+
+test('plain numbers are one lift after another, which is how a trainer says not a superset', () => {
+  eq(walkPlan(ssPlan(ssItem('wide', '2', 2), ssItem('close', '3', 2))), 'wide1 wide2 close1 close2');
+});
+
+test('one lettered lift on its own has nothing to alternate with', () => {
+  const plan = ssPlan(ssItem('a', '1A', 2), ssItem('b', '2A', 2));
+  eq(walkPlan(plan), 'a1 a2 b1 b2');
+  eq(supersetOf(plan, plan[0]), null);
+});
+
+test('two supersets back to back stay two supersets', () => {
+  const plan = ssPlan(ssItem('a', '1A', 2), ssItem('b', '1B', 2), ssItem('c', '2A', 2), ssItem('d', '2B', 2));
+  eq(walkPlan(plan), 'a1> b1 a2> b2 c1> d1 c2> d2');
+  eq(supersetRuns(plan).map((lift) => lift.group?.length ?? 0).join(','), '2,2,2,2');
+});
+
+test('the same exercise lettered twice alternates like any other pair', () => {
+  // Clay's back extension: 1A a 45 second hold, 1B for 12 to 15. Two items, one exercise.
+  const plan = [
+    ...planForItem(holdItem, null, holdOpening),
+    ...planForItem(repsItem, null, holdOpening),
+  ];
+  const order = [];
+  const done = new Set();
+  let at = 0;
+  while (at !== -1) {
+    done.add(plan[at]);
+    order.push(plan[at].item.group_label);
+    at = nextAfter(plan, at, (entry) => !done.has(entry)).index;
+  }
+  eq(order.join(' '), '1A 1B 1A 1B 1A 1B');
+});
+
+test('going back to the top of a superset for the next round is not a wrap', () => {
+  const plan = ssPlan(ssItem('tri', '1A', 2), ssItem('bi', '1B', 2));
+  const done = new Set([plan[0], plan[2]]);
+  const move = nextAfter(plan, 2, (entry) => !done.has(entry));
+  eq(move.index, 1, 'tri set 2');
+  eq(move.wrapped, false);
+  eq(move.rest, true);
+});
+
+test('finishing the last lift with an earlier one still owed is still a wrap', () => {
+  const plan = ssPlan(ssItem('squat', '1', 1), ssItem('tri', '2A', 1), ssItem('bi', '2B', 1));
+  const done = new Set([plan[1], plan[2]]);
+  const move = nextAfter(plan, 2, (entry) => !done.has(entry));
+  eq(move.index, 0);
+  eq(move.wrapped, true);
+});
+
+test('skipping one half of a superset goes to the other half', () => {
+  const plan = ssPlan(ssItem('tri', '1A', 3), ssItem('bi', '1B', 3), ssItem('row', '2', 1));
+  // tri1 and bi1 done, then the triceps cable is taken for good: every tri set skipped from tri2.
+  const closed = new Set([plan[0], plan[3], plan[1], plan[2]]);
+  const move = nextAfter(plan, 1, (entry) => !closed.has(entry));
+  eq(plan[move.index].item.id, 'bi');
+  eq(plan[move.index].setIndex, 1);
+});
+
+test('a locked phone between the halves of a round comes back on the other half', () => {
+  const tri = ssItem('tri', '1A', 3);
+  const bi = ssItem('bi', '1B', 3);
+  const plan = ssPlan(tri, bi);
+  const row = (item, setIndex, at) => ({
+    id: `${item.id}-${setIndex}`,
+    exercise_id: item.exercise_id,
+    template_item_id: item.id,
+    set_index: setIndex,
+    weight_kg: 20,
+    reps: 10,
+    rounds: null,
+    hold_seconds: null,
+    is_warmup: false,
+    is_void: false,
+    is_extra: false,
+    supersedes_id: null,
+    logged_at: `2026-10-30T18:0${at}:00.000Z`,
+  });
+  // Round one, then the first half of round two.
+  const replayed = replaySession(plan, [row(tri, 0, 1), row(bi, 0, 2), row(tri, 1, 3)], new Map());
+  const resumingOn = replayed.plan[replayed.cursor];
+  eq(resumingOn.item.id, 'bi', 'not tri set 3');
+  eq(resumingOn.setIndex, 1);
 });
 
 test('a real adjustment still carries within one lift', () => {

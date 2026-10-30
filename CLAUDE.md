@@ -502,6 +502,22 @@ Requirements:
   matches each row to its own seat wherever that sits: it used to search forward from the cursor,
   which meant bench before squat and then a locked phone came back with two copies of every squat
   set and the real ones reading as never done.
+- **A superset alternates.** Lettered set numbers sharing a leading number (1A, 1B) are a superset,
+  and after a set inside one the next set is the other lift's: triceps, biceps, rest, round two.
+  The screen walked the plan in order and asked for every triceps set first, which is not how Clay
+  trains them, so he hopped lifts by hand through the workout panel twice a round. `js/superset.js`
+  `nextAfter` owns where the cursor goes, for Log set, Skip and the resume path alike, so a locked
+  phone between the halves of a round comes back on the second half. **Only the walk changed: the
+  plan stays in program order**, one lift's sets together, so counting, Add set, swaps and replay
+  read it exactly as before. No rest inside a round; the rest after it is the one set on the lift
+  that closed it. A warmup is not half of a round and is followed by its own lift. The steppers on
+  arriving at a lift come from that lift's last set this session (`steppersFor` in `app.js`), so an
+  adjustment survives every round trip. The set line carries the trainer's label ("3B · Set 2 of
+  3") so a lift changing on its own reads as the superset. **Plain numbers are not a superset**: a
+  trainer who wants two lifts one after the other writes 2 and 3, as 0026 already said, and a lone
+  lettered row has nothing to alternate with. It applies to every lettered group, Clay's same lift
+  pairs too (a 45 second back extension hold, then back extension for reps), because the letter is
+  how his sheets have always said "together".
 - Undo the last logged set is always available for the duration of the session, including after a
   reload, and including for sets logged before it.
 - Adding a set is one tap and appends to the lift the client is on, prefilled from wherever the
